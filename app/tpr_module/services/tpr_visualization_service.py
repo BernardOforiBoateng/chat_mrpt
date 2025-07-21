@@ -127,7 +127,7 @@ class TPRVisualizationService:
                     xanchor='center'
                 ),
                 mapbox=dict(
-                    style="carto-positron",
+                    style="open-street-map",
                     center=dict(lat=center_lat, lon=center_lon),
                     zoom=6.5
                 ),

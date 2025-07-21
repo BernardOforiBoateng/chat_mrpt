@@ -241,7 +241,7 @@ def create_agent_composite_score_maps(unified_dataset: gpd.GeoDataFrame,
         for i in range(1, rows * cols + 1):
             if i <= len(page_models):
                 fig.update_mapboxes(
-                    style="carto-positron",
+                    style="open-street-map",
                     center={"lat": center_lat, "lon": center_lon},
                     zoom=zoom_level,
                     row=((i-1)//cols)+1, col=((i-1)%cols)+1
@@ -468,7 +468,7 @@ def create_agent_vulnerability_map(unified_dataset: gpd.GeoDataFrame,
                 'font': {'size': 20}  
             },
             mapbox=dict(
-                style="carto-positron",  
+                style="open-street-map",  
                 center={"lat": center_lat, "lon": center_lon},
                 zoom=zoom_level
             ),
@@ -950,7 +950,7 @@ def create_agent_urban_extent_map(unified_dataset: gpd.GeoDataFrame,
                 'font': {'size': 20}  # ORIGINAL: Font size 20
             },
             mapbox=dict(
-                style="carto-positron",
+                style="open-street-map",
                 center=prep_result['map_center'],
                 zoom=prep_result['zoom_level']
             ),

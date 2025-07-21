@@ -105,7 +105,7 @@ def create_agent_pca_vulnerability_map(unified_dataset: gpd.GeoDataFrame,
                 'font': {'size': 18}
             },
             mapbox=dict(
-                style="carto-positron",
+                style="open-street-map",
                 center=prep_result['map_center'],
                 zoom=prep_result['zoom_level']
             ),
