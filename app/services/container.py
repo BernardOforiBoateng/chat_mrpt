@@ -516,4 +516,28 @@ def init_services(app: Flask) -> ServiceContainer:
     def health_check():
         return container.health_check()
     
-    return container 
+    return container
+
+
+# Global variable to hold the service container instance
+_service_container = None
+
+
+def get_service_container():
+    """
+    Get the global service container instance.
+    
+    This function provides access to the service container from anywhere
+    in the application. It uses Flask's current_app context.
+    
+    Returns:
+        ServiceContainer: The application's service container
+    """
+    global _service_container
+    if _service_container is None:
+        from flask import current_app
+        if hasattr(current_app, 'services'):
+            _service_container = current_app.services
+        else:
+            raise RuntimeError("Service container not initialized. Make sure the app is properly configured.")
+    return _service_container 
