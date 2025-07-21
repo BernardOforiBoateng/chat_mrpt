@@ -25,49 +25,47 @@ fi
 
 SSH_KEY=$2
 
-# Create a deployment package excluding large files
-echo "Creating deployment package..."
+# Create a deployment package INCLUDING large files
+echo "Creating deployment package (this will take time due to large files)..."
+echo "Including raster files, settlement data, and TPR data..."
 tar -czf chatmrpt_deploy.tar.gz \
     --exclude='.git*' \
     --exclude='*.pyc' \
     --exclude='__pycache__' \
     --exclude='chatmrpt_venv*' \
-    --exclude='instance/*' \
-    --exclude='*.db' \
-    --exclude='*.tif' \
-    --exclude='*.tiff' \
-    --exclude='rasters/*' \
+    --exclude='instance/*.db' \
+    --exclude='instance/uploads/*' \
     --exclude='*.log' \
     --exclude='*.tar.gz' \
     --exclude='*.zip' \
-    --exclude='kano_settlement_data/*' \
     .
 
 echo "Package created: chatmrpt_deploy.tar.gz"
 
 # Upload to AWS
-echo "Uploading to AWS..."
-scp -i "$SSH_KEY" chatmrpt_deploy.tar.gz ubuntu@$AWS_IP:~/
+echo "Uploading to AWS (this may take 5-10 minutes due to large files)..."
+scp -i "$SSH_KEY" chatmrpt_deploy.tar.gz ec2-user@$AWS_IP:~/
 
 # SSH into AWS and deploy
 echo "Connecting to AWS to deploy..."
-ssh -i "$SSH_KEY" ubuntu@$AWS_IP << 'ENDSSH'
+ssh -i "$SSH_KEY" ec2-user@$AWS_IP << 'ENDSSH'
     echo "Connected to AWS EC2 instance"
     
     # Stop the application
     echo "Stopping application..."
-    sudo systemctl stop chatmrpt || true
+    # Kill gunicorn processes
+    pkill -f gunicorn || true
     
     # Backup current deployment
     echo "Backing up current deployment..."
-    if [ -d "/home/ubuntu/ChatMRPT" ]; then
-        sudo mv /home/ubuntu/ChatMRPT /home/ubuntu/ChatMRPT.backup.$(date +%Y%m%d_%H%M%S)
+    if [ -d "/home/ec2-user/ChatMRPT" ]; then
+        mv /home/ec2-user/ChatMRPT /home/ec2-user/ChatMRPT.backup.$(date +%Y%m%d_%H%M%S)
     fi
     
     # Create new directory
     echo "Creating new deployment directory..."
-    mkdir -p /home/ubuntu/ChatMRPT
-    cd /home/ubuntu/ChatMRPT
+    mkdir -p /home/ec2-user/ChatMRPT
+    cd /home/ec2-user/ChatMRPT
     
     # Extract new code
     echo "Extracting new code..."
