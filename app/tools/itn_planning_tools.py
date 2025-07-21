@@ -78,7 +78,7 @@ class PlanITNDistribution(BaseTool):
         try:
             # Get service container
             container = get_service_container()
-            data_service = container.get_service('data_service')
+            data_service = container.get('data_service')
             
             # Get data handler
             data_handler = data_service.get_handler(session_id)
