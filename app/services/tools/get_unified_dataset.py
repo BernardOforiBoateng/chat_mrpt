@@ -6,7 +6,7 @@ def _get_unified_dataset(session_id: str) -> pd.DataFrame:
     """Get unified dataset - NO FALLBACKS."""
     try:
         # Only try unified dataset - NO fallback to original CSV
-        unified_path = f'sessions/{session_id}/unified_dataset.csv'
+        unified_path = f'instance/uploads/{session_id}/unified_dataset.csv'
         
         if not os.path.exists(unified_path):
             raise FileNotFoundError(f"❌ UNIFIED DATASET NOT FOUND: {unified_path}")
