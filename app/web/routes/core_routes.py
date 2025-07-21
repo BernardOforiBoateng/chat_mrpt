@@ -159,12 +159,12 @@ def index():
                             stack_trace=traceback.format_exc()
                         )
     
-    # NOTE: We do NOT reset TPR workflow state here anymore
-    # TPR workflow state should persist across page loads to maintain conversation flow
-    # It will only be reset when:
-    # 1. Creating a new session (lines 137-138)
-    # 2. Explicitly clearing the session
-    # 3. TPR workflow completes naturally
+    # CRITICAL FIX: Always reset TPR workflow state when index is loaded
+    # This ensures that every visit to the main page starts with TPR disabled
+    # Prevents session persistence issues where TPR remains active across browser sessions
+    session['tpr_workflow_active'] = False
+    session['tpr_session_id'] = None
+    logger.info(f"TPR workflow state reset for session {session.get('session_id', 'unknown')}")
     
     # py-sidebot pattern: No complex background loading needed
     # Request interpreter handles tool registration directly
