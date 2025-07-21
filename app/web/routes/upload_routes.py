@@ -356,6 +356,45 @@ def handle_full_dataset_path(session_id: str, csv_file, shapefile, upload_summar
     })
 
 
+def clear_analysis_results(session_folder: str):
+    """
+    Clear old analysis results from session folder when new files are uploaded.
+    This prevents data contamination from previous analyses.
+    """
+    import glob
+    
+    # Define patterns for analysis result files
+    analysis_patterns = [
+        'analysis_*.csv',
+        'unified_dataset.*',
+        'composite_scores*.csv',
+        'vulnerability_rankings*.csv',
+        'normalized_data.csv',
+        'cleaned_data.csv',
+        '*_map_*.html',
+        '*_chart_*.html',
+        'itn_distribution_*.csv',
+        'model_*.csv',
+        '*.geoparquet'
+    ]
+    
+    files_removed = 0
+    for pattern in analysis_patterns:
+        files = glob.glob(os.path.join(session_folder, pattern))
+        for file_path in files:
+            try:
+                os.remove(file_path)
+                files_removed += 1
+                logger.debug(f"Removed old analysis file: {os.path.basename(file_path)}")
+            except Exception as e:
+                logger.warning(f"Could not remove {file_path}: {e}")
+    
+    if files_removed > 0:
+        logger.info(f"🧹 Cleared {files_removed} old analysis files from session folder")
+    
+    return files_removed
+
+
 def store_raw_data_files(session_folder: str, csv_file, shapefile):
     """
     Level 4A: Store Raw Data (Following Diagram)
@@ -363,6 +402,9 @@ def store_raw_data_files(session_folder: str, csv_file, shapefile):
     """
     try:
         stored_files = []
+        
+        # Clear old analysis results before storing new files
+        clear_analysis_results(session_folder)
         
         # Store CSV as raw_data.csv (preserving original data)
         if csv_file and allowed_file(csv_file.filename, ALLOWED_EXTENSIONS_CSV):
@@ -562,6 +604,9 @@ def handle_csv_only_path(session_id: str, csv_file, upload_summary: dict):
 def store_raw_csv_only(session_folder: str, csv_file):
     """Store raw CSV file only"""
     try:
+        # Clear old analysis results before storing new file
+        clear_analysis_results(session_folder)
+        
         if csv_file and allowed_file(csv_file.filename, ALLOWED_EXTENSIONS_CSV):
             raw_csv_path = os.path.join(session_folder, 'raw_data.csv')
             csv_file.save(raw_csv_path)
