@@ -47,42 +47,7 @@ class SessionDataService:
         try:
             # Check if we already have a handler for this session
             if session_id in self.session_handlers:
-                handler = self.session_handlers[session_id]
-                
-                # Check if analysis results might have been created since handler was cached
-                session_folder = os.path.join(self.base_upload_folder, session_id)
-                
-                # Check for analysis result files
-                analysis_files = [
-                    'analysis_vulnerability_rankings.csv',
-                    'analysis_vulnerability_rankings_pca.csv',
-                    'unified_dataset.csv',
-                    'unified_dataset.geoparquet'
-                ]
-                
-                # Check if any analysis files exist but aren't loaded
-                needs_reload = False
-                for filename in analysis_files:
-                    file_path = os.path.join(session_folder, filename)
-                    if os.path.exists(file_path):
-                        # Check if this data is loaded in the handler
-                        if filename == 'analysis_vulnerability_rankings.csv' and not hasattr(handler, 'vulnerability_rankings'):
-                            needs_reload = True
-                            break
-                        elif filename == 'analysis_vulnerability_rankings_pca.csv' and not hasattr(handler, 'vulnerability_rankings_pca'):
-                            needs_reload = True
-                            break
-                        elif filename.startswith('unified_dataset') and not hasattr(handler, 'unified_dataset'):
-                            needs_reload = True
-                            break
-                
-                if needs_reload:
-                    logger.info(f"Analysis results found for session {session_id}, reloading data...")
-                    # Force reload by creating new handler
-                    del self.session_handlers[session_id]
-                    # Fall through to create new handler
-                else:
-                    return handler
+                return self.session_handlers[session_id]
             
             # Create session folder path
             session_folder = os.path.join(self.base_upload_folder, session_id)
@@ -119,6 +84,29 @@ class SessionDataService:
     def get_data_handler(self, session_id: str):
         """Alias for get_handler for backward compatibility."""
         return self.get_handler(session_id)
+    
+    def reload_analysis_results(self, session_id: str) -> Optional[DataHandler]:
+        """
+        Force reload of a DataHandler to pick up newly created analysis results.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Reloaded DataHandler instance, or None if not found
+        """
+        try:
+            # Remove from cache to force reload
+            if session_id in self.session_handlers:
+                del self.session_handlers[session_id]
+                logger.info(f"Cleared cached handler for session {session_id}")
+            
+            # Get fresh handler (will reload from disk)
+            return self.get_handler(session_id)
+            
+        except Exception as e:
+            logger.error(f"Error reloading handler for session {session_id}: {e}")
+            return None
     
     def clear_session_data(self, session_id: str) -> bool:
         """
