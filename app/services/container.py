@@ -164,14 +164,27 @@ class ServiceContainer:
             return None
     
     def _create_data_service(self, container: 'ServiceContainer'):
-        """Create data service - session-aware data handling."""
+        """Create data service - simple wrapper for DataHandler creation."""
         try:
-            from ..data.session_data_service import SessionDataService
+            class SimpleDataService:
+                """Simple data service that creates DataHandler instances."""
+                
+                def __init__(self, upload_folder):
+                    self.upload_folder = upload_folder
+                
+                def get_handler(self, session_id):
+                    """Get DataHandler for session."""
+                    import os
+                    from ..data import DataHandler
+                    
+                    session_folder = os.path.join(self.upload_folder, session_id)
+                    if os.path.exists(session_folder):
+                        # Create fresh DataHandler each time
+                        return DataHandler(session_folder)
+                    return None
             
             upload_folder = self._app.config.get('UPLOAD_FOLDER')
-            return SessionDataService(
-                base_upload_folder=upload_folder,
-            )
+            return SimpleDataService(upload_folder)
         except Exception as e:
             logger.warning(f"Failed to create data service: {e}")
             return None
@@ -387,9 +400,9 @@ class ServiceContainer:
     def _create_report_service(self, container: 'ServiceContainer'):
         """Create report service."""
         try:
-            from ..reports import ReportGenerator
+            from ..reports import ModernReportGenerator
             
-            return ReportGenerator()
+            return ModernReportGenerator
         except Exception as e:
             logger.warning(f"Failed to create report service: {e}")
             return None
