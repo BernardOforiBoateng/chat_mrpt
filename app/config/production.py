@@ -59,12 +59,13 @@ class ProductionConfig(BaseConfig):
         'X-Frame-Options': 'SAMEORIGIN',
         'X-XSS-Protection': '1; mode=block',
         'Content-Security-Policy': (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdn.plot.ly; "
+            "default-src 'self' blob:; "
+            "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdn.plot.ly blob:; "
             "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
-            "img-src 'self' data: https:; "
+            "img-src 'self' data: https: blob:; "
             "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
             "frame-src 'self' http://chatmrpt-alb-319454030.us-east-2.elb.amazonaws.com; "
-            "connect-src 'self' https://tile.openstreetmap.org"
+            "connect-src 'self' https://tile.openstreetmap.org https://*.tiles.mapbox.com https://api.mapbox.com; "
+            "worker-src 'self' blob:;"
         )
     }
