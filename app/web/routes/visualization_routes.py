@@ -291,7 +291,12 @@ def serve_viz_file(session_id, filename):
                 'message': 'Visualization file not found'
             }), 404
         
-        return send_from_directory(session_folder, filename)
+        response = send_from_directory(session_folder, filename)
+        # Remove restrictive CSP for visualization files to allow map tiles to load
+        response.headers.pop('Content-Security-Policy', None)
+        # Set a permissive CSP for the visualization iframe
+        response.headers['Content-Security-Policy'] = "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;"
+        return response
     
     except Exception as e:
         logger.error(f"Error serving visualization file: {str(e)}", exc_info=True)
