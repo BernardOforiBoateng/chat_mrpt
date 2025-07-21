@@ -80,7 +80,7 @@ class PlanITNDistribution(BaseTool):
             container = get_service_container()
             data_service = container.get_service('data_service')
             
-            # Get data handler - first try with existing handler
+            # Get data handler
             data_handler = data_service.get_handler(session_id)
             if not data_handler:
                 return self._create_error_result(
@@ -89,20 +89,9 @@ class PlanITNDistribution(BaseTool):
             
             # Check if analysis is complete
             if not self._check_analysis_complete(data_handler):
-                # Try reloading in case analysis was just completed
-                logger.info("Analysis not found, attempting to reload data handler...")
-                if hasattr(data_service, 'reload_analysis_results'):
-                    data_handler = data_service.reload_analysis_results(session_id)
-                    if data_handler and self._check_analysis_complete(data_handler):
-                        logger.info("Analysis results found after reload!")
-                    else:
-                        return self._create_error_result(
-                            "Analysis has not been completed yet. Please run malaria risk analysis first before planning ITN distribution."
-                        )
-                else:
-                    return self._create_error_result(
-                        "Analysis has not been completed yet. Please run malaria risk analysis first before planning ITN distribution."
-                    )
+                return self._create_error_result(
+                    "Analysis has not been completed yet. Please run malaria risk analysis first before planning ITN distribution."
+                )
             
             # Check if parameters are provided
             if self.total_nets is None:
