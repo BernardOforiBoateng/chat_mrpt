@@ -1,0 +1,168 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+chatmrpt_venv_new/
+*_venv/
+*.venv
+
+# Flask
+instance/
+.webassets-cache
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3
+
+# Session and data directories
+sessions/
+data/
+test_results/
+unified_test_session_*/
+memory/
+
+# Test files and debugging scripts
+test_*.py
+debug_*.py
+check_*.py
+analyze_*.py
+investigate_*.py
+fix_*.py
+verify_*.py
+diagnose_*.py
+extract_*.py
+manual_*.py
+comprehensive_*.py
+simple_*.py
+alternative_*.py
+authenticate_*.py
+setup_*.py
+run_*.py
+
+# JSON files (conversation logs, test results, config)
+*.json
+!package.json
+!tsconfig.json
+
+# Text files (transcripts, logs, notes)
+*.txt
+!requirements.txt
+
+# CSV output files
+*_extraction_*.csv
+*_output*.csv
+*.csv
+!requirements.csv
+
+# Output directories
+*_output/
+*_extraction_output/
+poc_extraction_output/
+osun_extraction_output/
+
+# Large data files
+*.zip
+*.gz
+*.tar
+*.rar
+
+# Raster/GIS files
+*.tif
+*.tiff
+*.geotiff
+rasters/
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.ico
+
+# Documentation and notes (except core docs)
+*.md
+!README.md
+!ARCHITECTURE.md
+!DEPLOYMENT.md
+
+# Cleanup and temporary files
+cleanup_legacy_code.*
+fix_openai.*
+integration_example.py
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Temporary Office files
+~$*
+*.tmp
+
+# Excel and Word documents
+*.docx
+*.xlsx
+*.xls
+*.doc
+*.ppt
+*.pptx
+
+# PDFs
+*.pdf
+*.PDF
+
+# Development and configuration files
+ee_config.py
+config_*.py
+
+# Test session data
+test_session_data_flow.py
+test_frontend_integration.py
+test_phase*.py
+
+# Settlement data (large files - will be synced separately)
+kano_settlement_data/
+
+# Keep only essential files
+!core_*.py
+!main.py
+!app.py
+!run.py
+
+# Git files
+.git/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~ .git-backup/
