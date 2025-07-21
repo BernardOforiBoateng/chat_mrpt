@@ -65,7 +65,7 @@ class ProductionConfig(BaseConfig):
             "img-src 'self' data: https: blob:; "
             "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
             "frame-src 'self' http://chatmrpt-alb-319454030.us-east-2.elb.amazonaws.com; "
-            "connect-src 'self' https://tile.openstreetmap.org https://*.tiles.mapbox.com https://api.mapbox.com; "
+            "connect-src 'self' https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.tiles.mapbox.com https://api.mapbox.com; "
             "worker-src 'self' blob:;"
         )
     }
