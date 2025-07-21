@@ -1,0 +1,20 @@
+[Unit]
+Description=ChatMRPT Flask Application
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ChatMRPT
+Environment="PATH=/home/ubuntu/ChatMRPT/venv/bin"
+Environment="FLASK_ENV=production"
+ExecStart=/home/ubuntu/ChatMRPT/venv/bin/gunicorn -c gunicorn.conf.py 'run:app'
+Restart=always
+RestartSec=10
+
+# Ensure instance folder permissions
+ExecStartPre=/bin/bash -c 'mkdir -p /home/ubuntu/ChatMRPT/instance/uploads /home/ubuntu/ChatMRPT/instance/reports /home/ubuntu/ChatMRPT/instance/logs /home/ubuntu/ChatMRPT/instance/exports'
+ExecStartPre=/bin/bash -c 'chmod -R 777 /home/ubuntu/ChatMRPT/instance'
+
+[Install]
+WantedBy=multi-user.target
