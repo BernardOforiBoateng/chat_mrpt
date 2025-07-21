@@ -16,7 +16,7 @@ class ProductionConfig(BaseConfig):
         raise ValueError("SECRET_KEY environment variable is not set!")
     
     # Secure session cookies
-    SESSION_COOKIE_SECURE = True  # HTTPS only
+    SESSION_COOKIE_SECURE = False  # Set to False for HTTP-only load balancer
     SESSION_COOKIE_HTTPONLY = True  # No JS access
     SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
     PERMANENT_SESSION_LIFETIME = 3600  # 1 hour
@@ -64,6 +64,7 @@ class ProductionConfig(BaseConfig):
             "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
             "img-src 'self' data: https:; "
             "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
+            "frame-src 'self' http://chatmrpt-alb-319454030.us-east-2.elb.amazonaws.com; "
             "connect-src 'self' https://tile.openstreetmap.org"
         )
     }
