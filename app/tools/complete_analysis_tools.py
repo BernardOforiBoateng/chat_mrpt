@@ -317,6 +317,14 @@ class RunCompleteAnalysis(DataAnalysisTool):
                 logger.error(f"Failed to notify state handler: {e}")
                 # Continue - not critical for analysis success
             
+            # Set the general analysis_complete flag that ITN tool checks
+            try:
+                from flask import session
+                session['analysis_complete'] = True
+                logger.info(f"✅ Set session['analysis_complete'] = True for ITN planning")
+            except Exception as e:
+                logger.warning(f"Failed to set analysis_complete flag: {e}")
+            
             return ToolExecutionResult(
                 success=True,
                 message=success_message,
@@ -1184,6 +1192,7 @@ class RunCompositeAnalysis(DataAnalysisTool):
                 try:
                     from flask import session
                     session['composite_analysis_complete'] = True
+                    session['analysis_complete'] = True  # Also set general flag for ITN
                 except:
                     pass  # Session not available in test context
                 
@@ -1253,6 +1262,7 @@ class RunPCAAnalysis(DataAnalysisTool):
                 try:
                     from flask import session
                     session['pca_analysis_complete'] = True
+                    session['analysis_complete'] = True  # Also set general flag for ITN
                 except:
                     pass  # Session not available in test context
                 

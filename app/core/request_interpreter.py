@@ -1187,6 +1187,16 @@ For example:
                 if remaining > 0:
                     column_info += f"\n... and {remaining} more columns available for detailed queries"
             
+            # Build dynamic SQL example for "Why is X ward ranked high?"
+            # Include analysis columns plus any numeric variables that were used
+            detail_columns = [ward_col, 'composite_score', 'composite_rank', 'pca_score', 'pca_rank']
+            if variables_used and df is not None:
+                # Add up to 5 numeric variables that were actually used in the analysis
+                for var in variables_used[:5]:
+                    if var in df.columns and pd.api.types.is_numeric_dtype(df[var]):
+                        detail_columns.append(var)
+            detail_columns_str = ', '.join(detail_columns)
+            
             stage_guidance = f"""
 ## DATA ACCESS: Post-Analysis Stage
 You now have access to the UNIFIED DATASET with all computed results.
@@ -1198,7 +1208,7 @@ IMPORTANT: Users want to see RESULTS, not column names:
 
 Example queries for common questions (using actual column names from schema above):
 - "Show top vulnerable wards" → SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10
-- "Why is X ward ranked high?" → SELECT {ward_col}, composite_score, composite_rank, pca_score, pca_rank, pfpr, housing_quality, mean_rainfall, u5_tpr_rdt FROM df WHERE {ward_col} = 'X'
+- "Why is X ward ranked high?" → SELECT {detail_columns_str} FROM df WHERE {ward_col} = 'X'
 - "High risk areas" → SELECT {ward_col}, composite_score, vulnerability_category FROM df WHERE vulnerability_category = 'High Risk'
 - "Compare methods" → SELECT {ward_col}, composite_rank, pca_rank, ABS(composite_rank - pca_rank) as rank_diff FROM df ORDER BY rank_diff DESC LIMIT 20
 - "Summary statistics" → Use execute_data_query: "provide summary statistics of analysis results"
@@ -1269,6 +1279,14 @@ No data is currently loaded. Guide the user to upload their CSV data and shapefi
         # Get ward column for examples
         ward_col = session_context.get('ward_column', 'WardName')
         
+        # Build dynamic detail columns based on what's available
+        if session_context.get('analysis_complete', False):
+            # Post-analysis: use the same detail columns from above
+            detail_example = detail_columns_str if 'detail_columns_str' in locals() else f"{ward_col}, composite_score, composite_rank, pca_score, pca_rank"
+        else:
+            # Pre-analysis: just show ward column
+            detail_example = ward_col
+        
         tool_guidance = f"""{stage_guidance}
 ## Tool Selection Guide
 
@@ -1278,12 +1296,12 @@ CRITICAL: Understand user INTENT before selecting tools:
 Use execute_sql_query with FOCUSED queries (NEVER use SELECT * - always specify columns):
 - "Show top 10 highest risk wards" → query="SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10"
 - "List high risk areas" → query="SELECT {ward_col}, composite_score FROM df WHERE vulnerability_category = 'High Risk'"
-- "Why is X ward ranked high?" → query="SELECT {ward_col}, composite_score, composite_rank, pca_score, pca_rank, pfpr, housing_quality, mean_rainfall, u5_tpr_rdt FROM df WHERE {ward_col} = 'X'"
+- "Why is X ward ranked high?" → query="SELECT {detail_example} FROM df WHERE {ward_col} = 'X'"
 - "Average composite score" → query="SELECT AVG(composite_score) as avg_score FROM df"
 
 **INTENT: Analyze Relationships or Complex Statistics**
 Use execute_data_query with Python code, then INTERPRET the results:
-- "Correlation between rainfall and malaria" → query="correlation analysis between rainfall and pfpr" → Explain what correlation means for transmission
+- "Correlation between X and Y" → query="correlation analysis between [column1] and [column2]" → Explain what correlation means
 - "Compare PCA vs composite methods" → query="compare ranking methods PCA vs composite" → Interpret which method better captures risk
 - "Distribution of risk scores" → query="analyze distribution of composite scores" → Explain what the distribution reveals about risk patterns
 - "Statistical summary" → query="comprehensive statistical analysis" → Interpret key findings for malaria control

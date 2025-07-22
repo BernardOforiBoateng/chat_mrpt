@@ -1122,7 +1122,10 @@ Use these statistics to understand data distribution before proceeding with comp
                 continue
             if 'Number of duplicate rows:' in line:
                 in_missing_section = False
-                duplicate_count = int(line.split(':')[1].strip())
+                try:
+                    duplicate_count = int(line.split(':')[1].strip())
+                except (ValueError, IndexError):
+                    duplicate_count = 0
                 continue
             if in_missing_section and line.strip():
                 parts = line.strip().split()
@@ -1134,7 +1137,7 @@ Use these statistics to understand data distribution before proceeding with comp
                             missing_count += count
                             if count > 50:  # Significant missing data
                                 key_missing_vars.append((var_name, count))
-                    except ValueError:
+                    except (ValueError, IndexError):
                         continue
         
         # Build conversational response
@@ -1172,8 +1175,11 @@ Use these statistics to understand data distribution before proceeding with comp
                 import re
                 numbers = re.findall(r'\d+', line)
                 if len(numbers) >= 2:
-                    num_rows = int(numbers[0])
-                    num_cols = int(numbers[1])
+                    try:
+                        num_rows = int(numbers[0])
+                        num_cols = int(numbers[1])
+                    except (ValueError, IndexError):
+                        pass
             elif 'float64' in line:
                 num_numeric += 1
             elif 'object' in line and 'dtype' not in line:
