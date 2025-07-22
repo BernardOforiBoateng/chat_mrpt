@@ -483,6 +483,9 @@ class ToolRegistry:
             'app.tools.settlement_intervention_tools',
             # 'app.tools.spatial_autocorrelation_tools',
             'app.tools.complete_analysis_tools',  # CRITICAL: Include complete analysis
+            'app.tools.itn_planning_tools',  # ITN distribution planning
+            'app.tools.export_tools',  # Export functionality
+            'app.tools.methodology_explanation_tools',  # Methodology explanations
             'app.tools.chatmrpt_help_tool'  # Help and guidance tool
         ]
         
