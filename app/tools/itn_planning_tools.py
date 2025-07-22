@@ -142,40 +142,106 @@ class PlanITNDistribution(BaseTool):
     
     def _check_analysis_complete(self, data_handler: DataHandler) -> bool:
         """Check if analysis has been completed"""
-        # First check session flag (primary indicator)
+        logger.info("🔍 Checking if analysis is complete...")
+        
+        # Get session ID from multiple sources
+        session_id = None
+        try:
+            # Try from data_handler first
+            session_id = getattr(data_handler, 'session_id', None)
+            if not session_id:
+                # Try from Flask session
+                from flask import session as flask_session
+                session_id = flask_session.get('session_id')
+            logger.info(f"Session ID: {session_id}")
+        except Exception as e:
+            logger.warning(f"Could not get session ID: {e}")
+        
+        # Method 1: Check Flask session flag (might not work with multi-worker)
         try:
             from flask import session
             if session.get('analysis_complete', False):
-                logger.info("Analysis complete flag found in session")
+                logger.info("✅ Analysis complete flag found in Flask session")
                 return True
+            else:
+                logger.debug("Flask session flag not set")
         except Exception as e:
             logger.debug(f"Could not check session flag: {e}")
         
-        # Check for vulnerability rankings in data handler
-        has_composite = hasattr(data_handler, 'vulnerability_rankings') and data_handler.vulnerability_rankings is not None
-        has_pca = hasattr(data_handler, 'vulnerability_rankings_pca') and data_handler.vulnerability_rankings_pca is not None
-        
-        # Check for unified dataset
-        has_unified = hasattr(data_handler, 'unified_dataset') and data_handler.unified_dataset is not None
-        
-        # Check if analysis results exist in the current dataset
+        # Method 2: Check unified data state (file-based, works across workers)
         try:
             from ..core.unified_data_state import get_data_state
-            data_state = get_data_state(getattr(data_handler, 'session_id', None))
-            if data_state.current_data is not None:
-                df = data_state.current_data
-                # Check for analysis columns
-                has_analysis_columns = ('composite_score' in df.columns or 
-                                      'composite_rank' in df.columns or 
-                                      'pca_score' in df.columns or 
-                                      'pca_rank' in df.columns)
-                if has_analysis_columns:
-                    logger.info("Analysis columns found in current dataset")
+            if session_id:
+                data_state = get_data_state(session_id)
+                
+                # Check if analysis is marked complete in data state
+                if data_state.analysis_complete:
+                    logger.info("✅ Analysis complete in unified data state")
                     return True
+                
+                # Check if current data has analysis columns
+                if data_state.current_data is not None:
+                    df = data_state.current_data
+                    analysis_columns = ['composite_score', 'composite_rank', 'pca_score', 'pca_rank']
+                    has_columns = any(col in df.columns for col in analysis_columns)
+                    if has_columns:
+                        logger.info(f"✅ Analysis columns found: {[col for col in analysis_columns if col in df.columns]}")
+                        return True
+                    else:
+                        logger.debug(f"No analysis columns in dataset. Columns: {list(df.columns)[:10]}...")
         except Exception as e:
-            logger.debug(f"Could not check unified data state: {e}")
+            logger.warning(f"Could not check unified data state: {e}")
         
-        return has_composite or has_pca or has_unified
+        # Method 3: Direct file check (most reliable for multi-worker)
+        if session_id:
+            try:
+                import os
+                from pathlib import Path
+                
+                # Check for analysis result files
+                session_folder = Path("instance/uploads") / session_id
+                if session_folder.exists():
+                    # Check for key analysis files
+                    analysis_files = [
+                        "unified_dataset.geoparquet",
+                        "unified_dataset.csv",
+                        "analysis_results_composite.csv",
+                        "analysis_results_pca.csv",
+                        "composite_analysis_results.csv"
+                    ]
+                    
+                    for filename in analysis_files:
+                        filepath = session_folder / filename
+                        if filepath.exists():
+                            logger.info(f"✅ Found analysis file: {filename}")
+                            return True
+                    
+                    # Check if any CSV has ranking columns
+                    for csv_file in session_folder.glob("*.csv"):
+                        try:
+                            import pandas as pd
+                            df = pd.read_csv(csv_file, nrows=5)
+                            if any(col in df.columns for col in ['composite_rank', 'pca_rank']):
+                                logger.info(f"✅ Found rankings in: {csv_file.name}")
+                                return True
+                        except:
+                            continue
+                            
+                    logger.debug(f"No analysis files found in {session_folder}")
+            except Exception as e:
+                logger.warning(f"Could not check files directly: {e}")
+        
+        # Method 4: Check data handler attributes (legacy)
+        has_composite = hasattr(data_handler, 'vulnerability_rankings') and data_handler.vulnerability_rankings is not None
+        has_pca = hasattr(data_handler, 'vulnerability_rankings_pca') and data_handler.vulnerability_rankings_pca is not None
+        has_unified = hasattr(data_handler, 'unified_dataset') and data_handler.unified_dataset is not None
+        
+        if has_composite or has_pca or has_unified:
+            logger.info(f"✅ Found in data_handler: composite={has_composite}, pca={has_pca}, unified={has_unified}")
+            return True
+        
+        logger.warning("❌ Analysis not complete - no indicators found")
+        return False
     
     def _create_parameter_request_result(self) -> ToolExecutionResult:
         """Create result requesting parameters from user"""
