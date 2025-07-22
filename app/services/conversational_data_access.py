@@ -901,33 +901,78 @@ CODE:
                             ward_name = row[col]
                             break
                     
-                    # Create internal data summary for LLM interpretation
-                    data_summary = f"Ward: {ward_name if ward_name else 'Unknown'}\n"
-                    
-                    # Add ranking information
-                    if 'composite_rank' in result_df.columns:
-                        data_summary += f"Composite Risk Rank: #{int(row['composite_rank'])}\n"
-                    if 'pca_rank' in result_df.columns:
-                        data_summary += f"PCA Risk Rank: #{int(row['pca_rank'])}\n"
-                    if 'composite_score' in result_df.columns:
-                        data_summary += f"Composite Score: {row['composite_score']:.3f}\n"
-                    if 'pca_score' in result_df.columns:
-                        data_summary += f"PCA Score: {row['pca_score']:.3f}\n"
-                    
-                    # Add risk factor values
-                    data_summary += "\nRisk Factors:\n"
-                    for col in result_df.columns:
-                        if col.lower() not in ['wardname', 'ward_name', 'ward', 'composite_score', 'composite_rank', 'pca_score', 'pca_rank', 
-                                             'composite_category', 'pca_category', 'vulnerability_category', 'overall_rank']:
-                            value = row[col]
-                            if pd.notna(value):
-                                if isinstance(value, float):
-                                    data_summary += f"- {col}: {value:.3f}\n"
-                                else:
-                                    data_summary += f"- {col}: {value}\n"
-                    
-                    # Provide interpretation instruction with hidden data
-                    output = f"<!--DATA_FOR_INTERPRETATION\n{data_summary}\n-->\n\n**[Analyze the above data and explain why {ward_name if ward_name else 'this ward'} is ranked at this position. Focus on the key risk drivers and compare to typical values. Do not show the raw data values, only provide the interpretation.]**"
+                    # Get the full dataset to calculate percentiles and comparisons
+                    try:
+                        full_df, _ = self.get_available_data()
+                        
+                        # Calculate percentiles and comparisons for each variable
+                        comparisons = []
+                        
+                        for col in result_df.columns:
+                            if col.lower() not in ['wardname', 'ward_name', 'ward', 'composite_score', 'composite_rank', 
+                                                 'pca_score', 'pca_rank', 'composite_category', 'pca_category', 
+                                                 'vulnerability_category', 'overall_rank']:
+                                value = row[col]
+                                if pd.notna(value) and col in full_df.columns:
+                                    try:
+                                        # For numeric columns, calculate multiple statistics
+                                        if pd.api.types.is_numeric_dtype(full_df[col]):
+                                            # Basic statistics
+                                            col_values = full_df[col].dropna()
+                                            n_wards = len(col_values)
+                                            
+                                            # 1. Rank position
+                                            rank = (col_values > value).sum() + 1
+                                            
+                                            # 2. Percentile
+                                            percentile = (col_values <= value).sum() / n_wards * 100
+                                            
+                                            # 3. Median comparison
+                                            median_val = col_values.median()
+                                            if median_val != 0:
+                                                median_ratio = value / median_val
+                                                median_comp = f"{median_ratio:.1f}x median"
+                                            else:
+                                                median_comp = f"{value - median_val:+.1f} from median"
+                                            
+                                            # 4. Check for extreme values (z-score)
+                                            mean_val = col_values.mean()
+                                            std_val = col_values.std()
+                                            if std_val > 0:
+                                                z_score = (value - mean_val) / std_val
+                                                is_extreme = abs(z_score) > 2
+                                            else:
+                                                is_extreme = False
+                                            
+                                            # Build comparison string
+                                            if is_extreme:
+                                                comparisons.append(
+                                                    f"{col}: {value:.2f} (⚠️ extreme - ranked {rank}/{n_wards} | "
+                                                    f"{percentile:.0f}th percentile | {median_comp})"
+                                                )
+                                            else:
+                                                comparisons.append(
+                                                    f"{col}: {value:.2f} (ranked {rank}/{n_wards} | "
+                                                    f"{percentile:.0f}th percentile | {median_comp})"
+                                                )
+                                    except Exception as e:
+                                        logger.debug(f"Error calculating stats for {col}: {e}")
+                        
+                        # Build the output that will be interpreted by the LLM
+                        if comparisons:
+                            output = f"""{ward_name} ward risk analysis:
+
+Rankings: Composite #{int(row['composite_rank']) if 'composite_rank' in row else 'N/A'}, PCA #{int(row['pca_rank']) if 'pca_rank' in row else 'N/A'}
+
+Key risk factors:
+{chr(10).join('• ' + comp for comp in comparisons)}"""
+                        else:
+                            output = f"Risk analysis for {ward_name} ward."
+                        
+                    except Exception as e:
+                        logger.debug(f"Could not calculate percentiles: {e}")
+                        # Fallback to simple message
+                        output = f"Analyzing ranking for {ward_name} ward..."
                     
                 elif is_ward_query:
                     output_parts.append("**Results:**")

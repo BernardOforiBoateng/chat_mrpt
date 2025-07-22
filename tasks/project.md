@@ -506,3 +506,27 @@ The experience reinforced important software engineering principles: test integr
 - Settlement types are more visible while maintaining transparency
 - Professional appearance without CSP violations
 - Enhanced readability with better typography and colors
+
+## Advanced Ward Ranking Implementation (July 22, 2025 - Part 3)
+
+### Multi-Metric Statistical Comparisons
+**Problem**: Users needed more context when asking "why is X ward ranked where it is?" - percentiles alone weren't sufficient.
+
+**Solution**: Implemented comprehensive statistical comparisons showing:
+1. **Rank Position**: "ranked 3/66" - immediate understanding
+2. **Percentile**: "75th percentile" - relative position
+3. **Median Comparison**: "2.5x median" or "+3.2 from median" - magnitude sense
+4. **Extreme Value Detection**: "⚠️ extreme" flag when z-score > 2
+
+**Implementation Details**:
+- Completely dynamic - works with any dataset variables
+- No hardcoded variable names or thresholds
+- Calculates z-scores to identify statistical outliers
+- Handles edge cases (zero median, missing values)
+- Clean output format: "variable: value (ranked X/Y | Zth percentile | Ax median)"
+
+**Benefits**:
+- Users get multiple perspectives on each variable
+- Easy to spot outliers and concerning values
+- Context helps explain why wards are ranked where they are
+- Works with any malaria dataset without modification
