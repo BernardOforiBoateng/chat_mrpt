@@ -42,8 +42,8 @@ def get_settlement_color(settlement_type):
     return color_map.get(settlement_type, '#CCCCCC')
 
 # Transparency settings for better roof visibility
-SETTLEMENT_FILL_OPACITY = 0.25  # Very transparent fill to see roofs clearly
-SETTLEMENT_BORDER_OPACITY = 0.7  # Visible borders
+SETTLEMENT_FILL_OPACITY = 0.4  # Balanced transparency for visibility while showing roofs
+SETTLEMENT_BORDER_OPACITY = 0.9  # Strong borders for clarity
 
 def load_building_data(session_id: str = None) -> Optional[gpd.GeoDataFrame]:
     """Load building polygon data dynamically from any available source"""
@@ -338,7 +338,7 @@ def create_building_classification_map(
                 mode='lines',
                 fill='toself',
                 fillcolor=color,
-                line=dict(width=0.8, color=color),
+                line=dict(width=1.5, color=color),
                 opacity=SETTLEMENT_FILL_OPACITY,
                 name=f'{settlement_type.title()} Settlement',
                 hovertemplate=f'<b>{settlement_type.title()} Settlement</b><br>' +
@@ -372,7 +372,7 @@ def create_building_classification_map(
                 lon=all_ward_lons,
                 lat=all_ward_lats,
                 mode='lines',
-                line=dict(width=2, color='rgba(0, 0, 0, 0.8)'),  # Black boundaries for OpenStreetMap
+                line=dict(width=2, color='rgba(60, 60, 60, 0.8)'),  # Dark gray boundaries for better contrast
                 name='Ward Boundaries',
                 hovertemplate='<b>Ward Boundary</b><br>' +
                              'Administrative boundary<br>' +
@@ -406,7 +406,7 @@ def create_building_classification_map(
                     lat=ward_center_lats,
                     mode='text',
                     text=ward_names,
-                    textfont=dict(size=8, color='black'),  # Black text for OpenStreetMap
+                    textfont=dict(size=10, color='rgba(40, 40, 40, 0.9)', family='Arial, sans-serif'),  # Improved text styling
                     name='Ward Names',
                     hovertemplate='<b>%{text}</b><br>' +
                                  'Ward centroid<br>' +
@@ -452,10 +452,10 @@ def create_building_classification_map(
                 center_lon = (ward_bounds[0] + ward_bounds[2]) / 2
                 zoom_level = 13  # Zoom in for ward view
         
-        # Configure map layout with a CSP-friendly style
+        # Configure map layout starting with OpenStreetMap (reliable, no token)
         fig.update_layout(
             mapbox=dict(
-                style="carto-positron",  # Use Carto style which doesn't load external fonts
+                style="open-street-map",  # Start with reliable street map, users can switch to satellite
                 center=dict(lat=center_lat, lon=center_lon),
                 zoom=zoom_level,
                 # Add custom Esri World Imagery layer
@@ -501,17 +501,19 @@ def create_building_classification_map(
         filename = f"{map_name}.html"
         file_path = os.path.join(session_folder, filename)
         
-        # Use write_html to create self-contained HTML with inline Plotly
-        # This avoids CSP issues by including all necessary JavaScript
+        # Use fig.write_html with custom configuration for compatibility
         fig.write_html(
             file_path,
-            include_plotlyjs='inline',  # Include Plotly.js inline to avoid CSP issues
+            include_plotlyjs='cdn',  # Use CDN to avoid inline scripts
             config={
                 'responsive': True,
                 'displayModeBar': True,
                 'modeBarButtonsToAdd': ['drawrect', 'eraseshape'],
-                'scrollZoom': True
-            }
+                'scrollZoom': True,
+                'displaylogo': False
+            },
+            # Add custom HTML in the div_id parameter area
+            div_id="plotly-div"
         )
         
         web_path = f"/serve_viz_file/{session_id}/{filename}"
@@ -527,8 +529,10 @@ def create_building_classification_map(
             'map_type': 'building_classification',
             'ward_name': ward_name,
             'building_count': len(buildings),
-            'settlement_types': sorted(buildings['sttlmn_'].unique())
+            'settlement_types': sorted(buildings['sttlmn_'].unique()),
+            'note': 'Use map controls to toggle layers and switch between street/satellite view'
         }
+        
         
     except Exception as e:
         logger.error(f"Error creating building classification map: {e}")

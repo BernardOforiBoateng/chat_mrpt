@@ -478,3 +478,31 @@ The experience reinforced important software engineering principles: test integr
 2. **CSP Awareness**: When using third-party visualization libraries, always consider CSP implications
 3. **State Management**: Session flags should be the primary source of truth, with fallbacks for compatibility
 4. **User-Centric Fixes**: Focus on what users need (explanations, not just data) rather than technical correctness alone
+
+## Follow-up Fixes (July 22, 2025 - Part 2)
+
+### Issue 1: Ward Ranking Data Overload
+**Problem**: The ward ranking explanation was dumping all raw data (rankings, scores, all variable values) before providing interpretation, creating information overload.
+
+**Solution**: Modified `conversational_data_access.py` to:
+- Hide raw data in HTML comments for LLM processing
+- Provide clear instruction for interpretation-only output
+- Keep data available for analysis but not visible to users
+
+### Issue 2: Settlement Map Visual Quality
+**Problem**: The carto-positron style looked poor and the maps weren't visually appealing.
+
+**Solution**: Enhanced `settlement_validation_tools.py` with:
+- Changed base style to "white-bg" with custom tile layers
+- Added Carto light theme tiles as default background
+- Included map style switcher buttons (Street Map/Satellite)
+- Increased settlement fill opacity from 0.25 to 0.5
+- Increased border width from 0.8 to 2 pixels
+- Improved ward boundary and label styling
+- Better color contrast for all map elements
+
+**Key Improvements**:
+- Users can now switch between street and satellite views
+- Settlement types are more visible while maintaining transparency
+- Professional appearance without CSP violations
+- Enhanced readability with better typography and colors

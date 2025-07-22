@@ -901,44 +901,38 @@ CODE:
                             ward_name = row[col]
                             break
                     
-                    output_parts.append(f"**Analysis for {ward_name if ward_name else 'this ward'}:**")
-                    output_parts.append("")
+                    # Create internal data summary for LLM interpretation
+                    data_summary = f"Ward: {ward_name if ward_name else 'Unknown'}\n"
                     
-                    # Show ranking information first
+                    # Add ranking information
                     if 'composite_rank' in result_df.columns:
-                        output_parts.append(f"• **Composite Risk Rank**: #{int(row['composite_rank'])}")
+                        data_summary += f"Composite Risk Rank: #{int(row['composite_rank'])}\n"
                     if 'pca_rank' in result_df.columns:
-                        output_parts.append(f"• **PCA Risk Rank**: #{int(row['pca_rank'])}")
+                        data_summary += f"PCA Risk Rank: #{int(row['pca_rank'])}\n"
                     if 'composite_score' in result_df.columns:
-                        output_parts.append(f"• **Composite Score**: {row['composite_score']:.3f}")
+                        data_summary += f"Composite Score: {row['composite_score']:.3f}\n"
                     if 'pca_score' in result_df.columns:
-                        output_parts.append(f"• **PCA Score**: {row['pca_score']:.3f}")
+                        data_summary += f"PCA Score: {row['pca_score']:.3f}\n"
                     
-                    output_parts.append("")
-                    output_parts.append("**Risk Factor Values:**")
-                    
-                    # Show other variables (risk factors)
-                    risk_factors = []
+                    # Add risk factor values
+                    data_summary += "\nRisk Factors:\n"
                     for col in result_df.columns:
-                        if col.lower() not in ['wardname', 'ward_name', 'ward', 'composite_score', 'composite_rank', 'pca_score', 'pca_rank']:
+                        if col.lower() not in ['wardname', 'ward_name', 'ward', 'composite_score', 'composite_rank', 'pca_score', 'pca_rank', 
+                                             'composite_category', 'pca_category', 'vulnerability_category', 'overall_rank']:
                             value = row[col]
                             if pd.notna(value):
                                 if isinstance(value, float):
-                                    risk_factors.append(f"• **{col}**: {value:.3f}")
+                                    data_summary += f"- {col}: {value:.3f}\n"
                                 else:
-                                    risk_factors.append(f"• **{col}**: {value}")
+                                    data_summary += f"- {col}: {value}\n"
                     
-                    output_parts.extend(risk_factors)
-                    
-                    # Add interpretation prompt
-                    output_parts.append("")
-                    output_parts.append("**[Interpret these values to explain why this ward has this ranking, comparing to averages and identifying primary risk drivers]**")
+                    # Provide interpretation instruction with hidden data
+                    output = f"<!--DATA_FOR_INTERPRETATION\n{data_summary}\n-->\n\n**[Analyze the above data and explain why {ward_name if ward_name else 'this ward'} is ranked at this position. Focus on the key risk drivers and compare to typical values. Do not show the raw data values, only provide the interpretation.]**"
                     
                 elif is_ward_query:
                     output_parts.append("**Results:**")
                     output_parts.append("")
-                
-                if not is_ranking_explanation:
+                    
                     for idx, row in result_df.iterrows():
                         if len(result_df.columns) == 1:
                             output_parts.append(f"• {row.iloc[0]}")
@@ -952,8 +946,25 @@ CODE:
                                 else:
                                     row_info.append(f"{col}: {value}")
                             output_parts.append(f"• {' - '.join(row_info)}")
-                
-                output = "\n".join(output_parts)
+                    
+                    output = "\n".join(output_parts)
+                else:
+                    # Default formatting for other queries
+                    for idx, row in result_df.iterrows():
+                        if len(result_df.columns) == 1:
+                            output_parts.append(f"• {row.iloc[0]}")
+                        else:
+                            # Format each row as a bullet point with key info
+                            row_info = []
+                            for col in result_df.columns:
+                                value = row[col]
+                                if isinstance(value, float):
+                                    row_info.append(f"{col}: {value:.3f}")
+                                else:
+                                    row_info.append(f"{col}: {value}")
+                            output_parts.append(f"• {' - '.join(row_info)}")
+                    
+                    output = "\n".join(output_parts)
             else:
                 # Large result set - summarize
                 output = f"Found {len(result_df)} results. Showing first 5:\n\n"
