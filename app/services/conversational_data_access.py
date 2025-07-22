@@ -889,23 +889,69 @@ CODE:
                 # Determine if this is a ward-related query
                 is_ward_query = any(col.lower() in ['wardname', 'ward_name', 'ward'] for col in result_df.columns)
                 
-                if is_ward_query:
+                # Check if this is a "why is X ward ranked" query
+                is_ranking_explanation = ('composite_score' in result_df.columns or 'composite_rank' in result_df.columns) and len(result_df) == 1
+                
+                if is_ranking_explanation:
+                    # Special handling for ward ranking explanations
+                    row = result_df.iloc[0]
+                    ward_name = None
+                    for col in result_df.columns:
+                        if 'ward' in col.lower():
+                            ward_name = row[col]
+                            break
+                    
+                    output_parts.append(f"**Analysis for {ward_name if ward_name else 'this ward'}:**")
+                    output_parts.append("")
+                    
+                    # Show ranking information first
+                    if 'composite_rank' in result_df.columns:
+                        output_parts.append(f"• **Composite Risk Rank**: #{int(row['composite_rank'])}")
+                    if 'pca_rank' in result_df.columns:
+                        output_parts.append(f"• **PCA Risk Rank**: #{int(row['pca_rank'])}")
+                    if 'composite_score' in result_df.columns:
+                        output_parts.append(f"• **Composite Score**: {row['composite_score']:.3f}")
+                    if 'pca_score' in result_df.columns:
+                        output_parts.append(f"• **PCA Score**: {row['pca_score']:.3f}")
+                    
+                    output_parts.append("")
+                    output_parts.append("**Risk Factor Values:**")
+                    
+                    # Show other variables (risk factors)
+                    risk_factors = []
+                    for col in result_df.columns:
+                        if col.lower() not in ['wardname', 'ward_name', 'ward', 'composite_score', 'composite_rank', 'pca_score', 'pca_rank']:
+                            value = row[col]
+                            if pd.notna(value):
+                                if isinstance(value, float):
+                                    risk_factors.append(f"• **{col}**: {value:.3f}")
+                                else:
+                                    risk_factors.append(f"• **{col}**: {value}")
+                    
+                    output_parts.extend(risk_factors)
+                    
+                    # Add interpretation prompt
+                    output_parts.append("")
+                    output_parts.append("**[Interpret these values to explain why this ward has this ranking, comparing to averages and identifying primary risk drivers]**")
+                    
+                elif is_ward_query:
                     output_parts.append("**Results:**")
                     output_parts.append("")
                 
-                for idx, row in result_df.iterrows():
-                    if len(result_df.columns) == 1:
-                        output_parts.append(f"• {row.iloc[0]}")
-                    else:
-                        # Format each row as a bullet point with key info
-                        row_info = []
-                        for col in result_df.columns:
-                            value = row[col]
-                            if isinstance(value, float):
-                                row_info.append(f"{col}: {value:.3f}")
-                            else:
-                                row_info.append(f"{col}: {value}")
-                        output_parts.append(f"• {' - '.join(row_info)}")
+                if not is_ranking_explanation:
+                    for idx, row in result_df.iterrows():
+                        if len(result_df.columns) == 1:
+                            output_parts.append(f"• {row.iloc[0]}")
+                        else:
+                            # Format each row as a bullet point with key info
+                            row_info = []
+                            for col in result_df.columns:
+                                value = row[col]
+                                if isinstance(value, float):
+                                    row_info.append(f"{col}: {value:.3f}")
+                                else:
+                                    row_info.append(f"{col}: {value}")
+                            output_parts.append(f"• {' - '.join(row_info)}")
                 
                 output = "\n".join(output_parts)
             else:

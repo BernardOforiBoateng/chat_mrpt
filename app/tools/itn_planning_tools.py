@@ -142,12 +142,38 @@ class PlanITNDistribution(BaseTool):
     
     def _check_analysis_complete(self, data_handler: DataHandler) -> bool:
         """Check if analysis has been completed"""
-        # Check for vulnerability rankings
+        # First check session flag (primary indicator)
+        try:
+            from flask import session
+            if session.get('analysis_complete', False):
+                logger.info("Analysis complete flag found in session")
+                return True
+        except Exception as e:
+            logger.debug(f"Could not check session flag: {e}")
+        
+        # Check for vulnerability rankings in data handler
         has_composite = hasattr(data_handler, 'vulnerability_rankings') and data_handler.vulnerability_rankings is not None
         has_pca = hasattr(data_handler, 'vulnerability_rankings_pca') and data_handler.vulnerability_rankings_pca is not None
         
         # Check for unified dataset
         has_unified = hasattr(data_handler, 'unified_dataset') and data_handler.unified_dataset is not None
+        
+        # Check if analysis results exist in the current dataset
+        try:
+            from ..core.unified_data_state import get_data_state
+            data_state = get_data_state(getattr(data_handler, 'session_id', None))
+            if data_state.current_data is not None:
+                df = data_state.current_data
+                # Check for analysis columns
+                has_analysis_columns = ('composite_score' in df.columns or 
+                                      'composite_rank' in df.columns or 
+                                      'pca_score' in df.columns or 
+                                      'pca_rank' in df.columns)
+                if has_analysis_columns:
+                    logger.info("Analysis columns found in current dataset")
+                    return True
+        except Exception as e:
+            logger.debug(f"Could not check unified data state: {e}")
         
         return has_composite or has_pca or has_unified
     

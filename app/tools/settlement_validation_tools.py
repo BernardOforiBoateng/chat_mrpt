@@ -452,10 +452,10 @@ def create_building_classification_map(
                 center_lon = (ward_bounds[0] + ward_bounds[2]) / 2
                 zoom_level = 13  # Zoom in for ward view
         
-        # Configure map layout starting with OpenStreetMap (reliable, no token)
+        # Configure map layout with a CSP-friendly style
         fig.update_layout(
             mapbox=dict(
-                style="open-street-map",  # Start with reliable street map, users can switch to satellite
+                style="carto-positron",  # Use Carto style which doesn't load external fonts
                 center=dict(lat=center_lat, lon=center_lon),
                 zoom=zoom_level,
                 # Add custom Esri World Imagery layer
