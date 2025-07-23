@@ -621,3 +621,201 @@ Created a comprehensive HTML report generator that includes:
 - Professional presentation format
 - All information in one place
 - No need to explain separate files
+
+## TPR Workflow Consistency Fixes (January 2025)
+
+### Problem Discovery
+User reported inconsistent TPR workflow behavior on AWS:
+- Sometimes getting "I've paused TPR analysis" messages unexpectedly
+- State names like "Adamawa State" triggering wrong responses
+- Download links disappearing after generation
+- Workflow lost on browser refresh
+- Frustration about demo reliability
+
+### Root Cause Analysis
+
+1. **Multi-Worker Session Issues**
+   - Gunicorn runs 4 worker processes
+   - Flask sessions not properly persisted without `session.modified = True`
+   - Worker A sets data, Worker B doesn't see it
+   - Download links particularly affected
+
+2. **Intent Classification Flaws**
+   - LLM sometimes misinterprets state names as questions
+   - Fallback classifier too simplistic
+   - Single-word inputs not handled well
+   - "Adamawa" → "What do you want to know?" → User confusion
+
+3. **Page Refresh Design Flaw**
+   - `core_routes.py` always reset TPR state on index load
+   - Intended to prevent stale sessions
+   - But breaks active TPR workflows on refresh
+   - Users lose progress mid-analysis
+
+### Solution Design Process
+
+**Key Constraint**: Must not break existing malaria risk analysis workflow
+
+Designed three-phase approach:
+1. **Low Risk**: Session persistence fixes only
+2. **Medium Risk**: Intent classification improvements  
+3. **Higher Risk**: Smart session state management
+
+### Implementation Details
+
+#### Phase 1: Session Persistence
+Added `session.modified = True` in 5 locations:
+- After activating TPR workflow
+- After storing download links (critical fix)
+- After completing analysis
+- After cancelling workflow
+- After user exits workflow
+
+**Learning**: Flask's session interface doesn't automatically detect dictionary modifications. Must explicitly flag.
+
+#### Phase 2: Intent Classification
+Enhanced fallback classifier with:
+- State name variation matching (with/without "State")
+- Single/two-word default to TPR continuation
+- Explicit exit only with "stop TPR"
+- Better logging for debugging
+
+Updated LLM prompt with explicit rules and examples.
+
+**Learning**: Being overly clever with intent detection causes more problems than defaulting to expected behavior.
+
+#### Phase 3: Smart Session Management
+Changed from always resetting to conditional reset:
+- Check `request.referrer` - None means new session
+- Preserve state on internal navigation
+- Still reset for truly new sessions
+
+**Learning**: Browser refresh has referrer, new tabs don't. Perfect for our use case.
+
+### What Worked
+- Session persistence fixes immediately solved download issues
+- Enhanced intent classification eliminated false exits
+- Smart session management preserved workflow on refresh
+- Extensive logging helped debug in production
+- Phased approach minimized risk
+
+### What Didn't Work Initially
+- First attempt broke normal risk analysis by being too aggressive
+- Had to revert and redesign more carefully
+- Learned importance of testing BOTH workflows
+
+### Deployment Strategy
+- Created comprehensive deployment script
+- Includes Gunicorn restart with proper settings
+- Added log monitoring commands
+- Clear testing checklist
+
+### Performance Impact
+- Minimal - only added logging and session flags
+- No new database queries
+- No additional API calls
+- Session cookie slightly larger with modified flag
+
+### Future Considerations
+- Redis session backend remains as option if issues persist
+- Could add session timeout handling (4+ hours)
+- Might enhance with workflow state visualization
+
+### Key Takeaways
+1. Multi-worker environments need explicit session management
+2. Default to expected behavior in ambiguous cases
+3. Test all workflows, not just the one being fixed
+4. Phased deployment reduces risk
+5. Logging is critical for production debugging
+
+### Issue Resolution: "I understand you're asking about" Messages (January 23, 2025)
+
+**Problem**: Even after deploying all session and routing fixes, users still getting "I understand you're asking about: 'Adamawa State'" messages instead of proper TPR workflow continuation.
+
+**Root Cause Discovery**:
+1. Initially thought it was a routing issue in TPR workflow router
+2. Checked request interpreter - not the source
+3. Found the message was coming from TPR conversation manager itself
+4. The issue was in `_handle_general_query` method returning this generic message
+
+**Deeper Analysis**:
+- The conversation manager's `_handle_state_selection` method had poor state name matching
+- Only did simple substring matching: `state.lower() in user_input.lower()`
+- This failed for exact matches like "Adamawa State" → "Adamawa State"
+- When state selection failed, it went to `_handle_general_query` instead of clarification
+
+**Solution Implemented**:
+Enhanced state matching in `_handle_state_selection` with multiple patterns:
+- Exact match (case insensitive)
+- State name without "State" suffix
+- User input contains state name
+- State name contains user input
+- Bidirectional substring matching
+
+**Key Learning**: Sometimes the issue is not where you expect. The "I understand you're asking about" message seemed like a routing problem but was actually a matching logic issue within the correct handler.
+
+**Deployment**: Fix deployed to AWS at 3:30 AM UTC on January 23, 2025
+
+### Critical Discovery: Redis Missing on AWS (January 23, 2025)
+
+**Problem**: TPR workflow completely inconsistent on AWS - state/facility/age selections randomly fail with generic responses.
+
+**Investigation Process**:
+1. SSH'd into AWS EC2 instance to check logs
+2. Examined session folders and Flask session files
+3. Analyzed TPR workflow router and conversation manager code
+4. Discovered intent classification was working correctly
+5. Found the real issue: no Redis installed on AWS server
+
+**Root Cause**:
+- Application configured to use Redis for session management in multi-worker environments
+- Redis not installed/running on AWS: `which redis-server` returns nothing
+- App falls back to filesystem sessions: `SESSION_TYPE = 'filesystem'`
+- Multiple Gunicorn workers (4) behind ALB cannot share filesystem sessions
+- Worker A sets `tpr_workflow_active=True`, Worker B doesn't see it
+- TPR state lost between requests → generic responses
+
+**Why It Works Locally**:
+- Local development uses single process/worker
+- Filesystem sessions work fine with single worker
+- No session state sharing issues
+
+**Solution Options**:
+1. **Install Redis** (recommended): 
+   - `sudo amazon-linux-extras install redis6`
+   - Enables proper session sharing across workers
+2. **Single Worker** (quick fix): 
+   - Set `workers = 1` in gunicorn.conf.py
+   - Reduces concurrency but ensures consistency
+3. **Sticky Sessions on ALB**: 
+   - Configure AWS ALB session affinity
+   - Routes same user to same worker
+4. **Database Sessions**: 
+   - Use SQLAlchemy session backend
+   - More overhead than Redis
+
+**Key Learning**: Multi-worker production environments REQUIRE shared session storage. Filesystem sessions are development-only.
+
+**Next Steps**: Install and configure Redis on AWS for proper production deployment.
+
+### HTML Report Not Showing in Downloads (January 23, 2025)
+
+**Problem**: After successful TPR analysis, only 3 files appeared in the download UI instead of 4. The HTML report was missing despite being generated and sent by the backend.
+
+**Root Cause**: Type mismatch between backend and frontend:
+- Backend sends HTML report with type 'TPR Analysis Report'
+- Frontend JavaScript `typeMap` expected 'Summary Report'
+- The `getKeyFromType()` function returned null for 'TPR Analysis Report', filtering it out
+
+**Solution**: Added 'TPR Analysis Report' to the typeMap in tpr-download-manager.js:
+```javascript
+const typeMap = {
+    'TPR Analysis Data': 'tpr_analysis',
+    'Complete Analysis': 'main_analysis',
+    'Shapefile': 'shapefile',
+    'Summary Report': 'summary',
+    'TPR Analysis Report': 'summary'  // Added mapping for HTML report
+};
+```
+
+**Key Learning**: Always verify that frontend type mappings match backend output exactly. Even small string differences can cause features to silently fail.
