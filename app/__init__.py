@@ -91,7 +91,13 @@ def create_app(config_name=None):
     config_class.init_app(app)
 
     # --- Initialize Extensions ---
-    Session(app)
+    # Try to initialize Redis sessions, fall back to filesystem if Redis is not available
+    from .config.redis_config import RedisConfig
+    redis_initialized = RedisConfig.init_redis_session(app)
+    
+    if not redis_initialized:
+        # Fall back to filesystem sessions
+        Session(app)
     
     # Initialize Flask-Login
     login_manager = LoginManager()

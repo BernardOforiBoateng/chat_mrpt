@@ -196,28 +196,36 @@ class OutputGenerator:
         output_paths = {}
         
         try:
-            # First, merge with shapefile to get geometry and identifier columns
+            # First, try to merge with shapefile to get geometry and identifier columns
             tpr_with_geo = self._merge_with_shapefile(tpr_results, state_name)
             
-            # 1. Generate TPR Analysis CSV
+            # 1. Generate TPR Analysis CSV (always generate this)
             tpr_path = self._generate_tpr_csv(tpr_with_geo, state_name, metadata)
             output_paths['tpr_analysis'] = tpr_path
             
-            # 2. Generate Main Analysis CSV with environmental variables
-            main_path = self._generate_main_csv(tpr_with_geo, state_name)
-            output_paths['main_analysis'] = main_path
+            # 2. Try to generate Main Analysis CSV with environmental variables
+            try:
+                main_path = self._generate_main_csv(tpr_with_geo, state_name)
+                if main_path:
+                    output_paths['main_analysis'] = main_path
+            except Exception as e:
+                logger.warning(f"Could not generate main analysis CSV: {str(e)}")
             
-            # 3. Generate Shapefile
-            shapefile_path = self._generate_shapefile(tpr_with_geo, state_name)
-            output_paths['shapefile'] = shapefile_path
+            # 3. Try to generate Shapefile
+            try:
+                shapefile_path = self._generate_shapefile(tpr_with_geo, state_name)
+                if shapefile_path:
+                    output_paths['shapefile'] = shapefile_path
+            except Exception as e:
+                logger.warning(f"Could not generate shapefile: {str(e)}")
             
-            # 4. Generate summary report
+            # 4. Generate summary report (always generate this)
             summary_path = self._generate_summary_report(
                 tpr_with_geo, state_name, metadata, output_paths
             )
             output_paths['summary'] = summary_path
             
-            logger.info(f"Successfully generated all outputs: {output_paths}")
+            logger.info(f"Successfully generated outputs: {output_paths}")
             
         except Exception as e:
             logger.error(f"Error generating outputs: {str(e)}")

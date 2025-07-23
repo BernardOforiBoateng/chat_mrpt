@@ -22,6 +22,7 @@ from .reports_api_routes import reports_bp
 from .debug_routes import debug_bp
 from .itn_routes import itn_bp, itn_embed_bp
 from .export_routes import export_bp
+from .session_routes import session_bp
 
 # Import TPR routes if available
 try:
@@ -41,6 +42,7 @@ __all__ = [
     'itn_bp',
     'itn_embed_bp',
     'export_bp',
+    'session_bp',
     'tpr_bp',
     'register_all_blueprints'
 ]
@@ -73,8 +75,13 @@ def register_all_blueprints(app):
     
     # Register export routes (export download functionality)
     app.register_blueprint(export_bp)
+    
+    # Register session routes (session state verification)
+    app.register_blueprint(session_bp)
+    
     logger = logging.getLogger(__name__)
     logger.info("✅ Export routes registered")
+    logger.info("✅ Session routes registered")
     
     # Register TPR routes if available
     if TPR_ROUTES_AVAILABLE and tpr_bp:

@@ -50,7 +50,7 @@ class TPRConversationManager:
         self.llm_client = llm_client
         self.state_manager = state_manager or TPRStateManager()
         self.parser = NMEPParser()
-        self.current_stage = ConversationStage.INITIAL_ANALYSIS
+        self._update_stage(ConversationStage.INITIAL_ANALYSIS)
         
         # Components
         self.facility_filter = FacilityFilter()
@@ -64,7 +64,21 @@ class TPRConversationManager:
         self.selected_state = None
         self.selected_facility_level = None
         self.selected_age_group = None
+    
+    def _update_stage(self, new_stage: ConversationStage) -> None:
+        """Update conversation stage and force session update for multi-worker environment."""
+        self.current_stage = new_stage
         
+        # Force session update in multi-worker environment
+        try:
+            from flask import session
+            session.modified = True
+            logger.debug(f"Updated stage to {new_stage.value} and marked session as modified")
+        except ImportError:
+            # Not in Flask context, likely in tests
+            pass
+        except Exception as e:
+            logger.warning(f"Could not mark session as modified: {e}")
     
     def generate_response(self, command: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -118,7 +132,7 @@ class TPRConversationManager:
         # Update state manager
         self.state_manager.update_state('parsed_data', self.parsed_data)
         self.state_manager.update_state('workflow_stage', 'state_selection')
-        self.current_stage = ConversationStage.STATE_SELECTION
+        self._update_stage(ConversationStage.STATE_SELECTION)
         
         # Generate conversational summary
         # Check if parser has data loaded (from restoration)
@@ -179,7 +193,7 @@ Please select one state to proceed with TPR analysis."""
             Response dictionary with message and data
         """
         self.file_path = file_path
-        self.current_stage = ConversationStage.INITIAL_ANALYSIS
+        self._update_stage(ConversationStage.INITIAL_ANALYSIS)
         
         # Parse the file
         logger.info(f"Starting TPR conversation with file: {file_path}")
@@ -199,7 +213,7 @@ Please select one state to proceed with TPR analysis."""
         summary = self.parser.get_summary_for_conversation(parse_result['metadata'])
         
         # Move to state selection
-        self.current_stage = ConversationStage.STATE_SELECTION
+        self._update_stage(ConversationStage.STATE_SELECTION)
         
         return {
             'status': 'success',
@@ -320,7 +334,7 @@ Please select one state to proceed with TPR analysis."""
         )
         
         # Move to facility selection
-        self.current_stage = ConversationStage.FACILITY_SELECTION
+        self._update_stage(ConversationStage.FACILITY_SELECTION)
         
         message = facility_analysis['summary']
         message += "\n\nWhich facility level would you prefer to analyze?"
@@ -485,7 +499,7 @@ Please select one state to proceed with TPR analysis."""
         self.selected_facility_level = selected_level
         self.state_manager.update_state('selected_facility_level', selected_level)
         self.state_manager.update_state('facility_level', selected_level.lower())
-        self.state_manager.update_state('workflow_stage', 'age_selection')
+        self.state_manager.update_state('workflow_stage', 'age_group_selection')
         
         # Filter data and check completeness
         state_data = self.parser.get_state_data(self.selected_state)
@@ -497,7 +511,7 @@ Please select one state to proceed with TPR analysis."""
         completeness_pw = self.parser.calculate_data_completeness(filtered_data, selected_level, 'pw')
         
         # Move to age group selection
-        self.current_stage = ConversationStage.AGE_GROUP_SELECTION
+        self._update_stage(ConversationStage.AGE_GROUP_SELECTION)
         
         message = f"Good choice! Using **{selected_level}** facilities for {self.selected_state}.\n\n"
         message += f"I can calculate TPR for different age groups in {self.selected_state}. Here's the data availability:\n\n"
@@ -571,7 +585,7 @@ Please select one state to proceed with TPR analysis."""
         self.state_manager.update_state('workflow_stage', 'calculation')
         
         # Start calculation
-        self.current_stage = ConversationStage.CALCULATION
+        self._update_stage(ConversationStage.CALCULATION)
         
         message = "Perfect! I'm now calculating TPR values for each ward...\n\n"
         
@@ -634,7 +648,7 @@ Please select one state to proceed with TPR analysis."""
                 message += f"- {range_name}: {count} wards\n"
         
         # Check for threshold violations
-        self.current_stage = ConversationStage.THRESHOLD_CHECK
+        self._update_stage(ConversationStage.THRESHOLD_CHECK)
         # Use the actual TPRResult objects, not the dictionary
         threshold_results = self.threshold_detector.detect_threshold_violations(self.calculator.results)
         
@@ -652,7 +666,7 @@ Please select one state to proceed with TPR analysis."""
             }
         else:
             # No violations, proceed to finalization
-            self.current_stage = ConversationStage.FINALIZATION
+            self._update_stage(ConversationStage.FINALIZATION)
             return self._finalize_calculation(tpr_results, summary_stats)
     
     def _handle_threshold_response(self, user_input: str, intent_data: Dict) -> Dict[str, Any]:
@@ -668,7 +682,7 @@ Please select one state to proceed with TPR analysis."""
             
             message += " Recalculation complete! The adjusted values are more reasonable for urban areas.\n"
             
-            self.current_stage = ConversationStage.FINALIZATION
+            self._update_stage(ConversationStage.FINALIZATION)
             return {
                 'status': 'success',
                 'message': message,
@@ -676,7 +690,7 @@ Please select one state to proceed with TPR analysis."""
             }
         else:
             # User doesn't want recalculation
-            self.current_stage = ConversationStage.FINALIZATION
+            self._update_stage(ConversationStage.FINALIZATION)
             return self._finalize_calculation(
                 self.calculator.results,
                 self.calculator.get_summary_statistics()
@@ -700,7 +714,7 @@ Please select one state to proceed with TPR analysis."""
         
         message += "\nThis will take just a moment as I read from our local database..."
         
-        self.current_stage = ConversationStage.COMPLETE
+        self._update_stage(ConversationStage.COMPLETE)
         
         return {
             'status': 'ready_for_output',

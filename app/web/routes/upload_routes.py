@@ -22,6 +22,8 @@ from ...core.exceptions import ValidationError, DataProcessingError
 from ...core.utils import convert_to_json_serializable
 from ...core.responses import ResponseBuilder
 
+logger = logging.getLogger(__name__)
+
 # TPR Module imports
 try:
     from ...tpr_module.integration.upload_detector import TPRUploadDetector
@@ -30,8 +32,6 @@ try:
 except ImportError:
     logger.warning("TPR module not available")
     TPR_MODULE_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
 
 # Create the upload routes blueprint
 upload_bp = Blueprint('upload', __name__)
@@ -410,6 +410,8 @@ def store_raw_data_files(session_folder: str, csv_file, shapefile):
         if csv_file and allowed_file(csv_file.filename, ALLOWED_EXTENSIONS_CSV):
             raw_csv_path = os.path.join(session_folder, 'raw_data.csv')
             csv_file.save(raw_csv_path)
+            # Ensure file is fully written and synced
+            os.sync()
             stored_files.append('raw_data.csv')
             logger.info(f"✅ Stored raw CSV: {csv_file.filename} → raw_data.csv")
         
@@ -417,6 +419,8 @@ def store_raw_data_files(session_folder: str, csv_file, shapefile):
         if shapefile and allowed_file(shapefile.filename, ALLOWED_EXTENSIONS_SHP):
             raw_shp_path = os.path.join(session_folder, 'raw_shapefile.zip')
             shapefile.save(raw_shp_path)
+            # Ensure file is fully written and synced
+            os.sync()
             stored_files.append('raw_shapefile.zip')
             logger.info(f"✅ Stored raw shapefile: {shapefile.filename} → raw_shapefile.zip")
         
@@ -701,6 +705,9 @@ def handle_tpr_path(session_id: str, csv_file, shapefile, upload_type: str, dete
     
     # Don't trigger standard analysis permission - TPR has its own flow
     session['should_ask_analysis_permission'] = False
+    
+    # CRITICAL: Force session update for multi-worker environment
+    session.modified = True
     
     # Log completion
     upload_duration = time.time() - upload_start_time
