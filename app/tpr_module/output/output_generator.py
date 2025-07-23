@@ -18,6 +18,7 @@ from datetime import datetime
 from ..data.geopolitical_zones import STATE_TO_ZONE, ZONE_VARIABLES
 from ..services.raster_extractor import RasterExtractor
 from ..services.shapefile_extractor import ShapefileExtractor
+from .tpr_report_generator import TPRReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,35 @@ class OutputGenerator:
                 tpr_with_geo, state_name, metadata, output_paths
             )
             output_paths['summary'] = summary_path
+            
+            # 5. Generate comprehensive HTML report for sharing
+            try:
+                report_generator = TPRReportGenerator(self.session_id)
+                
+                # Prepare analysis results
+                analysis_results = {
+                    'status': 'success',
+                    'output_paths': output_paths,
+                    'wards_analyzed': len(tpr_with_geo),
+                    'mean_tpr': tpr_with_geo['TPR'].mean() if 'TPR' in tpr_with_geo.columns else 0,
+                    'high_tpr_wards': (tpr_with_geo['TPR'] > 50).sum() if 'TPR' in tpr_with_geo.columns else 0,
+                    'pipeline_duration': metadata.get('pipeline_duration', 'N/A')
+                }
+                
+                # Add threshold results if available
+                if 'threshold_results' in metadata:
+                    analysis_results['threshold_results'] = metadata['threshold_results']
+                
+                # Generate the comprehensive report
+                html_report_path = report_generator.generate_report(
+                    analysis_results=analysis_results,
+                    tpr_data=tpr_with_geo,
+                    metadata=metadata
+                )
+                output_paths['html_report'] = html_report_path
+                logger.info(f"Generated comprehensive HTML report: {html_report_path}")
+            except Exception as e:
+                logger.warning(f"Could not generate HTML report: {str(e)}")
             
             logger.info(f"Successfully generated outputs: {output_paths}")
             

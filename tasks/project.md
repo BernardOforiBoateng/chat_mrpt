@@ -530,3 +530,94 @@ The experience reinforced important software engineering principles: test integr
 - Easy to spot outliers and concerning values
 - Context helps explain why wards are ranked where they are
 - Works with any malaria dataset without modification
+
+## 2025-01-23: TPR Environmental Data Extraction Dynamic Fix
+
+### Problem Identified
+The TPR module was failing to generate environmental data files because:
+1. Hardcoded expectation of 2023 annual raster files that don't exist
+2. Actual data consists of monthly files from various years (2015-2024)
+3. Bug where `append()` was called on a set instead of `add()`
+4. No mechanism to average multiple temporal files
+
+### Solution Implemented
+Created a dynamic raster extraction system that:
+1. **Discovers all available files** - `_discover_all_files_for_variable()` finds all .tif files for a variable regardless of year
+2. **Computes temporal averages** - `_compute_temporal_average()` averages across multiple raster files
+3. **Truly dynamic extraction** - `_extract_with_averaging()` automatically:
+   - Finds ALL available years of data
+   - Averages across ALL years (not just one)
+   - Uses annual files when available, falls back to representative monthly files
+   - The year parameter from NMEP metadata is only used for logging context
+4. **Handles monthly data** - Uses last available month as representative for each year
+5. **Variable name mapping** - Maps 'temp' → 'temperature' and 'distance_to_waterbodies' → 'distance_to_water'
+
+### Technical Details
+- Added methods to RasterExtractor for dynamic file discovery and averaging
+- Removed hardcoded VARIABLE_TO_RASTER mapping from geopolitical_zones.py
+- Fixed set.append() bug (changed to set.add())
+- Added import re for regex pattern matching
+- System now works with any available data instead of expecting specific years
+
+### Key Learnings
+1. **Never hardcode temporal expectations** - Environmental data availability varies by year
+2. **Build flexible averaging systems** - Better to average available data than fail completely
+3. **Log extensively** - Added detailed logging of what files are found and used
+4. **Handle edge cases** - System now handles monthly files, missing years, and partial data
+
+### Files Modified
+1. `app/tpr_module/services/raster_extractor.py` - Added dynamic averaging methods
+2. `app/tpr_module/data/geopolitical_zones.py` - Removed hardcoded mappings
+
+### Next Steps
+- Test the system with real TPR data
+- Deploy to AWS
+- Monitor logs to ensure averaging is working correctly
+
+## 2025-01-23: TPR Analysis Workflow Report Implementation
+
+### Requirements
+User requested a comprehensive TPR analysis report that:
+- Documents the entire workflow (steps taken, parameters used)
+- Includes environmental variables extracted
+- Contains the TPR distribution map
+- Can be shared with supervisors and colleagues
+- Professional format suitable for presentations
+
+### Solution Implemented
+Created a comprehensive HTML report generator that includes:
+
+1. **Executive Summary** - Key metrics in visual metric boxes
+2. **Analysis Workflow** - Step-by-step documentation of what was done
+3. **TPR Statistics** - Detailed statistical breakdown
+4. **High Risk Wards** - Table of top 10 highest TPR wards
+5. **Environmental Variables** - List of extracted variables with coverage
+6. **Recommendations** - Based on threshold analysis
+7. **Embedded Map** - TPR distribution map embedded directly in report
+8. **Methodology Notes** - Technical details for transparency
+
+### Technical Implementation
+1. Created `TPRReportGenerator` class in `app/tpr_module/output/tpr_report_generator.py`
+2. Integrated into `OutputGenerator.generate_outputs()` method
+3. Report searches multiple locations for TPR map and embeds it
+4. Uses Jinja2 templating for clean HTML generation
+5. Includes Plotly.js for interactive map display
+6. Professional styling with print-friendly CSS
+
+### Key Features
+- **Self-contained HTML** - Single file with all content
+- **Interactive map** - Embedded Plotly visualization
+- **Professional design** - Clean layout with ChatMRPT branding
+- **Comprehensive data** - All relevant metrics and analysis details
+- **Shareable format** - Ready for email or presentation
+
+### Files Modified
+1. `app/tpr_module/output/tpr_report_generator.py` - New report generator
+2. `app/tpr_module/output/output_generator.py` - Integration into pipeline
+
+### Benefits
+- Users can share analysis results with stakeholders
+- Complete documentation of analysis process
+- Professional presentation format
+- All information in one place
+- No need to explain separate files

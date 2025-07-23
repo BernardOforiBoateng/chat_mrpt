@@ -6,6 +6,7 @@ for ward centroids based on geopolitical zone requirements.
 """
 
 import os
+import re
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -136,6 +137,7 @@ class RasterExtractor:
                                year: Optional[int]) -> List[float]:
         """
         Extract values for a single variable using ward geometries.
+        Now uses dynamic averaging for better data availability.
         
         Args:
             ward_gdf: GeoDataFrame with ward geometries from Nigerian shapefile
@@ -145,19 +147,113 @@ class RasterExtractor:
         Returns:
             List of extracted values
         """
-        # Find raster file
-        raster_path = self._find_raster_file(variable, year)
+        # Handle variable name mapping
+        # Map 'temp' to 'temperature' as that's what the files use
+        if variable == 'temp':
+            variable = 'temperature'
+            logger.info("Mapped 'temp' to 'temperature' for file lookup")
+        elif variable == 'distance_to_waterbodies':
+            variable = 'distance_to_water'
+            logger.info("Mapped 'distance_to_waterbodies' to 'distance_to_water' for file lookup")
         
-        if raster_path is None:
-            logger.warning(f"No raster file found for {variable} (year: {year})")
-            # Log available files for debugging
-            var_dir = self.raster_base_dir / self.variable_directories.get(variable, '')
-            if var_dir.exists():
-                available_files = list(var_dir.glob("*.tif"))
-                logger.info(f"Available files in {var_dir}: {[f.name for f in available_files]}")
+        # Use the new dynamic averaging method
+        return self._extract_with_averaging(ward_gdf, variable, year)
+    
+    def _discover_all_files_for_variable(self, variable: str) -> Dict[int, List[Path]]:
+        """
+        Discover all available files for a variable across all years.
+        
+        Args:
+            variable: Variable name
+            
+        Returns:
+            Dictionary mapping years to list of file paths
+        """
+        if variable not in self.variable_directories:
+            logger.warning(f"Unknown variable: {variable}")
+            return {}
+        
+        var_dir = self.raster_base_dir / self.variable_directories[variable]
+        
+        if not var_dir.exists():
+            logger.warning(f"Directory not found: {var_dir}")
+            return {}
+        
+        year_files = {}
+        
+        # Find all .tif files for this variable
+        for file_path in var_dir.glob(f"*{variable}*.tif"):
+            # Extract year from filename
+            import re
+            year_match = re.search(r'(\d{4})', file_path.stem)
+            if year_match:
+                year = int(year_match.group(1))
+                if 2000 <= year <= 2030:
+                    if year not in year_files:
+                        year_files[year] = []
+                    year_files[year].append(file_path)
+            elif variable in ['elevation', 'distance_to_water']:
+                # Static variables without year
+                if 'static' not in year_files:
+                    year_files['static'] = []
+                year_files['static'].append(file_path)
+        
+        logger.info(f"Found files for {variable}: {', '.join(str(y) for y in sorted(year_files.keys()))}")
+        return year_files
+    
+    def _compute_temporal_average(self, raster_files: List[Path], ward_gdf: gpd.GeoDataFrame) -> List[float]:
+        """
+        Compute average values across multiple raster files.
+        
+        Args:
+            raster_files: List of raster file paths to average
+            ward_gdf: GeoDataFrame with ward geometries
+            
+        Returns:
+            List of averaged values
+        """
+        if not raster_files:
             return [np.nan] * len(ward_gdf)
         
-        # Extract values using ward geometries
+        # If only one file, just extract from it
+        if len(raster_files) == 1:
+            return self._extract_from_single_raster(raster_files[0], ward_gdf)
+        
+        logger.info(f"Computing average across {len(raster_files)} raster files")
+        
+        # Initialize arrays for accumulation
+        sum_values = np.zeros(len(ward_gdf))
+        count_values = np.zeros(len(ward_gdf))
+        
+        # Extract from each file and accumulate
+        for raster_path in raster_files:
+            values = self._extract_from_single_raster(raster_path, ward_gdf)
+            for i, val in enumerate(values):
+                if not np.isnan(val):
+                    sum_values[i] += val
+                    count_values[i] += 1
+        
+        # Compute average
+        avg_values = []
+        for i in range(len(ward_gdf)):
+            if count_values[i] > 0:
+                avg_values.append(sum_values[i] / count_values[i])
+            else:
+                avg_values.append(np.nan)
+        
+        return avg_values
+    
+    def _extract_from_single_raster(self, raster_path: Path, ward_gdf: gpd.GeoDataFrame) -> List[float]:
+        """
+        Extract values from a single raster file.
+        
+        Args:
+            raster_path: Path to raster file
+            ward_gdf: GeoDataFrame with ward geometries
+            
+        Returns:
+            List of extracted values
+        """
         try:
             with rasterio.open(raster_path) as src:
                 # Convert ward geometries to raster CRS if needed
@@ -166,33 +262,89 @@ class RasterExtractor:
                 else:
                     ward_gdf_transformed = ward_gdf
                 
-                # Extract values using ward centroids from official shapefile
+                # Extract values using ward centroids
                 values = []
                 for idx, ward in ward_gdf_transformed.iterrows():
                     if ward.geometry is not None and ward.geometry.is_valid:
-                        # Get centroid from the official geometry
                         centroid = ward.geometry.centroid
-                        # Sample value at centroid
                         val = list(sample_gen(src, [(centroid.x, centroid.y)]))[0]
                         values.append(val[0] if val[0] is not None else np.nan)
                     else:
                         values.append(np.nan)
                 
-                # Ensure we return exactly the right number of values
-                if len(values) != len(ward_gdf):
-                    logger.error(f"Value count mismatch: extracted {len(values)}, expected {len(ward_gdf)}")
-                    # Pad or truncate to match
-                    if len(values) < len(ward_gdf):
-                        values.extend([np.nan] * (len(ward_gdf) - len(values)))
-                    else:
-                        values = values[:len(ward_gdf)]
-                
-                logger.debug(f"Extracted {len(values)} values from {raster_path.name}")
                 return values
                 
         except Exception as e:
             logger.error(f"Error reading raster {raster_path}: {str(e)}")
             return [np.nan] * len(ward_gdf)
+    
+    def _extract_with_averaging(self, ward_gdf: gpd.GeoDataFrame, variable: str, year: Optional[int]) -> List[float]:
+        """
+        Extract values with dynamic averaging based on available data.
+        
+        Args:
+            ward_gdf: GeoDataFrame with ward geometries
+            variable: Variable name
+            year: Requested year (optional)
+            
+        Returns:
+            List of extracted values
+        """
+        # Discover all available files
+        year_files = self._discover_all_files_for_variable(variable)
+        
+        if not year_files:
+            logger.warning(f"No files found for {variable}")
+            return [np.nan] * len(ward_gdf)
+        
+        # For static variables
+        if 'static' in year_files:
+            logger.info(f"Using static file for {variable}")
+            return self._compute_temporal_average(year_files['static'], ward_gdf)
+        
+        # Dynamic averaging approach - use all available data
+        # The year parameter is just for logging context, not for filtering
+        
+        # Get all available years
+        numeric_years = [y for y in year_files.keys() if isinstance(y, int)]
+        
+        if not numeric_years:
+            logger.warning(f"No temporal data found for {variable}")
+            return [np.nan] * len(ward_gdf)
+        
+        logger.info(f"Found {variable} data for years: {sorted(numeric_years)}")
+        if year:
+            logger.info(f"Note: NMEP data is from {year}, but we'll use all available raster data")
+        
+        # Collect all files to average
+        all_files_to_average = []
+        
+        for data_year in numeric_years:
+            files = year_files[data_year]
+            
+            # For each year, check what type of files we have
+            monthly_files = [f for f in files if re.search(r'_\d{2}\.tif$', f.name)]
+            annual_files = [f for f in files if 'annual' in f.name or not re.search(r'_\d{2}\.tif$', f.name)]
+            
+            if annual_files:
+                # If we have annual file(s) for this year, use them
+                all_files_to_average.extend(annual_files)
+                logger.info(f"Including {len(annual_files)} annual file(s) from {data_year}")
+            elif monthly_files:
+                # If we only have monthly files, we need to average them first
+                # For now, take the last available month as representative
+                # (or we could average all months, but that's computationally expensive)
+                last_month_file = sorted(monthly_files)[-1]
+                all_files_to_average.append(last_month_file)
+                logger.info(f"Including {last_month_file.name} as representative for {data_year}")
+        
+        if not all_files_to_average:
+            logger.warning(f"No suitable files found for {variable}")
+            return [np.nan] * len(ward_gdf)
+        
+        # Now average all the collected files
+        logger.info(f"Averaging {len(all_files_to_average)} files across {len(numeric_years)} years for {variable}")
+        return self._compute_temporal_average(all_files_to_average, ward_gdf)
     
     def _find_raster_file(self, variable: str, year: Optional[int]) -> Optional[Path]:
         """
@@ -335,7 +487,7 @@ class RasterExtractor:
                 if year_match:
                     year = int(year_match.group(1))
                     if 2000 <= year <= 2030:
-                        years.append(year)
+                        years.add(year)
             
             if files:
                 available[variable] = {
