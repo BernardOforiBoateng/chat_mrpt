@@ -434,6 +434,12 @@ Just tell me what you're interested in!
         if 'shapefile' in output_paths and output_paths['shapefile']:
             links['shapefile'] = output_paths['shapefile']
             
+        if 'html_report' in output_paths and output_paths['html_report']:
+            links['html_report'] = output_paths['html_report']
+            
+        if 'summary' in output_paths and output_paths['summary']:
+            links['summary'] = output_paths['summary']
+            
         return links
     
     def _generate_tpr_map(self, state_name: str) -> Optional[Dict[str, Any]]:
@@ -616,12 +622,14 @@ Your analysis files are ready for download:
 1. **TPR Analysis CSV** - Detailed ward-level TPR calculations
 2. **Complete Analysis CSV** - TPR with environmental variables  
 3. **Shapefile** - Geographic data for mapping
+4. **HTML Report** - Comprehensive analysis report for sharing
+5. **Summary Report** - Analysis summary and metadata
 
 Your data is now ready for the next steps in malaria intervention planning! The files have been automatically prepared for risk analysis.
 
 ### Download Options:
 - Visit the "Download Processed Data" tab to get your files
-- All three files (TPR CSV, Complete Analysis, Shapefile) are ready
+- All files are ready for download
 
 ---
 **Next Step:** I've finished the TPR analysis. Would you like to proceed to the risk analysis to rank wards and plan for ITN distribution?

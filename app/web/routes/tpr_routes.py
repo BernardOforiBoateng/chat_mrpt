@@ -166,7 +166,8 @@ def get_tpr_download_links():
                 'tpr_analysis': 'TPR Analysis Data',
                 'main_analysis': 'Complete Analysis',
                 'shapefile': 'Shapefile',
-                'summary': 'Summary Report'
+                'summary': 'Summary Report',
+                'html_report': 'TPR Analysis Report'
             }
             links_list.append({
                 'type': type_map.get(key, key),
@@ -195,7 +196,8 @@ def download_tpr_output(file_type):
         'tpr_analysis': None,
         'main_analysis': None,
         'shapefile': None,
-        'summary': None
+        'summary': None,
+        'html_report': None
     }
     
     # Find the appropriate file
@@ -213,7 +215,8 @@ def download_tpr_output(file_type):
             'tpr_analysis': '*_TPR_Analysis_*.csv',
             'main_analysis': '*_plus.csv',
             'shapefile': '*_state.zip',
-            'summary': '*_Summary_Report.md'
+            'summary': '*_Summary_Report.md',
+            'html_report': '*.html'
         }
         
         pattern = patterns.get(file_type)
@@ -236,7 +239,8 @@ def download_tpr_output(file_type):
             'tpr_analysis': 'text/csv',
             'main_analysis': 'text/csv',
             'shapefile': 'application/zip',
-            'summary': 'text/markdown'
+            'summary': 'text/markdown',
+            'html_report': 'text/html'
         }
         
         return send_file(
