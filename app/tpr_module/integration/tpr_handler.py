@@ -196,6 +196,20 @@ class TPRHandler:
             # Get current state
             current_state = self.state_manager.get_state()
             
+            # Check if TPR is complete and user is confirming to proceed to risk analysis
+            if current_state.get('workflow_stage') == 'complete':
+                # Check if user is saying yes to proceed
+                confirmation_words = {'yes', 'y', 'ok', 'okay', 'sure', 'proceed', 'continue', 'go', 'yep', 'yeah'}
+                if any(word in user_message.lower().split() for word in confirmation_words):
+                    # Return special trigger to show exploration menu
+                    return {
+                        'status': 'success',
+                        'workflow': 'tpr',
+                        'stage': 'transition',
+                        'response': '__DATA_UPLOADED__',
+                        'trigger_exploration': True
+                    }
+            
             # Generate response through conversation manager
             response = self.conversation_manager.process_user_input(user_message)
             
@@ -320,18 +334,20 @@ class TPRHandler:
             
             # Mark workflow complete
             self.state_manager.update_state({
-                'workflow_stage': 'completed',
+                'workflow_stage': 'complete',
                 'analysis_results': pipeline_result,
                 'output_paths': output_paths
             })
             
-            # Clear TPR session flag
-            session.pop('tpr_workflow_active', None)
+            # DO NOT clear TPR session flag here - wait for user response
+            # Only set the trigger flag for later use
+            session['trigger_data_uploaded'] = True
+            session.modified = True
             
             return {
                 'status': 'success',
                 'workflow': 'tpr',
-                'stage': 'completed',
+                'stage': 'complete',
                 'response': self._generate_completion_message(
                     selected_state, 
                     pipeline_result,
@@ -346,7 +362,8 @@ class TPRHandler:
                 },
                 'download_links': self._generate_download_links(output_paths),
                 'visualizations': [tpr_map_path] if tpr_map_path else [],
-                'analysis_time': f"{analysis_time:.2f} seconds"
+                'analysis_time': f"{analysis_time:.2f} seconds",
+                'trigger_data_uploaded': session.get('trigger_data_uploaded', False)
             }
             
         except Exception as e:
@@ -387,8 +404,18 @@ The environmental variables were selected based on {state}'s geopolitical zone, 
 
 You can download these files using the links below. The data is ready for further analysis, mapping, or integration with your existing workflows.
 
+Your data is now ready for risk analysis! The TPR results have been integrated with environmental variables.
+
 ---
-**Next Step:** I've finished the TPR analysis. Would you like to proceed to the risk analysis to rank wards and plan for ITN distribution?
+
+**What would you like to do next?**
+• Run malaria risk analysis to rank wards for ITN distribution
+• Explore the TPR data in more detail
+• Map variable distributions
+• Check data quality
+• Something else
+
+Just tell me what you're interested in!
 """
         
         return message
@@ -603,6 +630,8 @@ Your data is now ready for the next steps in malaria intervention planning! The 
                     # This allows the permission system to take over
                     session.pop('tpr_workflow_active', None)
                     session.pop('tpr_session_id', None)
+                    # Set flag to trigger data exploration menu
+                    session['trigger_data_uploaded'] = True
                     session.modified = True
                     logger.info(f"TPR workflow flags cleared for risk transition - session {self.session_id}")
                 else:
@@ -628,7 +657,8 @@ Your data is now ready for the next steps in malaria intervention planning! The 
                 'download_links': download_links,
                 'visualizations': [visualization],  # This will display the map in chat
                 'next_step': 'download_or_continue',
-                'risk_ready': True  # Signal that risk analysis is ready
+                'risk_ready': True,  # Signal that risk analysis is ready
+                'trigger_data_uploaded': session.get('trigger_data_uploaded', False)  # Pass flag to frontend
             }
             
         except Exception as e:
@@ -643,7 +673,7 @@ Your data is now ready for the next steps in malaria intervention planning! The 
         state = self.state_manager.get_state()
         
         return {
-            'active': state.get('workflow_stage') != 'completed',
+            'active': state.get('workflow_stage') != 'complete',
             'stage': state.get('workflow_stage', 'not_started'),
             'selected_state': state.get('selected_state'),
             'parameters': {
