@@ -568,6 +568,24 @@ Just tell me what you're interested in!
                     'description': 'Geographic boundaries with all data'
                 })
             
+            # Add HTML report
+            if 'html_report' in output_paths:
+                download_links.append({
+                    'name': os.path.basename(output_paths['html_report']),
+                    'path': output_paths['html_report'],
+                    'type': 'TPR Analysis Report',
+                    'description': 'Comprehensive HTML report for sharing'
+                })
+            
+            # Add summary report
+            if 'summary' in output_paths:
+                download_links.append({
+                    'name': os.path.basename(output_paths['summary']),
+                    'path': output_paths['summary'],
+                    'type': 'Summary Report',
+                    'description': 'Analysis summary and metadata'
+                })
+            
             # Check for valid TPR results
             if not tpr_results or len(tpr_results) == 0:
                 logger.error("No TPR results generated")
@@ -598,12 +616,14 @@ Your analysis files are ready for download:
 1. **TPR Analysis CSV** - Detailed ward-level TPR calculations
 2. **Complete Analysis CSV** - TPR with environmental variables  
 3. **Shapefile** - Geographic data for mapping
+4. **HTML Report** - Comprehensive analysis report for sharing
+5. **Summary Report** - Analysis summary and metadata
 
 Your data is now ready for the next steps in malaria intervention planning! The files have been automatically prepared for risk analysis.
 
 ### Download Options:
 - Visit the "Download Processed Data" tab to get your files
-- All three files (TPR CSV, Complete Analysis, Shapefile) are ready
+- All five files are ready for download
 
 ---
 **Next Step:** I've finished the TPR analysis. Would you like to proceed to the risk analysis to rank wards and plan for ITN distribution?
