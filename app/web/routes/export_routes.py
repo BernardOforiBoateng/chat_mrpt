@@ -34,11 +34,22 @@ def download_export(session_id, filename):
         # Construct safe path (prevent directory traversal)
         safe_filename = os.path.basename(filename)
         export_base_dir = Path('instance/exports') / session_id
+        
+        # First try direct path
         file_path = export_base_dir / safe_filename
         
-        # Ensure file exists and is within allowed directory
+        # If not found, search in timestamped subdirectories
         if not file_path.exists():
-            logger.error(f"Export file not found: {file_path}")
+            # Look for the file in any itn_export_* subdirectory
+            for subdir in export_base_dir.glob('itn_export_*'):
+                potential_path = subdir / safe_filename
+                if potential_path.exists():
+                    file_path = potential_path
+                    break
+        
+        # Ensure file exists
+        if not file_path.exists():
+            logger.error(f"Export file not found: {safe_filename} in {export_base_dir}")
             abort(404, "Export file not found")
         
         # Ensure path is within exports directory

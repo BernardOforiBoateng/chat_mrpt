@@ -90,9 +90,9 @@ def generate_report():
             custom_sections = request.form.getlist('custom_sections')
         
         # Validate format
-        valid_formats = ['pdf', 'html', 'markdown']
+        valid_formats = ['pdf', 'html', 'markdown', 'export']
         if report_format not in valid_formats:
-            report_format = 'pdf'
+            report_format = 'export'  # Default to export package
         
         logger.info(f"Generating {report_format} report for session {session_id}")
         

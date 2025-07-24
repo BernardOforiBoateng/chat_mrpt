@@ -428,7 +428,7 @@ class ChatMRPTApp {
                 // Format the download button based on the content
                 let downloadButtonText = '📦 Download Export Package';
                 if (result.format === 'pdf') {
-                    downloadButtonText = '📄 Download PDF Report';
+                    downloadButtonText = '📦 Download Analysis Package';
                 } else if (result.format === 'html') {
                     downloadButtonText = '🌐 Download HTML Report';
                 }
