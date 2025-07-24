@@ -1341,4 +1341,38 @@ session.modified = True
 - For scaling beyond 10 concurrent users, implement Redis for session storage
 - Redis would allow multiple workers while maintaining session state
 - Current single-worker solution is adequate for pilot/testing phase
+
+## Comprehensive Session Fix (2025-07-24) - Part 2
+
+### Additional Issue Found
+Even with single worker and `session.modified = True`, sessions were creating new IDs on every request. The logs showed:
+- Multiple new session IDs being created rapidly
+- Session cookie not persisting between requests
+
+### Root Cause #2
+1. Flask's `session.permanent` flag wasn't being set
+2. Session initialization in `core_routes.py` wasn't marking session as modified
+3. Cookie configuration needed explicit naming
+
+### Complete Solution
+1. **Added `@app.before_request` handler** in `__init__.py`:
+   ```python
+   @app.before_request
+   def make_session_permanent():
+       session.permanent = True
+   ```
+
+2. **Added `session.modified = True`** in `core_routes.py`:
+   - After new session initialization
+   - After TPR state changes
+
+3. **Added cookie configuration** in `base.py`:
+   - `SESSION_COOKIE_NAME = 'chatmrpt_session'`
+   - `SESSION_COOKIE_DOMAIN = None` (auto-detect)
+
+### Result
+Session persistence now works correctly with:
+- Single worker for in-memory consistency
+- Proper session marking for filesystem storage
+- Consistent cookie naming and handling
 - [ ] Verify session persistence after page refresh
