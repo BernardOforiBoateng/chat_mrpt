@@ -386,6 +386,9 @@ I've successfully analyzed the Test Positivity Rate data for **{wards_analyzed} 
 The environmental variables were selected based on {state}'s geopolitical zone, ensuring the most relevant factors for malaria risk assessment in your region.
 
 You can download these files using the links below. The data is ready for further analysis, mapping, or integration with your existing workflows.
+
+---
+**Next Step:** I've finished the TPR analysis. Would you like to proceed to the risk analysis to rank wards and plan for ITN distribution?
 """
         
         return message
@@ -574,6 +577,9 @@ Your data is now ready for the next steps in malaria intervention planning! The 
 ### Download Options:
 - Visit the "Download Processed Data" tab to get your files
 - All three files (TPR CSV, Complete Analysis, Shapefile) are ready
+
+---
+**Next Step:** I've finished the TPR analysis. Would you like to proceed to the risk analysis to rank wards and plan for ITN distribution?
 """
             
             # Store download links in session
@@ -592,6 +598,13 @@ Your data is now ready for the next steps in malaria intervention planning! The 
                 
                 if transition_result['status'] == 'success':
                     logger.info(f"Successfully prepared TPR data for risk analysis - session {self.session_id}")
+                    
+                    # CRITICAL: Clear TPR workflow flags after successful transition
+                    # This allows the permission system to take over
+                    session.pop('tpr_workflow_active', None)
+                    session.pop('tpr_session_id', None)
+                    session.modified = True
+                    logger.info(f"TPR workflow flags cleared for risk transition - session {self.session_id}")
                 else:
                     logger.warning(f"Could not prepare for risk transition: {transition_result.get('message')}")
                     

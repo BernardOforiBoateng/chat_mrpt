@@ -1622,7 +1622,9 @@ Just tell me what you're interested in."""
         
         if should_ask_permission:
             # Check if this is a confirmation message
+            logger.debug(f"Checking if '{user_message}' is a confirmation message")
             if self._is_confirmation_message(user_message):
+                logger.info(f"✅ Confirmed! '{user_message}' detected as confirmation")
                 logger.info("✅ User confirmed with 'yes' - executing automatic analysis...")
                 # User said yes - run analysis
                 result = self._execute_automatic_analysis(session_id)
@@ -1708,8 +1710,26 @@ Just tell me what you're interested in."""
             return f"📊 **{viz_name} Created** - This visualization shows malaria risk analysis results for intervention planning."
     
     def _is_confirmation_message(self, message: str) -> bool:
-        """Check if message is confirmation."""
-        return message.lower().strip() in ['yes', 'y', 'ok', 'okay', 'sure', 'proceed', 'continue']
+        """Check if message is confirmation using dynamic detection."""
+        msg = message.lower().strip()
+        
+        # Core confirmation words
+        confirmation_words = {'yes', 'y', 'ok', 'okay', 'sure', 'proceed', 'continue', 'go', 'yep', 'yeah', 'affirmative'}
+        negative_words = {'no', 'not', 'dont', "don't", 'cancel', 'stop', 'wait', 'hold'}
+        
+        # Split message into words
+        words = msg.split()
+        
+        # Check if any word in the message is a confirmation word
+        has_confirmation = any(word in confirmation_words for word in words)
+        has_negative = any(word in negative_words for word in words)
+        
+        # If there's a negative word, it's not a confirmation
+        if has_negative:
+            return False
+            
+        # If there's at least one confirmation word and no negatives, it's a confirmation
+        return has_confirmation
     
     def _execute_automatic_analysis(self, session_id: str) -> Dict[str, Any]:
         """Execute automatic analysis after permission."""

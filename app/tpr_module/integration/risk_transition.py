@@ -30,19 +30,27 @@ class TPRToRiskTransition:
             bool: True if transition is possible
         """
         try:
-            # Check for required TPR output files
-            main_analysis = os.path.join(self.tpr_folder, 'main_analysis.csv')
-            shapefile = os.path.join(self.tpr_folder, 'shapefile.zip')
+            # Look for actual TPR output files in session folder (not tpr_outputs subfolder)
+            # Files are named {state}_plus.csv and {state}_state.zip
+            import glob
             
-            if not os.path.exists(main_analysis):
-                logger.warning(f"Main analysis CSV not found at {main_analysis}")
+            # Find the plus.csv and state.zip files
+            csv_files = glob.glob(os.path.join(self.session_folder, '*_plus.csv'))
+            shp_files = glob.glob(os.path.join(self.session_folder, '*_state.zip'))
+            
+            if not csv_files:
+                logger.warning(f"No *_plus.csv files found in {self.session_folder}")
                 return False
                 
-            if not os.path.exists(shapefile):
-                logger.warning(f"Shapefile not found at {shapefile}")
+            if not shp_files:
+                logger.warning(f"No *_state.zip files found in {self.session_folder}")
                 return False
-                
-            logger.info(f"TPR outputs available for transition: {self.session_id}")
+            
+            # Store the found files for later use
+            self._tpr_csv = csv_files[0]  # Use the first match
+            self._tpr_shapefile = shp_files[0]
+            
+            logger.info(f"TPR outputs available for transition: {os.path.basename(self._tpr_csv)}, {os.path.basename(self._tpr_shapefile)}")
             return True
             
         except Exception as e:
@@ -57,20 +65,29 @@ class TPRToRiskTransition:
             dict: Result with status and file information
         """
         try:
-            # Source files from TPR
-            tpr_main_csv = os.path.join(self.tpr_folder, 'main_analysis.csv')
-            tpr_shapefile = os.path.join(self.tpr_folder, 'shapefile.zip')
+            # Check if files were found by can_transition
+            if not hasattr(self, '_tpr_csv') or not hasattr(self, '_tpr_shapefile'):
+                # If not found in attributes, find them again
+                import glob
+                csv_files = glob.glob(os.path.join(self.session_folder, '*_plus.csv'))
+                shp_files = glob.glob(os.path.join(self.session_folder, '*_state.zip'))
+                
+                if not csv_files or not shp_files:
+                    raise FileNotFoundError("TPR output files not found")
+                
+                self._tpr_csv = csv_files[0]
+                self._tpr_shapefile = shp_files[0]
             
             # Target files for risk analysis (matching standard upload)
             risk_csv = os.path.join(self.session_folder, 'raw_data.csv')
             risk_shapefile = os.path.join(self.session_folder, 'raw_shapefile.zip')
             
             # Copy files (preserving TPR outputs)
-            shutil.copy2(tpr_main_csv, risk_csv)
-            logger.info(f"Copied TPR main analysis to {risk_csv}")
+            shutil.copy2(self._tpr_csv, risk_csv)
+            logger.info(f"Copied {os.path.basename(self._tpr_csv)} to raw_data.csv")
             
-            shutil.copy2(tpr_shapefile, risk_shapefile)
-            logger.info(f"Copied TPR shapefile to {risk_shapefile}")
+            shutil.copy2(self._tpr_shapefile, risk_shapefile)
+            logger.info(f"Copied {os.path.basename(self._tpr_shapefile)} to raw_shapefile.zip")
             
             # Get file sizes for metadata
             csv_size = os.path.getsize(risk_csv)

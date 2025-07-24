@@ -29,6 +29,54 @@ app/tpr_module/
 ### 2. Conversational Flow Design
 Instead of rigid step-by-step wizards, we implemented a flexible conversational interface that understands context and user intent.
 
+## Report Generation Investigation (July 24, 2025)
+
+### Issue Found
+- User clicking "Generate a report" button gets error: "Could not check analysis status. Please try running the analysis again."
+- Root cause: Frontend tries to check `/debug/session_state` endpoint which returned 404
+- `debug_routes.py` was just a placeholder with no actual routes
+
+### Current Report Implementation
+The system has two types of reports:
+
+1. **ITN Distribution Export Package** (when ITN planning is complete):
+   - Interactive HTML dashboard
+   - Detailed CSV files with ward rankings and ITN allocations  
+   - Maps and visualizations
+   - Summary statistics
+   - All packaged in a ZIP file
+
+2. **Basic Analysis Export** (risk analysis without ITN):
+   - Vulnerability rankings CSV
+   - Analysis summary text file
+   - Packaged in a ZIP file
+
+### Report Generation Flow
+1. User clicks "Generate a report" button
+2. Frontend checks session state via `/debug/session_state`
+3. If analysis is complete, sends message "Generate PDF report" via chat
+4. Report service (`ModernReportGenerator`) checks for:
+   - ITN results → generates comprehensive export
+   - Basic analysis → generates analysis export
+   - No results → returns error message
+
+### Fix Applied
+- Created proper `/debug/session_state` endpoint in `debug_routes.py`
+- Endpoint returns session state including analysis status and ITN completion
+- This allows the report button to work properly
+
+### Limitations of Current Implementation
+- PDF generation is just a placeholder (`_generate_pdf_report` returns "pdf_report_placeholder.pdf")
+- HTML report generation is a placeholder (`_generate_html_report` returns "html_report_placeholder.html")
+- Main functional export is the ZIP package with CSV/dashboard
+- No comprehensive narrative report with insights and recommendations
+
+### Next Steps for Report Enhancement
+- Need to understand user requirements for report content
+- Consider implementing proper PDF generation with analysis insights
+- Add narrative sections explaining results and recommendations
+- Include visualizations in the PDF report
+
 **Key Components:**
 - `TPRConversationManager`: Orchestrates the flow
 - `TPRWorkflowRouter`: Routes messages intelligently
@@ -819,3 +867,441 @@ const typeMap = {
 ```
 
 **Key Learning**: Always verify that frontend type mappings match backend output exactly. Even small string differences can cause features to silently fail.
+
+---
+
+## Session Management Issues (July 2025)
+
+### Critical Session Context Issues Investigation (July 23, 2025)
+
+#### Issue 1: Download Files Not Available After Risk Analysis
+
+**Problem**: Despite completing analysis, download tab shows "no files available. Run a TPR analysis first"
+
+**Root Cause**: Flask session context error
+```
+WARNING in complete_analysis_tools: Failed to set analysis_complete flag: Working outside of request context.
+```
+
+**Why It Happens**:
+- Risk analysis runs in a background thread/process
+- Flask sessions require an active HTTP request context
+- The `analysis_complete` flag can't be set without this context
+- Download manager checks this flag to show available files
+
+**Evidence**:
+- TPR download links work (4 files stored successfully)
+- Risk analysis files exist on disk but aren't listed
+- The error occurs consistently after both composite and PCA analysis
+
+#### Issue 2: Generic Ward Explanations Without Data
+
+**Problem**: When user asks why a ward is ranked highly, system provides generic explanations
+
+**Example**:
+- User asks: "Why is Gwapopolok ward ranked so highly?"
+- System queries: `SELECT WardName, composite_score, composite_rank, pca_score, pca_rank FROM df WHERE WardName = 'Gwapopolok'`
+- Actual data: TPR=89.4%, housing_quality=0.0437, composite_score=0.676
+- But response says: "has a high malaria prevalence rate" (no number), "likely has poor housing" (no specifics)
+
+**Root Cause**: 
+- SQL query executes successfully
+- Results aren't passed to the LLM for response generation
+- LLM generates template-like response without access to actual values
+
+**Impact**:
+- Users can't validate rankings
+- Explanations lack credibility
+- Data-driven insights are lost
+
+#### Lessons Learned:
+1. **Flask Context Management**: Background tasks need proper context handling with `current_app.app_context()`
+2. **Tool Result Propagation**: Ensure tool outputs are included in LLM prompts
+3. **Session Persistence**: Consider Redis/database for cross-process session state
+4. **Response Validation**: Add checks to ensure data values appear in explanations
+
+---
+
+## TPR Upload Rigidity Investigation (July 23, 2025)
+
+### Problem Statement
+User reported that "NMEP TPR and LLIN 2024_16072025.xlsx" fails to upload despite containing TPR data.
+
+### Root Causes Identified
+
+#### 1. Hardcoded Sheet Name
+- TPR parser requires sheet named 'raw' (line 78 in nmep_parser.py)
+- New file has 'Sheet1' → immediately rejected
+- No attempt to check other sheets for TPR data
+
+#### 2. Column Naming Convention Changes
+Working files use:
+- State, LGA, Ward, Health Faccility
+
+New format uses:
+- orgunitlevel2 (State)
+- orgunitlevel3 (LGA)
+- orgunitlevel4 (Ward)
+- orgunitlevel5 (Facility)
+
+#### 3. Column Mapper Gaps
+- No mappings for 'orgunitlevel' columns
+- System can't translate new format to standard names
+- Would fail even if sheet name was fixed
+
+#### 4. Missing Critical Columns
+- No 'level' column (Primary/Secondary/Tertiary)
+- No 'ownership' column
+- These are required for facility filtering
+
+### Technical Details
+
+**File Detection Logic**:
+```python
+# Current (rigid)
+if 'raw' not in excel_file.sheet_names:
+    return False
+
+# Should be (flexible)
+for sheet in excel_file.sheet_names:
+    if has_tpr_columns(sheet):
+        return True
+```
+
+**Column Mapping Gaps**:
+- 'state' mappings: ['State', 'state', 'STATE', 'State Name']
+- Missing: 'orgunitlevel2', 'State/Province', 'Region'
+
+### Impact Analysis
+
+1. **Data Rejection Rate**: Unknown percentage of valid NMEP files rejected
+2. **User Workarounds**: Manual file editing required
+3. **Scalability Issue**: Each new format requires code changes
+4. **Error Messaging**: Users get "not a TPR file" with no details
+
+### Lessons Learned
+
+1. **Assume Variability**: Government data formats change frequently
+2. **Detection Over Validation**: Find TPR data wherever it exists
+3. **Graceful Degradation**: Work with partial data when possible
+4. **User Feedback**: Explain exactly what's missing/wrong
+
+### Anti-Patterns Found
+
+1. **Sheet Name Hardcoding**: Assuming consistent sheet naming
+2. **Exact Column Matching**: No fuzzy matching or alternatives
+3. **All-or-Nothing Validation**: Complete rejection vs. partial functionality
+4. **Silent Failures**: No diagnostic information for users
+
+---
+
+## TPR to Risk Analysis Workflow Issues (July 23, 2025)
+
+### Issue 1: TPR Map Uniform Purple Color
+
+**Problem**: TPR distribution map shows all wards in same purple color despite values ranging from 29.7% to 97.6%
+
+**Root Cause**: 
+- Visualization code caps color scale at 50% (`zmax=50`)
+- 218 out of 226 wards (96.5%) have TPR > 50%
+- All values above 50% rendered as maximum purple
+
+**Code Location**: `app/tpr_module/services/tpr_visualization_service.py`, line 115
+
+### Issue 2: Ward Name Mismatches (20% Data Loss)
+
+**Problem**: 46 wards have mismatched names between TPR data and shapefile
+
+**Types of Mismatches**:
+1. **Space vs Hyphen**: "Mayo Lope" vs "Mayo-Lope" (7 wards)
+2. **Slash formatting**: "Bazza Margi" vs "Bazza/Margi" (10+ wards)
+3. **Roman numerals**: "Girei 1" vs "Girei I" (2 wards)
+4. **Spelling variations**: "Betso" vs "Besto", "Gabon" vs "Gabun" (15+ wards)
+5. **Special characters**: "Gaanda" vs "Ga'anda"
+6. **LGA disambiguation**: "Lamurde" vs "Lamurde (Lamurde)" & "Lamurde (Mubi South)"
+
+**Impact**:
+- 20.4% of wards show as blank on maps
+- ITN planning matched only 1 of 224 wards
+- Risk analysis missing data for mismatched wards
+
+### Lessons Learned
+
+1. **Color Scale Design**: Always check data distribution before setting scale limits
+2. **Data Standardization**: Ward names must be standardized at data entry
+3. **Fuzzy Matching**: Exact string matching too brittle for real-world data
+
+---
+
+## TPR to Risk to ITN Workflow Investigation (July 23, 2025)
+
+### Investigation Summary
+
+Investigated 6 critical issues reported during Osun State analysis workflow:
+
+### Issue 1: TPR Map Missing Areas ✓ RESOLVED
+**Observation**: TPR map shows data correctly but appears zoomed out
+**Finding**: Map is correctly generated but view extends beyond state boundaries showing neighboring areas as blank/white
+**File**: `tpr_distribution_map_osun_state.html` (940KB)
+
+### Issue 2: Missing Download Files ✓ IDENTIFIED
+**Problem**: "No files available" shown in download tab after analysis
+**Finding**: All files are generated in session directory but download UI not populated
+**Files Generated**:
+- TPR analysis CSV files
+- Risk analysis files (composite scores, PCA scores, vulnerability rankings)
+- Unified dataset with all variables
+- But visualization serving issue prevents download listing
+
+### Issue 3: Data Quality 1970 Missing Values ✓ INVESTIGATED
+**Problem**: Data quality check reports suspicious "1970 total missing values"
+**Finding**: Actual missing values in Osun data:
+- Unified dataset: 559 empty fields
+- Analysis cleaned data: fewer missing values
+- The 1970 number source not found in code - likely calculated dynamically
+**Note**: Number seems unrealistic for 322 wards × ~15 variables dataset
+
+### Issue 4: Fallback Summary 322 Wards ✓ SOLVED
+**Problem**: Summary shows "322 wards" instead of Adamawa-specific summary
+**Root Cause**: System processing Osun State data (322 wards) not Adamawa (226 wards)
+**Evidence**: `unified_dataset.csv` has 323 lines (322 wards + header) with state code "OS"
+
+### Issue 5: Blank Vulnerability Map ✓ PARTIALLY SOLVED
+**Problem**: Vulnerability map appears blank in browser
+**Finding**: Map file generated successfully
+- File: `vulnerability_map_composite_20250723_194331.html` (6MB)
+- Location: Main session directory, not in visualizations subfolder
+- Issue: Frontend display or file serving problem, not generation
+
+### Issue 6: Blank ITN Distribution Map ✓ PARTIALLY SOLVED
+**Problem**: ITN distribution map appears blank
+**Finding**: Map file generated successfully
+- File: `itn_map_272baf03-653b-4371-846e-1bc1f71e03cd.html` (527KB)
+- Location: `app/static/visualizations/`
+- ITN calculation completed: 1,506,250 nets allocated to 127 wards
+- Issue: Frontend display problem, not generation
+
+### Key Findings
+
+1. **File Generation Working**: All backend processes complete successfully
+2. **Frontend Issues**: Maps generated but not displaying properly
+3. **Session Confusion**: System correctly processing Osun data, not Adamawa
+4. **File Organization**: Vulnerability maps in session root, ITN maps in static/visualizations
+5. **Data Quality**: Missing value count calculation needs investigation
+
+### Next Steps Recommended
+
+1. Fix frontend map display issues
+2. Implement proper file listing for downloads
+3. Investigate data quality calculation logic
+4. Ensure maps are served from correct locations
+5. Add better session state management
+
+## TPR Ward Name Mismatch Analysis (2025-07-23)
+
+### Problem Statement
+During TPR workflow on AWS, ward names in TPR data have misspellings/variations that don't match the shapefile ward names, causing data merge failures.
+
+### Investigation Findings
+
+#### 1. Current Ward Name Matching Implementation
+The TPR module has three different normalization approaches:
+
+1. **In `tpr_pipeline.py`** (lines 341-342):
+   - Simple uppercase + strip normalization
+   - Direct merge on normalized names
+   - No fuzzy matching
+
+2. **In `shapefile_extractor.py`** (lines 300-311):
+   - More sophisticated normalization:
+     - Uppercase + strip
+     - Removes words: 'WARD', 'LGA', 'STATE'
+     - Cleans multiple spaces
+   - Uses `difflib.get_close_matches` for fuzzy matching with 0.7 cutoff
+
+3. **In `tpr_visualization_service.py`** (lines 228-250):
+   - Different normalization approach:
+     - Lowercase (inconsistent with others using uppercase)
+     - Removes special characters
+     - Removes 'ward' suffix
+   - Uses `SequenceMatcher` for fuzzy matching
+
+#### 2. Key Issues Identified
+
+1. **Inconsistent Normalization**: Different modules use different normalization strategies (uppercase vs lowercase, different word removals)
+
+2. **Limited Fuzzy Matching**: 
+   - Only `shapefile_extractor.py` and `tpr_visualization_service.py` have fuzzy matching
+   - The main pipeline in `tpr_pipeline.py` uses exact matching only
+   - Different similarity thresholds (0.7 vs 0.85)
+
+3. **No Common Misspelling Database**: No system to handle known common variations
+
+4. **Merge Happens at Multiple Points**:
+   - In `tpr_pipeline._match_with_shapefile()` 
+   - In `output_generator._add_shapefile_data()`
+   - In `tpr_visualization_service._merge_with_fuzzy_matching()`
+
+### Proposed Solution
+
+Create a centralized `WardNameMatcher` utility that:
+1. Provides consistent normalization across all modules
+2. Implements robust fuzzy matching with configurable thresholds
+3. Maintains a database of common misspellings/variations
+4. Logs all matches for debugging and improvement
+5. Can be easily integrated into existing merge operations
+
+### Implementation Plan
+1. Create `app/tpr_module/utils/ward_name_matcher.py`
+2. Update `tpr_pipeline._match_with_shapefile()` to use new matcher
+3. Update `output_generator` and `tpr_visualization_service` to use consistent matching
+4. Add logging for unmatched wards to identify patterns
+5. Test with real TPR data showing mismatches
+
+### Implementation Completed (2025-07-23)
+
+Enhanced `app/tpr_module/core/tpr_pipeline.py` with fuzzy matching:
+
+1. **Added Import**: `from difflib import SequenceMatcher, get_close_matches`
+
+2. **Created `_normalize_ward_name()` method**:
+   - Converts to uppercase for consistency
+   - Removes common words: 'WARD', 'WARDS', 'LGA', 'STATE'
+   - Removes special characters and brackets
+   - Cleans multiple spaces
+
+3. **Enhanced `_match_with_shapefile()` method**:
+   - First attempts exact match with enhanced normalization
+   - For unmatched wards, applies fuzzy matching with 0.85 threshold
+   - Logs all matches (exact, fuzzy, failed) for debugging
+   - Provides detailed statistics
+
+4. **Key Features**:
+   - Backward compatible - exact matches still work
+   - Configurable similarity threshold (currently 0.85)
+   - Detailed logging for debugging and improvement
+   - Handles geometry and other shapefile columns properly
+
+5. **Expected Benefits**:
+   - Should catch common misspellings like "Jauben" vs "Jauban"
+   - Handles variations in spacing and punctuation
+   - Provides visibility into matching process through logs
+
+### Next Steps
+- Deploy to AWS and test with real TPR data showing mismatches
+- Monitor logs to identify any remaining unmatched patterns
+- Consider adjusting similarity threshold based on results
+- May need to add specific misspelling database if patterns emerge
+
+## TPR Issues Investigation (2025-07-23)
+
+### Issues Found After Deployment:
+
+#### 1. Ward Matching Enhancement Works But Some Issues Remain
+- **Success**: Fuzzy matching is working - 226 wards were analyzed (all Adamawa wards)
+- **Issue**: Map still shows some green areas (no data)
+- **Root Cause**: Geometry not properly preserved in output files
+- **Evidence**: 
+  - `Adamawa_State_TPR_Analysis_20250723.csv` has no geometry column
+  - `Adamawa_plus.csv` also missing geometry column
+  - All 226 wards present in data but can't be mapped without geometry
+
+#### 2. Risk Analysis Transition Failure
+- **Problem**: When user says "yes" to proceed to risk analysis, system loses context
+- **Root Cause**: Session mismatch - files created under session `a8b3239d...` but API checking different session `56f048d5...`
+- **Evidence**: Console shows generic "no data uploaded" message after transition attempt
+- **Missing Logic**: Request interpreter doesn't detect TPR completion state to trigger `transition_tpr_to_risk()`
+
+#### 3. Download Tab Empty
+- **Problem**: "No download links available" despite successful TPR completion
+- **Root Cause**: Session mismatch - download links stored in old session, not accessible in new session
+- **Evidence**: `/api/tpr/download-links` returns empty array with different session ID
+
+### Key Finding: Session Management Issue
+The core problem is session persistence across the TPR workflow:
+1. TPR analysis completes successfully
+2. Files are created and stored
+3. But when user responds "yes", a new session is created
+4. New session has no knowledge of TPR completion or file locations
+5. Risk transition logic exists but never gets triggered
+
+### Recommended Fixes:
+1. **Immediate**: Fix session persistence to maintain context after TPR completion
+2. **Ward Matching**: Ensure geometry is preserved in output files
+3. **Transition Logic**: Add TPR completion detection to request interpreter
+4. **Download Links**: Ensure links persist in session across requests
+
+## Session Persistence Solution Implemented (2025-07-23)
+
+### Problem Analysis
+The core issue was session data not persisting across requests in AWS's multi-worker environment. When users responded "yes" after TPR completion, a new session was created, losing all TPR context.
+
+### Solution: File-Based Session Persistence
+
+#### 1. Created File-Based Session Store (`app/core/file_session_store.py`)
+- Implements a file-based session storage mechanism that works across multiple Gunicorn workers
+- Uses file locking (fcntl) for thread-safe operations across processes
+- Automatic session expiration and cleanup (24-hour TTL by default)
+- JSON-based storage with atomic writes using temp files and rename
+- Session files stored in `/tmp/chatmrpt_sessions/` with MD5-hashed filenames
+
+Key methods:
+```python
+- get(session_id, key, default=None): Retrieve a value
+- set(session_id, key, value): Store a value
+- get_all(session_id): Get all session data
+- update(session_id, data): Update multiple values
+- delete(session_id, key=None): Delete key or entire session
+```
+
+#### 2. Enhanced TPR Handler (`app/tpr_module/integration/tpr_handler.py`)
+Modified to store critical state in both Flask session and file-based session:
+
+- **On TPR activation** (lines 146-160):
+  - Stores workflow flags, session ID, and initial state
+  - Ensures persistence across worker processes
+
+- **On download link generation** (lines 614-628):
+  - Stores download links, completion flags, and output paths
+  - Maintains data for cross-request access
+
+- **On risk transition** (lines 640-654):
+  - Clears workflow flags from both sessions
+  - Marks transition as complete
+
+#### 3. Request Interpreter Enhancement (`app/core/request_interpreter.py`)
+Added file-based session checking for TPR completion detection (lines 1702-1724):
+- Checks both Flask session and file session for TPR completion
+- Restores session data if found in file storage
+- Ensures "yes" response triggers risk analysis transition
+
+#### 4. TPR Routes Session Recovery (`app/web/routes/tpr_routes.py`)
+Enhanced endpoints to check file-based sessions:
+
+- **`/api/tpr/status`** (lines 36-54): Checks and restores TPR workflow state
+- **`/api/tpr/process`** (lines 93-113): Recovers workflow state and TPR data
+- **`/api/tpr/download-links`** (lines 199-214): Recovers download links from file session
+
+#### 5. Geometry Preservation Fix (`app/tpr_module/output/output_generator.py`)
+- Fixed CSV output to properly include all identifier columns
+- Maintained geometry in GeoDataFrame for shapefile generation
+- Ensured proper column ordering in output files
+
+### Benefits of This Solution
+
+1. **Multi-Worker Safe**: Works reliably across multiple Gunicorn workers
+2. **Session Recovery**: Can recover state even if Flask session is lost
+3. **Atomic Operations**: Prevents data corruption with file locking
+4. **Automatic Cleanup**: Expired sessions removed automatically
+5. **Backward Compatible**: Gracefully falls back if file session unavailable
+6. **Performance**: Minimal overhead with in-memory caching potential
+
+### Testing Checklist
+
+- [ ] Upload TPR file and complete analysis
+- [ ] Verify map displays all wards (no green areas)
+- [ ] Respond "yes" to risk analysis prompt
+- [ ] Confirm transition to risk analysis workflow
+- [ ] Check download tab has all files available
+- [ ] Test with multiple concurrent sessions
+- [ ] Verify session persistence after page refresh
