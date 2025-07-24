@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import plotly.graph_objects as go
 from pandas.api.types import is_datetime64_any_dtype
+from app.data.population_data.itn_population_loader import get_population_loader
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,14 @@ def detect_state(data_handler) -> str:
         'KB': 'Kebbi',
         'SO': 'Sokoto',
         'ZA': 'Zamfara',
-        'JI': 'Jigawa'
+        'JI': 'Jigawa',
+        'AD': 'Adamawa',
+        'DT': 'Delta',
+        'KD': 'Kaduna',
+        'KW': 'Kwara',
+        'NG': 'Niger',
+        'TR': 'Taraba',
+        'YB': 'Yobe'
     }
     
     # Check shapefile data first
@@ -57,6 +65,34 @@ def detect_state(data_handler) -> str:
 
 def load_population_data(state: str) -> Optional[pd.DataFrame]:
     """Load and aggregate population data for the state."""
+    loader = get_population_loader()
+    
+    # Try new format first
+    pop_df = loader.load_state_population(state, use_new_format=True)
+    
+    if pop_df is not None:
+        # New format data is already clean with Ward, LGA, Population
+        logger.info(f"Using new cleaned population data for {state}")
+        
+        # Create output format matching old function's return
+        ward_population = pop_df.copy()
+        ward_population.columns = ['WardName', 'AdminLevel2', 'Population']
+        
+        # Add dummy coordinates for now (will be matched from shapefile)
+        ward_population['AvgLatitude'] = np.nan
+        ward_population['AvgLongitude'] = np.nan
+        
+        # Add lowercase version for case-insensitive matching
+        ward_population['WardName_lower'] = ward_population['WardName'].str.lower()
+        
+        logger.info(f"Loaded population data for {len(ward_population)} wards in {state}")
+        logger.info(f"Total population: {ward_population['Population'].sum():,.0f}")
+        
+        return ward_population
+    
+    # Fall back to old format processing
+    logger.info(f"New format not available for {state}, trying old format")
+    
     # Check both xlsx and csv formats
     xlsx_path = f'app/data/population_data/pbi_distribution_{state}.xlsx'
     csv_path = f'app/data/population_data/pbi_distribution_{state}.csv'

@@ -1375,4 +1375,150 @@ Session persistence now works correctly with:
 - Single worker for in-memory consistency
 - Proper session marking for filesystem storage
 - Consistent cookie naming and handling
-- [ ] Verify session persistence after page refresh
+- [x] Verify session persistence after page refresh
+
+## TPR to Risk Analysis Transition Fix (2025-01-09)
+
+### Issue
+After TPR analysis completion, when user types "yes" in response to "Would you like to proceed to the risk analysis?", the system immediately runs risk analysis instead of showing the data exploration menu.
+
+### Investigation
+User logs showed:
+- Line 390-397: User types "yes" after TPR completion
+- Line 402-413: System immediately shows "✅ Analysis Complete in 10.7 seconds!"
+
+### Root Cause
+1. When TPR completes, `risk_transition.py` sets `session['should_ask_analysis_permission'] = True`
+2. The TPR completion message asks "Would you like to proceed to the risk analysis?"
+3. When user says "yes", `request_interpreter.py` detects this as a confirmation message
+4. Because `should_ask_analysis_permission` flag is true, it immediately runs `_execute_automatic_analysis()`
+5. This bypasses the normal data exploration menu
+
+### Solution
+1. **Removed permission flag** from TPR transition:
+   - In `risk_transition.py` line 125: Commented out `session['should_ask_analysis_permission'] = True`
+   - In `risk_transition.py` line 155: Removed from SessionStateManager update
+   
+2. **Updated TPR completion message** to show exploration menu:
+   - Changed from: "Would you like to proceed to the risk analysis?"
+   - Changed to: "What would you like to do next?" with menu options
+   - This matches the standard data upload flow
+
+### Result
+Now when user completes TPR and says "yes", they see the data exploration menu instead of automatic analysis execution. This gives users control over what they want to do next.
+
+## TPR Workflow Transition - Generic LLM Response Issue (2025-07-24)
+
+### Problem
+After initial fix, user reported still getting generic LLM response "Could you please clarify your request?" when saying "yes" after TPR completion, instead of the exploration menu.
+
+### Investigation  
+Browser console logs showed:
+- TPR analysis completed successfully
+- User said "yes" to proceed (line 392)
+- Got generic response (line 404-407)
+- Missing expected console log "🎯 TPR complete - triggering data exploration menu"
+- `trigger_data_uploaded` flag not being passed to frontend
+
+### Root Cause
+Found two different code paths for TPR completion:
+1. `_generate_outputs_and_files` method (sets trigger flag correctly)
+2. `_run_tpr_analysis` method (doesn't set trigger flag)
+
+User's workflow was going through `_run_tpr_analysis` which didn't include the trigger.
+
+### Additional Issues Found
+1. Workflow stage inconsistency: checking for 'complete' but setting 'completed'
+2. Missing trigger flag in response object from `_run_tpr_analysis`
+
+### Solution Applied
+1. **Added trigger flag setup in `_run_tpr_analysis`** (lines 342-346):
+   ```python
+   session.pop('tpr_workflow_active', None)
+   session.pop('tpr_session_id', None)  
+   session['trigger_data_uploaded'] = True
+   session.modified = True
+   ```
+
+2. **Fixed workflow stage consistency**:
+   - Changed from 'completed' to 'complete' throughout
+   - Updated in state manager, response object, and status check
+
+3. **Added trigger flag to response**:
+   - Line 367: Added `'trigger_data_uploaded': session.get('trigger_data_uploaded', False)`
+
+### Result
+Now both TPR completion paths properly trigger the exploration menu:
+- TPR completion sets `trigger_data_uploaded` flag
+- Frontend detects flag and waits 2 seconds
+- Automatically sends `__DATA_UPLOADED__` message
+- User sees standard exploration menu without hardcoding
+
+## TPR Transition Simple Fix - Missing user_message Assignment (2025-07-24)
+
+### Problem Still Persisting
+Despite all previous fixes, users still getting generic "It seems like you may have a question..." messages when saying "yes" after TPR completion.
+
+### Root Cause Discovery
+In `analysis_routes.py`, when TPR router returns `__DATA_UPLOADED__`:
+- Code clears TPR session flags
+- Code says "Let it fall through to normal processing"
+- BUT doesn't set `user_message = '__DATA_UPLOADED__'`
+- Main request interpreter processes original "yes" message instead
+
+### Simple Fix Applied
+Added one line in both transition conditions:
+```python
+# Set the message to trigger exploration menu
+user_message = '__DATA_UPLOADED__'
+```
+
+### Result
+- TPR router returns `__DATA_UPLOADED__` for transition
+- analysis_routes sets user_message to `__DATA_UPLOADED__`
+- Request interpreter processes this special trigger
+- User sees exploration menu as expected
+
+### Key Learning
+When implementing "fall through" logic, ensure the message being processed is updated, not just the session state.
+
+## ITN Population Data Integration (2025-07-24)
+
+### Problem
+The team provided cleaned ITN population data files with simpler structure (Ward, LGA, Population) to replace the complex distribution data format that required aggregation from household/distribution records.
+
+### Solution Implemented
+
+#### 1. Created Population Data Loader (`app/data/population_data/itn_population_loader.py`)
+- Singleton loader with caching for performance
+- Supports both new cleaned format and old distribution format
+- Dynamic state detection with fuzzy ward name matching
+- Methods:
+  - `get_available_states()` - Lists states with data
+  - `load_state_population()` - Loads data with format selection
+  - `get_ward_populations()` - Returns ward-to-population mapping
+  - `match_ward_names()` - Handles name variations
+
+#### 2. Updated ITN Pipeline (`app/analysis/itn_pipeline.py`)
+- Modified `load_population_data()` to use new loader
+- Tries new format first, falls back to old if unavailable
+- Added support for 9 new states (Adamawa, Delta, Kaduna, Katsina, Kwara, Niger, Osun, Taraba, Yobe)
+- Maintains backward compatibility with existing data
+
+#### 3. Benefits
+- **Simpler Data**: Direct population counts instead of household aggregation
+- **Better Accuracy**: Pre-cleaned data reduces errors
+- **Faster Processing**: No complex aggregation needed
+- **More States**: Support for 9 additional Nigerian states
+
+### Deployment
+- Files copied to AWS EC2 instance
+- New data directory: `/home/ec2-user/ChatMRPT/www/ITN/ITN/`
+- Application restarted successfully
+- Tested and confirmed working
+
+### Testing Results
+- Kaduna: 255 wards, 11.3M population
+- Osun: 332 wards, 7.1M population  
+- All 9 states loaded successfully
+- Backward compatibility maintained
