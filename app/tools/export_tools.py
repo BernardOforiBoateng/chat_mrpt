@@ -122,7 +122,7 @@ class ExportITNResults(BaseTool):
             message = self._format_export_summary(export_data, len(exported_files), package_size_mb)
             
             # Create web path for download
-            web_path = f"/download/{session_id}/{os.path.basename(zip_path)}"
+            web_path = f"/export/download/{session_id}/{os.path.basename(zip_path)}"
             
             result_data = {
                 'export_path': zip_path,
@@ -200,13 +200,24 @@ class ExportITNResults(BaseTool):
             gdf = export_data['unified_dataset']
             itn_results = export_data['itn_results']
             
-            # Select relevant columns for export
+            # Select ALL relevant columns for comprehensive export
             export_columns = [
+                # Location info
                 'ward_name', 'lga_name', 'state',
+                # Composite analysis
                 'composite_score', 'composite_rank', 'composite_category',
-                'population', 'urbanPercentage',
+                # PCA analysis
+                'pca_score', 'pca_rank', 'pca_category',
+                # Key demographics
+                'population', 'households', 'urbanPercentage',
+                # Health indicators
+                'TPR', 'U5_population', 
+                # ITN distribution
                 'nets_allocated', 'nets_needed', 'coverage_percent',
-                'allocation_phase'
+                'allocation_phase',
+                # Risk factors (if available)
+                'malaria_prevalence', 'poverty_rate', 'improved_housing',
+                'improved_sanitation', 'safe_water'
             ]
             
             # Filter to existing columns
@@ -220,6 +231,16 @@ class ExportITNResults(BaseTool):
                 # This would merge the ITN allocation results
                 # For now, we'll use what's in the unified dataset
                 pass
+            
+            # Add calculated columns if not present
+            if 'households' not in export_df.columns and 'population' in export_df.columns:
+                # Estimate households based on average household size
+                avg_household_size = 4  # Default, could be from config
+                export_df['households'] = (export_df['population'] / avg_household_size).round().astype(int)
+            
+            if 'nets_needed' not in export_df.columns and 'households' in export_df.columns:
+                # Calculate nets needed (2 nets per household standard)
+                export_df['nets_needed'] = export_df['households'] * 2
             
             # Sort by composite rank
             if 'composite_rank' in export_df.columns:
@@ -253,44 +274,277 @@ class ExportITNResults(BaseTool):
             return None
     
     def _create_dashboard_html(self, export_data: Dict[str, Any]) -> str:
-        """Create dashboard HTML content"""
-        # Placeholder for now - will be replaced with actual template
+        """Create comprehensive and creative dashboard HTML content"""
         stats = export_data.get('summary_stats', {})
+        gdf = export_data['unified_dataset']
+        itn_results = export_data.get('itn_results', {})
+        
+        # Calculate additional insights
+        high_risk_count = len(gdf[gdf['composite_category'] == 'High Risk']) if 'composite_category' in gdf.columns else 0
+        very_high_risk_count = len(gdf[gdf['composite_category'] == 'Very High Risk']) if 'composite_category' in gdf.columns else 0
+        
+        # Get top 10 wards
+        top_wards_html = ""
+        if 'composite_rank' in gdf.columns and 'ward_name' in gdf.columns:
+            top_10 = gdf.nsmallest(10, 'composite_rank')[['ward_name', 'lga_name', 'composite_score', 'composite_rank', 'population']]
+            top_wards_html = "<h3>🎯 Top 10 Highest Risk Wards</h3><table class='data-table'><tr><th>Rank</th><th>Ward</th><th>LGA</th><th>Risk Score</th><th>Population</th></tr>"
+            for _, row in top_10.iterrows():
+                top_wards_html += f"<tr><td>{int(row['composite_rank'])}</td><td>{row['ward_name']}</td><td>{row['lga_name']}</td><td>{row['composite_score']:.3f}</td><td>{int(row['population']):,}</td></tr>"
+            top_wards_html += "</table>"
         
         html = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <title>ITN Distribution Analysis - {export_data.get('session_id', 'Results')}</title>
+            <title>ITN Distribution Analysis Dashboard - {export_data.get('session_id', 'Results')}</title>
             <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                .header {{ background: #2c3e50; color: white; padding: 20px; border-radius: 5px; }}
-                .summary {{ margin: 20px 0; }}
-                .card {{ background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; }}
+                * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+                body {{ 
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                    color: #333;
+                    line-height: 1.6;
+                    padding: 20px;
+                }}
+                .container {{ max-width: 1200px; margin: 0 auto; }}
+                
+                /* Header */
+                .header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 40px;
+                    border-radius: 20px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                    text-align: center;
+                    margin-bottom: 30px;
+                }}
+                .header h1 {{
+                    font-size: 2.5em;
+                    margin-bottom: 10px;
+                    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                }}
+                .header p {{ font-size: 1.2em; opacity: 0.9; }}
+                
+                /* Grid Layout */
+                .grid {{ 
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }}
+                
+                /* Cards */
+                .card {{
+                    background: white;
+                    padding: 25px;
+                    border-radius: 15px;
+                    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+                    transition: transform 0.3s ease;
+                }}
+                .card:hover {{ transform: translateY(-5px); }}
+                
+                .card h3 {{
+                    color: #667eea;
+                    margin-bottom: 15px;
+                    font-size: 1.3em;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }}
+                
+                /* Impact Cards */
+                .impact-card {{
+                    background: linear-gradient(45deg, #11998e, #38ef7d);
+                    color: white;
+                    text-align: center;
+                }}
+                .impact-number {{
+                    font-size: 3em;
+                    font-weight: bold;
+                    margin: 10px 0;
+                }}
+                .impact-label {{ font-size: 1.1em; opacity: 0.9; }}
+                
+                /* Risk Cards */
+                .risk-card {{ background: linear-gradient(45deg, #ee0979, #ff6a00); color: white; }}
+                .coverage-card {{ background: linear-gradient(45deg, #4facfe, #00f2fe); color: white; }}
+                
+                /* Data Tables */
+                .data-table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 15px;
+                }}
+                .data-table th {{
+                    background: #667eea;
+                    color: white;
+                    padding: 10px;
+                    text-align: left;
+                }}
+                .data-table td {{
+                    padding: 10px;
+                    border-bottom: 1px solid #eee;
+                }}
+                .data-table tr:hover {{ background: #f5f5f5; }}
+                
+                /* Progress Bar */
+                .progress-bar {{
+                    background: #e0e0e0;
+                    height: 30px;
+                    border-radius: 15px;
+                    overflow: hidden;
+                    margin: 15px 0;
+                }}
+                .progress-fill {{
+                    background: linear-gradient(90deg, #667eea, #764ba2);
+                    height: 100%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: white;
+                    font-weight: bold;
+                }}
+                
+                /* Insights Section */
+                .insights {{
+                    background: white;
+                    padding: 30px;
+                    border-radius: 15px;
+                    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+                    margin-bottom: 30px;
+                }}
+                .insight-item {{
+                    display: flex;
+                    align-items: start;
+                    margin: 15px 0;
+                    padding: 15px;
+                    background: #f8f9fa;
+                    border-radius: 10px;
+                    border-left: 4px solid #667eea;
+                }}
+                .insight-icon {{ font-size: 1.5em; margin-right: 15px; }}
+                
+                /* Footer */
+                .footer {{
+                    text-align: center;
+                    padding: 20px;
+                    color: #666;
+                    font-size: 0.9em;
+                }}
+                
+                /* Responsive */
+                @media (max-width: 768px) {{
+                    .header h1 {{ font-size: 2em; }}
+                    .grid {{ grid-template-columns: 1fr; }}
+                }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>ITN Distribution Analysis Results</h1>
-                <p>Generated: {export_data['export_date'].strftime('%Y-%m-%d %H:%M')}</p>
-            </div>
-            
-            <div class="summary">
-                <h2>Summary Statistics</h2>
-                <div class="card">
-                    <h3>Distribution Overview</h3>
-                    <ul>
-                        <li>Total Nets Available: {stats.get('total_nets', 'N/A'):,}</li>
-                        <li>Nets Allocated: {stats.get('allocated', 'N/A'):,}</li>
-                        <li>Population Coverage: {stats.get('coverage_percent', 'N/A')}%</li>
-                        <li>Prioritized Wards: {stats.get('prioritized_wards', 'N/A')}</li>
-                    </ul>
+            <div class="container">
+                <div class="header">
+                    <h1>🦟 ITN Distribution Analysis Dashboard</h1>
+                    <p>Comprehensive Malaria Risk Assessment & Net Distribution Plan</p>
+                    <p>Generated: {export_data['export_date'].strftime('%B %d, %Y at %I:%M %p')}</p>
                 </div>
-            </div>
-            
-            <div class="note">
-                <p><em>Full dashboard with interactive maps will be available in the next update.</em></p>
+                
+                <div class="grid">
+                    <div class="card impact-card">
+                        <h3>👥 Population Impact</h3>
+                        <div class="impact-number">{stats.get('covered_population', 0):,}</div>
+                        <div class="impact-label">People Protected</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: {stats.get('coverage_percent', 0)}%">
+                                {stats.get('coverage_percent', 0)}% Coverage
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card risk-card">
+                        <h3>⚠️ High Risk Wards</h3>
+                        <div class="impact-number">{high_risk_count + very_high_risk_count}</div>
+                        <div class="impact-label">Wards Need Urgent Intervention</div>
+                        <p style="margin-top: 10px; font-size: 0.9em;">
+                            Very High Risk: {very_high_risk_count}<br>
+                            High Risk: {high_risk_count}
+                        </p>
+                    </div>
+                    
+                    <div class="card coverage-card">
+                        <h3>🛏️ Net Distribution</h3>
+                        <div class="impact-number">{stats.get('allocated', 0):,}</div>
+                        <div class="impact-label">Nets Allocated</div>
+                        <p style="margin-top: 10px; font-size: 0.9em;">
+                            {stats.get('fully_covered_wards', 0)} wards with 100% coverage<br>
+                            {stats.get('partially_covered_wards', 0)} wards partially covered
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="insights">
+                    <h2>📊 Key Insights & Recommendations</h2>
+                    
+                    <div class="insight-item">
+                        <span class="insight-icon">🎯</span>
+                        <div>
+                            <strong>Strategic Focus:</strong> The distribution plan prioritizes {stats.get('prioritized_wards', 0)} wards 
+                            with the highest malaria risk scores. These wards represent areas with critical combinations of 
+                            high malaria prevalence, poor housing conditions, and vulnerable populations.
+                        </div>
+                    </div>
+                    
+                    <div class="insight-item">
+                        <span class="insight-icon">📈</span>
+                        <div>
+                            <strong>Coverage Analysis:</strong> With {stats.get('total_nets', 0):,} nets available, 
+                            we achieve {stats.get('coverage_percent', 0)}% population coverage. This focused approach ensures 
+                            maximum impact in the highest-risk areas, though {100 - stats.get('coverage_percent', 0):.1f}% 
+                            of the population remains uncovered.
+                        </div>
+                    </div>
+                    
+                    <div class="insight-item">
+                        <span class="insight-icon">💡</span>
+                        <div>
+                            <strong>Next Steps:</strong> Consider supplementary interventions for uncovered areas including 
+                            indoor residual spraying (IRS), community education programs, and environmental management to 
+                            reduce mosquito breeding sites.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    {top_wards_html}
+                </div>
+                
+                <div class="card">
+                    <h3>📈 Distribution Statistics</h3>
+                    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                        <div>
+                            <strong>Total Wards:</strong> {export_data['total_wards']}<br>
+                            <strong>Wards Receiving Nets:</strong> {stats.get('prioritized_wards', 0)}<br>
+                            <strong>Analysis Method:</strong> {export_data['analysis_method'].title()}
+                        </div>
+                        <div>
+                            <strong>Avg Ward Coverage:</strong> {stats.get('ward_coverage_stats', {{}}).get('avg_coverage_percent', 0):.1f}%<br>
+                            <strong>Min Coverage:</strong> {stats.get('ward_coverage_stats', {{}}).get('min_coverage_percent', 0):.1f}%<br>
+                            <strong>Max Coverage:</strong> {stats.get('ward_coverage_stats', {{}}).get('max_coverage_percent', 0):.1f}%
+                        </div>
+                        <div>
+                            <strong>Total Population:</strong> {stats.get('total_population', 0):,}<br>
+                            <strong>Protected Population:</strong> {stats.get('covered_population', 0):,}<br>
+                            <strong>Remaining Nets:</strong> {stats.get('remaining', 0):,}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="footer">
+                    <p>This report was generated using advanced malaria risk analysis algorithms combining 
+                    composite scoring and PCA methodologies. For detailed ward-level data, please refer to 
+                    the accompanying CSV file.</p>
+                    <p><strong>ChatMRPT</strong> - Malaria Risk Prioritization Tool | {export_data['export_date'].strftime('%Y')}</p>
+                </div>
             </div>
         </body>
         </html>

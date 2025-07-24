@@ -246,10 +246,10 @@ class RequestInterpreter:
                         # Flag to toggle interpretation (easy to disable if needed)
                         ENABLE_INTERPRETATION = True
 
-                        def _yield_interpretation(raw_output: str):
+                        def _yield_interpretation(raw_output: str, tools_used_list: list):
                             """Utility to generate and yield interpretation chunks."""
                             if not ENABLE_INTERPRETATION:
-                                yield {'content': '', 'status': 'success', 'done': True}
+                                yield {'content': '', 'status': 'success', 'tools_used': tools_used_list, 'done': True}
                                 return
                             try:
                                 interpretation = self._interpret_raw_output(
@@ -262,41 +262,45 @@ class RequestInterpreter:
                                     yield {
                                         'content': interpretation,
                                         'status': 'success',
+                                        'tools_used': tools_used_list,
                                         'done': True
                                     }
                                 else:
-                                    yield {'content': '', 'status': 'success', 'done': True}
+                                    yield {'content': '', 'status': 'success', 'tools_used': tools_used_list, 'done': True}
                             except Exception as interp_err:
                                 logger.error(f"Error during interpretation: {interp_err}")
                                 yield {
                                     'content': f"⚠️ Interpretation failed: {interp_err}",
                                     'status': 'error',
+                                    'tools_used': tools_used_list,
                                     'done': True
                                 }
 
                         # Handle structured dict response
                         if isinstance(result, dict) and 'response' in result:
+                            tools_list = result.get('tools_used', [function_name])
                             yield {
                                 'content': result['response'],
                                 'status': result.get('status', 'success'),
                                 'visualizations': result.get('visualizations', []),
-                                'tools_used': result.get('tools_used', [function_name]),
+                                'tools_used': tools_list,
                                 'done': False
                             }
-                            yield from _yield_interpretation(result['response'])
+                            yield from _yield_interpretation(result['response'], tools_list)
                             self._store_conversation(session_id, user_message, result['response'])
                             return
 
                         # Handle raw string response
                         else:
                             raw_output = result if isinstance(result, str) else str(result)
+                            tools_list = [function_name]
                             yield {
                                 'content': raw_output,
                                 'status': 'success',
-                                'tools_used': [function_name],
+                                'tools_used': tools_list,
                                 'done': False
                             }
-                            yield from _yield_interpretation(raw_output)
+                            yield from _yield_interpretation(raw_output, tools_list)
                             self._store_conversation(session_id, user_message, raw_output)
                             return
                         # ---------------------------------------------------------------------------

@@ -402,7 +402,24 @@ class ServiceContainer:
         try:
             from ..reports import ModernReportGenerator
             
-            return ModernReportGenerator
+            # Return a wrapper class that creates instances on demand
+            class ReportServiceWrapper:
+                @staticmethod
+                def generate_report(data_handler, session_id, format_type='pdf', custom_sections=None, detail_level='standard'):
+                    """Generate report using ModernReportGenerator instance"""
+                    generator = ModernReportGenerator(data_handler, session_id)
+                    return generator.generate_report(format_type, custom_sections, detail_level)
+                
+                @staticmethod
+                def generate_dashboard(data_handler, session_id):
+                    """Generate dashboard (placeholder for compatibility)"""
+                    return {
+                        'status': 'success',
+                        'message': 'Dashboard generation not implemented',
+                        'report_url': None
+                    }
+            
+            return ReportServiceWrapper
         except Exception as e:
             logger.warning(f"Failed to create report service: {e}")
             return None

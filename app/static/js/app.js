@@ -390,19 +390,9 @@ class ChatMRPTApp {
                         window.statusIndicator.updateStatus();
                     }
                     
-                    // USER WANTS PDF + DASHBOARD - Generate directly via chat
-                    this.chatManager.addSystemMessage('Generating your PDF report and interactive dashboard...');
-                    
-                    // Send message to generate PDF report (this will also create dashboard)
-                    const chatInput = DOMHelpers.getElementById('message-input');
-                    if (chatInput) {
-                        chatInput.value = 'Generate PDF report';
-                        // Trigger the send message functionality
-                        this.chatManager.sendMessage();
-                    } else {
-                        // Direct API call fallback
-                        this.generateReportDirectly();
-                    }
+                    // Generate report directly via API
+                    this.chatManager.addSystemMessage('Generating your comprehensive analysis report...');
+                    this.generateReportDirectly();
                     
                 } else {
                     // Analysis not complete
@@ -429,20 +419,30 @@ class ChatMRPTApp {
             const response = await fetch('/generate_report', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ format: 'pdf' })
+                body: JSON.stringify({ format: 'export' })
             });
             
             const result = await response.json();
             
             if (result.status === 'success') {
+                // Format the download button based on the content
+                let downloadButtonText = '📦 Download Export Package';
+                if (result.format === 'pdf') {
+                    downloadButtonText = '📄 Download PDF Report';
+                } else if (result.format === 'html') {
+                    downloadButtonText = '🌐 Download HTML Report';
+                }
+                
                 this.chatManager.addSystemMessage(`
-                    <strong>Report generated successfully!</strong><br>
-                    <a href="${result.download_url}" class="btn btn-primary" target="_blank">
-                        📄 Download PDF Report
-                    </a>
+                    <div class="report-success">
+                        <strong>✅ ${result.message || 'Report generated successfully!'}</strong><br><br>
+                        <a href="${result.download_url}" class="btn btn-primary btn-lg" target="_blank">
+                            ${downloadButtonText}
+                        </a>
+                    </div>
                 `);
             } else {
-                this.chatManager.addSystemMessage(`Error generating report: ${result.message}`);
+                this.chatManager.addSystemMessage(`❌ Error generating report: ${result.message}`);
             }
         } catch (error) {
             console.error('Error generating report directly:', error);

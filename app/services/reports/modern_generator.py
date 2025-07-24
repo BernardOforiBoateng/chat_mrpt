@@ -106,6 +106,7 @@ class ModernReportGenerator:
                     'session_id': self.session_id,
                     'file_path': result.data.get('export_path'),
                     'web_path': result.data.get('web_path'),
+                    'report_url': result.data.get('web_path'),  # For compatibility
                     'download_links': [{
                         'name': 'ITN Distribution Export Package',
                         'url': result.data.get('web_path'),
@@ -180,6 +181,7 @@ class ModernReportGenerator:
                 'session_id': self.session_id,
                 'file_path': str(zip_path),
                 'web_path': web_path,
+                'report_url': web_path,  # For compatibility
                 'download_links': [{
                     'name': 'Analysis Export Package',
                     'url': web_path,

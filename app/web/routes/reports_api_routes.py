@@ -128,7 +128,7 @@ def generate_report():
             response_data = {
                 'status': 'success',
                 'message': result['message'],
-                'download_url': result.get('report_url'),
+                'download_url': result.get('web_path') or result.get('report_url'),
                 'format': report_format,
                 'additional_files': additional_files
             }

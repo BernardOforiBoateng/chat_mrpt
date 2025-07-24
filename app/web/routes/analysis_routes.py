@@ -597,12 +597,17 @@ def send_message_streaming():
                     # Track streaming result for logging
                     final_chunk = None
                     response_content = ""
+                    tools_used = []
                     
                     # Use the actual streaming method
                     for chunk in request_interpreter.process_message_streaming(user_message, session_id, session_data):
                         # Accumulate content for logging
                         if chunk.get('content'):
                             response_content += chunk.get('content', '')
+                        
+                        # Track tools used
+                        if chunk.get('tools_used'):
+                            tools_used.extend(chunk.get('tools_used', []))
                         
                         # Track final chunk
                         if chunk.get('done'):
@@ -611,6 +616,29 @@ def send_message_streaming():
                         chunk_json = json.dumps(chunk)
                         logger.debug(f"Sending streaming chunk: {chunk_json}")
                         yield f"data: {chunk_json}\n\n"
+                    
+                    # CRITICAL: Update session state after streaming completes
+                    # This must happen in the request context
+                    from flask import session as flask_session
+                    if tools_used:
+                        # Update session state based on tools used
+                        if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
+                            flask_session['analysis_complete'] = True
+                            if 'runcompleteanalysis' in tools_used:
+                                flask_session['analysis_type'] = 'dual_method'
+                            elif 'run_composite_analysis' in tools_used:
+                                flask_session['analysis_type'] = 'composite'
+                            else:
+                                flask_session['analysis_type'] = 'pca'
+                            # CRITICAL: Mark session as modified
+                            flask_session.modified = True
+                            logger.info(f"Session {session_id}: Analysis completed via streaming, session updated")
+                        
+                        # Clear any pending actions if analysis was run
+                        if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
+                            flask_session.pop('pending_action', None)
+                            flask_session.pop('pending_variables', None)
+                            flask_session.modified = True
                     
                     # Log completion using final chunk data
                     if final_chunk:
