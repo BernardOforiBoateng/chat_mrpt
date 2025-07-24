@@ -62,9 +62,12 @@ class PlanITNDistribution(BaseTool):
         return [
             "Plan ITN distribution",
             "I want to distribute bed nets",
+            "I want to plan bed net distribution",
             "Help me plan net distribution",
             "Allocate 10000 nets across wards",
-            "Plan bed net distribution with 50000 nets"
+            "Plan bed net distribution with 50000 nets",
+            "Plan ITN/bed net distribution",
+            "Help me distribute ITNs"
         ]
     
     @validator('method')
@@ -129,6 +132,16 @@ class PlanITNDistribution(BaseTool):
                 'household_size': avg_household_size,
                 'top_priority_wards': self._get_top_priority_wards(result['prioritized'])
             }
+            
+            # CRITICAL: Ensure analysis_complete flag is set for report generation
+            try:
+                from flask import session
+                session['analysis_complete'] = True
+                session['itn_planning_complete'] = True
+                session.modified = True
+                logger.info("✅ Set analysis_complete and itn_planning_complete flags in session")
+            except Exception as e:
+                logger.warning(f"Could not set session flags: {e}")
             
             return self._create_success_result(
                 message=message,

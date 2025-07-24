@@ -429,10 +429,26 @@ Please select one state to proceed with TPR analysis."""
         selected_state = intent_data.get('selection')
         
         if not selected_state:
-            # Try to find state in input directly
+            # Enhanced state matching - try multiple patterns
+            user_lower = user_input.lower().strip()
+            
             for state in self.parsed_data['states']:
-                if state.lower() in user_input.lower():
+                state_lower = state.lower()
+                state_without_suffix = state_lower.replace(' state', '').strip()
+                
+                # Check multiple patterns:
+                # 1. Exact match (case insensitive)
+                # 2. State name without "State" suffix
+                # 3. User input contains state name
+                # 4. State name contains user input
+                if (user_lower == state_lower or 
+                    user_lower == state_without_suffix or
+                    state_lower in user_lower or
+                    state_without_suffix in user_lower or
+                    user_lower in state_lower or
+                    user_lower in state_without_suffix):
                     selected_state = state
+                    logger.info(f"TPR: Matched user input '{user_input}' to state '{state}'")
                     break
         
         if selected_state and selected_state in self.parsed_data['states']:

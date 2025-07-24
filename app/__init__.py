@@ -155,6 +155,13 @@ def create_app(config_name=None):
     from .routes import init_routes
     init_routes(app)
     
+    # --- Session Persistence Fix ---
+    @app.before_request
+    def make_session_permanent():
+        """Ensure session is marked as permanent on every request."""
+        from flask import session
+        session.permanent = True
+    
     # Log startup information
     app.logger.info("ChatMRPT v3.0 - Modern Architecture Initialized")
     app.logger.info("Configuration: %s", config_class.__name__)

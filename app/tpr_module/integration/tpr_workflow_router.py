@@ -40,6 +40,8 @@ class TPRWorkflowRouter:
             Response dictionary
         """
         try:
+            logger.info(f"TPR Router: Processing message '{user_message}' for session {self.session_id}")
+            
             # Get TPR state from state manager
             from ..core.tpr_state_manager import TPRStateManager
             state_manager = TPRStateManager(self.session_id)
@@ -50,23 +52,31 @@ class TPRWorkflowRouter:
             enhanced_session_data['tpr_stage'] = tpr_state.get('workflow_stage', 'state_selection')
             enhanced_session_data['available_states'] = tpr_state.get('available_states', [])
             
+            logger.info(f"TPR Router: Current stage='{enhanced_session_data['tpr_stage']}', "
+                       f"Available states={len(enhanced_session_data.get('available_states', []))}")
+            
             # Classify the intent using LLM
             intent = self._classify_intent(user_message, enhanced_session_data)
+            logger.info(f"TPR Router: Intent classified as '{intent}' for message '{user_message}'")
             
             if intent == 'tpr_continue':
                 # Continue with TPR workflow
+                logger.info(f"TPR Router: Routing to TPR handler for continuation")
                 return self._handle_tpr_message(user_message)
             
             elif intent == 'general_question':
                 # Handle general question with gentle reminder
+                logger.warning(f"TPR Router: General question detected, may interrupt workflow")
                 return self._handle_general_question(user_message, enhanced_session_data)
             
             elif intent == 'exit_workflow':
                 # User wants to leave TPR workflow
+                logger.warning(f"TPR Router: User explicitly exiting TPR workflow")
                 return self._handle_workflow_exit(enhanced_session_data)
             
             else:
                 # Default to TPR workflow with context
+                logger.info(f"TPR Router: Unknown intent '{intent}', defaulting to TPR handler")
                 return self._handle_tpr_message(user_message)
                 
         except Exception as e:
@@ -89,6 +99,7 @@ class TPRWorkflowRouter:
             
             prompt = f"""You are analyzing a user message during a Test Positivity Rate (TPR) analysis workflow.
 The user has uploaded NMEP data and we are currently at stage: {stage}
+Available states for selection: {session_data.get('available_states', [])}
 
 User message: "{user_message}"
 
@@ -97,10 +108,20 @@ Classify the user's intent as one of:
 2. "general_question" - User is asking a general question about the system or malaria analysis
 3. "exit_workflow" - User wants to stop the TPR analysis and do something else
 
-Consider:
-- Questions about identity, capabilities, or help are general questions
-- Selections of states, facilities, or age groups are TPR continuations
-- Expressions of confusion or requests to stop indicate potential exit
+IMPORTANT RULES:
+- Any mention of a state name (even partial) should ALWAYS be classified as "tpr_continue"
+- Single words that could be state names should be "tpr_continue"
+- Two-word responses without question marks should be "tpr_continue"
+- Only classify as "exit_workflow" if user explicitly says "stop TPR" or "exit TPR"
+- When in doubt, default to "tpr_continue" to avoid disrupting the workflow
+- State selections can be very brief (e.g., just "Adamawa" or "Kwara State")
+
+Examples:
+- "Adamawa" -> tpr_continue
+- "Adamawa State" -> tpr_continue
+- "What is Adamawa?" -> tpr_continue (still selecting state)
+- "stop TPR analysis" -> exit_workflow
+- "Who are you?" -> general_question
 
 Return only the intent classification, nothing else."""
 
@@ -120,27 +141,54 @@ Return only the intent classification, nothing else."""
     def _simple_intent_classification(self, user_message: str, session_data: Dict) -> str:
         """
         Simple fallback intent classification without LLM.
+        Enhanced to better handle state names and prevent false exits.
         """
         lower_msg = user_message.lower().strip()
         
-        # Check for state names from available states (TPR continuation)
+        # Priority 1: Check state names with variations
         available_states = session_data.get('available_states', [])
-        if available_states and any(state.lower() in lower_msg for state in available_states):
+        if available_states:
+            for state in available_states:
+                # Create variations of state name for matching
+                state_variations = [
+                    state.lower(),
+                    state.lower().replace(' state', ''),
+                    state.lower().replace('state', '').strip()
+                ]
+                # Check if message contains state or state contains message (for single words)
+                if any(var in lower_msg or lower_msg in var for var in state_variations):
+                    logger.info(f"Intent: Detected state name '{state}' in message '{user_message}' - TPR continue")
+                    return 'tpr_continue'
+        
+        # Priority 2: Single/two word inputs are likely state names or selections
+        word_count = len(lower_msg.split())
+        if word_count <= 2 and '?' not in lower_msg:
+            logger.info(f"Intent: Treating '{user_message}' as potential state name (word count: {word_count}) - TPR continue")
             return 'tpr_continue'
         
         # Check for facility levels
         if any(level in lower_msg for level in ['primary', 'secondary', 'tertiary', 'all']):
+            logger.info(f"Intent: Detected facility level in '{user_message}' - TPR continue")
             return 'tpr_continue'
         
         # Check for age groups
-        if any(age in lower_msg for age in ['under 5', 'over 5', 'pregnant', 'u5', 'o5']):
+        if any(age in lower_msg for age in ['under 5', 'over 5', 'pregnant', 'u5', 'o5', 'all ages']):
+            logger.info(f"Intent: Detected age group in '{user_message}' - TPR continue")
             return 'tpr_continue'
         
-        # General questions often have question marks
-        if '?' in user_message and len(user_message) > 10:
+        # Only classify as exit if explicitly requested with TPR mention
+        if ('stop' in lower_msg or 'exit' in lower_msg or 'cancel' in lower_msg) and 'tpr' in lower_msg:
+            logger.info(f"Intent: Explicit exit request in '{user_message}' - exit workflow")
+            return 'exit_workflow'
+        
+        # General questions need clear indicators (not just any question mark)
+        general_indicators = ['what can you', 'who are you', 'help me understand', 'how does']
+        if '?' in user_message and any(indicator in lower_msg for indicator in general_indicators):
+            logger.info(f"Intent: General question detected in '{user_message}'")
             return 'general_question'
         
-        # Default to TPR continuation
+        # Default to TPR continuation to prevent accidental exits
+        logger.info(f"Intent: Defaulting to TPR continue for '{user_message}'")
         return 'tpr_continue'
     
     def _handle_tpr_message(self, user_message: str) -> Dict[str, Any]:
@@ -192,6 +240,10 @@ Return only the intent classification, nothing else."""
         """
         from flask import session
         session['tpr_workflow_active'] = False
+        session.pop('tpr_session_id', None)
+        # CRITICAL: Force session update for multi-worker environment
+        session.modified = True
+        logger.info(f"TPR workflow exited by user request for session {self.session_id}")
         
         return {
             'status': 'success',

@@ -26,6 +26,9 @@ class BaseConfig:
     SESSION_COOKIE_SECURE = False  # Set to True when using HTTPS in production
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_NAME = 'chatmrpt_session'
+    # CRITICAL: Set domain for AWS load balancer
+    SESSION_COOKIE_DOMAIN = None  # Let Flask auto-detect the domain
     
     # Path Configuration
     PROJECT_ROOT = Path(__file__).parent.parent.parent

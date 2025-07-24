@@ -627,14 +627,22 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
     # Create plotly figure
     fig = go.Figure()
     
+    # Filter out null geometries before creating map
+    valid_geometry_mask = ~shp_data.geometry.isnull()
+    shp_data_valid = shp_data[valid_geometry_mask].copy()
+    
+    if len(shp_data_valid) == 0:
+        logger.error("No valid geometries found in shapefile data")
+        return None
+    
     # Add choropleth layer - use geometry.__geo_interface__ like working maps
     fig.add_trace(go.Choroplethmapbox(
-        geojson=shp_data.geometry.__geo_interface__,
-        locations=shp_data.index,
-        z=shp_data['nets_allocated'],
+        geojson=shp_data_valid.geometry.__geo_interface__,
+        locations=shp_data_valid.index,
+        z=shp_data_valid['nets_allocated'],
         colorscale='RdYlGn',  # Red to Yellow to Green
         reversescale=True,    # Green for high allocation
-        text=shp_data['WardName'],
+        text=shp_data_valid['WardName'],
         hovertemplate='<b>%{text}</b><br>' +
                       '─────────────────<br>' +
                       '<b>Allocation Status:</b> %{customdata[2]}<br>' +
@@ -646,10 +654,10 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
                       '<b>Coverage:</b> %{customdata[1]:.1f}%<br>' +
                       '<extra></extra>',
         customdata=np.column_stack((
-            shp_data['Population'].fillna(0),
-            shp_data['coverage_percent'],
-            shp_data['allocation_phase'],
-            shp_data['urban_pct_display'].fillna(0)
+            shp_data_valid['Population'].fillna(0),
+            shp_data_valid['coverage_percent'],
+            shp_data_valid['allocation_phase'],
+            shp_data_valid['urban_pct_display'].fillna(0)
         )),
         marker_opacity=0.7,
         marker_line_width=1,

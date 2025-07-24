@@ -158,13 +158,28 @@ def index():
                             error_message=str(e),
                             stack_trace=traceback.format_exc()
                         )
+        
+        # CRITICAL: Mark session as modified when new session is created
+        session.modified = True
+        logger.info(f"New session marked as modified for persistence: {session['session_id']}")
     
-    # CRITICAL FIX: Always reset TPR workflow state when index is loaded
-    # This ensures that every visit to the main page starts with TPR disabled
-    # Prevents session persistence issues where TPR remains active across browser sessions
-    session['tpr_workflow_active'] = False
-    session['tpr_session_id'] = None
-    logger.info(f"TPR workflow state reset for session {session.get('session_id', 'unknown')}")
+    # Smart TPR workflow state management
+    # Only reset TPR state if this is a new session or external navigation
+    # Preserve TPR state on page refresh to maintain workflow continuity
+    if request.referrer is None or 'tpr_workflow_active' not in session:
+        # New session or navigation from external site - reset TPR state
+        session['tpr_workflow_active'] = False
+        session['tpr_session_id'] = None
+        session.modified = True  # Ensure TPR state changes persist
+        logger.info(f"TPR workflow state reset for session {session.get('session_id', 'unknown')} - new session or external navigation")
+    else:
+        # Internal navigation or page refresh - preserve existing TPR state
+        tpr_active = session.get('tpr_workflow_active', False)
+        if tpr_active:
+            logger.info(f"TPR workflow state PRESERVED on refresh: active={tpr_active} for session {session.get('session_id', 'unknown')}")
+        else:
+            # Normal risk analysis workflow - keep TPR disabled
+            logger.debug(f"TPR workflow remains inactive for session {session.get('session_id', 'unknown')}")
     
     # py-sidebot pattern: No complex background loading needed
     # Request interpreter handles tool registration directly

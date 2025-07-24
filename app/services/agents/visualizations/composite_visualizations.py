@@ -417,23 +417,42 @@ def create_agent_vulnerability_map(unified_dataset: gpd.GeoDataFrame,
         else:
             categories = pd.Series(['Unknown'] * len(gdf), index=gdf.index)
         
-        # Create hover text using vectorized string operations
-        hover_text = (ward_names + '<br>Rank: ' + ranks + '<br>Category: ' + categories).tolist()
+        # Filter out null geometries before creating map
+        valid_geometry_mask = ~gdf.geometry.isnull()
+        gdf_valid = gdf[valid_geometry_mask].copy()
+        
+        if len(gdf_valid) == 0:
+            return {
+                'status': 'error',
+                'message': 'No valid geometries found in the dataset. Please check your shapefile data.'
+            }
+        
+        # Log if any geometries were filtered
+        if len(gdf_valid) < len(gdf):
+            logger.warning(f"Filtered out {len(gdf) - len(gdf_valid)} wards with null geometries")
+        
+        # Create hover text using vectorized string operations for valid geometries only
+        hover_text = (gdf_valid['WardName'].astype(str) + '<br>Rank: ' + 
+                     gdf_valid['vulnerability_rank'].where(gdf_valid['vulnerability_rank'] != -1, 'Not ranked').astype(str) + 
+                     '<br>Category: ' + gdf_valid['vulnerability_category'].fillna('Unknown').astype(str)).tolist()
         
         # Convert geometry to geojson with proper serialization
-        geojson = create_geojson_from_gdf(gdf)
+        geojson = create_geojson_from_gdf(gdf_valid)
         
-        # Get proper map centering
-        center_lat = prep_result['map_center']['lat']
-        center_lon = prep_result['map_center']['lon']
-        zoom_level = prep_result['zoom_level']
+        # Get proper map centering based on valid geometries
+        bounds = gdf_valid.geometry.total_bounds
+        center_lat = gdf_valid.geometry.centroid.y.mean()
+        center_lon = gdf_valid.geometry.centroid.x.mean()
+        span_x = max(0.01, bounds[2] - bounds[0])
+        span_y = max(0.01, bounds[3] - bounds[1])
+        zoom_level = min(10, max(4, 6 - np.log(max(span_x, span_y))))
         
         # Add the choropleth layer
         fig = go.Figure()
         fig.add_trace(go.Choroplethmapbox(
             geojson=geojson,
-            locations=gdf.index,
-            z=z_values,
+            locations=gdf_valid.index,
+            z=z_values[valid_geometry_mask],
             colorscale=colorscale,  
             marker_opacity=0.8,    
             marker_line_width=0.5,

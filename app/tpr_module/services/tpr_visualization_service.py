@@ -10,6 +10,7 @@ import geopandas as gpd
 import plotly.graph_objects as go
 from pathlib import Path
 from typing import Dict, Any, Optional
+from difflib import SequenceMatcher
 
 from ..services.shapefile_extractor import ShapefileExtractor
 
@@ -50,11 +51,10 @@ class TPRVisualizationService:
                 logger.warning(f"No shapefile data for {state_name}, creating table view instead")
                 return self._create_table_view(tpr_df, state_name, title)
             
-            # Merge TPR data with shapefile
-            merged_gdf = state_shapefile.merge(
-                tpr_df[['WardName', 'TPR', 'Tested', 'Positive', 'DataCompleteness']],
-                on='WardName',
-                how='left'
+            # Merge TPR data with shapefile using fuzzy matching
+            merged_gdf = self._fuzzy_merge_tpr_shapefile(
+                state_shapefile,
+                tpr_df[['WardName', 'TPR', 'Tested', 'Positive', 'DataCompleteness']]
             )
             
             # Create hover text
@@ -108,11 +108,11 @@ class TPRVisualizationService:
                         font=dict(size=12)
                     ),
                     tickmode='array',
-                    tickvals=[0, 10, 20, 30, 40, 50],
-                    ticktext=['0%', '10%', '20%', '30%', '40%', '50%+']
+                    tickvals=[0, 20, 40, 60, 80, 100],
+                    ticktext=['0%', '20%', '40%', '60%', '80%', '100%']
                 ),
                 zmin=0,
-                zmax=50  # Cap at 50% for better visualization
+                zmax=100  # Show full TPR range up to 100%
             ))
             
             # Update layout
@@ -153,6 +153,104 @@ class TPRVisualizationService:
         except Exception as e:
             logger.error(f"Error creating TPR distribution map: {e}")
             return self._create_error_view(str(e))
+    
+    def _fuzzy_merge_tpr_shapefile(self, shapefile_gdf: gpd.GeoDataFrame, 
+                                   tpr_df: pd.DataFrame, 
+                                   similarity_threshold: float = 0.85) -> gpd.GeoDataFrame:
+        """
+        Merge TPR data with shapefile using fuzzy string matching for ward names.
+        
+        Args:
+            shapefile_gdf: GeoDataFrame from shapefile
+            tpr_df: DataFrame with TPR data
+            similarity_threshold: Minimum similarity score for matching (0-1)
+            
+        Returns:
+            Merged GeoDataFrame
+        """
+        # First try exact merge
+        merged = shapefile_gdf.merge(tpr_df, on='WardName', how='left')
+        
+        # Find unmatched wards (where TPR is null after merge)
+        unmatched_mask = merged['TPR'].isna()
+        unmatched_wards = merged.loc[unmatched_mask, 'WardName'].unique()
+        
+        if len(unmatched_wards) > 0:
+            logger.info(f"Found {len(unmatched_wards)} unmatched wards, attempting fuzzy matching...")
+            
+            # Create a mapping of TPR ward names for fuzzy matching
+            tpr_ward_names = tpr_df['WardName'].unique()
+            
+            # For each unmatched ward, find the best match in TPR data
+            for shp_ward in unmatched_wards:
+                if pd.isna(shp_ward):
+                    continue
+                    
+                # Normalize the shapefile ward name for comparison
+                shp_ward_normalized = self._normalize_ward_name(shp_ward)
+                
+                best_match = None
+                best_score = 0
+                
+                for tpr_ward in tpr_ward_names:
+                    # Normalize the TPR ward name
+                    tpr_ward_normalized = self._normalize_ward_name(tpr_ward)
+                    
+                    # Calculate similarity
+                    similarity = SequenceMatcher(None, shp_ward_normalized, tpr_ward_normalized).ratio()
+                    
+                    if similarity > best_score and similarity >= similarity_threshold:
+                        best_score = similarity
+                        best_match = tpr_ward
+                
+                # If we found a good match, update the merged data
+                if best_match:
+                    logger.debug(f"Fuzzy matched '{shp_ward}' to '{best_match}' (score: {best_score:.2f})")
+                    
+                    # Get the TPR data for the matched ward
+                    tpr_data = tpr_df[tpr_df['WardName'] == best_match].iloc[0]
+                    
+                    # Update the merged dataframe
+                    mask = merged['WardName'] == shp_ward
+                    for col in ['TPR', 'Tested', 'Positive', 'DataCompleteness']:
+                        if col in tpr_data:
+                            merged.loc[mask, col] = tpr_data[col]
+                else:
+                    logger.warning(f"No fuzzy match found for ward: {shp_ward}")
+            
+            # Report matching statistics
+            still_unmatched = merged['TPR'].isna().sum()
+            matched = len(unmatched_wards) - still_unmatched + (len(merged) - len(unmatched_wards))
+            logger.info(f"Fuzzy matching complete: {matched}/{len(merged)} wards have TPR data")
+        
+        return merged
+    
+    def _normalize_ward_name(self, name: str) -> str:
+        """
+        Normalize ward name for fuzzy matching.
+        This handles common variations without hardcoding specific names.
+        """
+        if pd.isna(name):
+            return ""
+            
+        # Convert to lowercase for comparison
+        normalized = str(name).lower().strip()
+        
+        # Remove common punctuation and normalize spaces
+        normalized = normalized.replace('-', ' ')
+        normalized = normalized.replace('/', ' ')
+        normalized = normalized.replace("'", '')
+        normalized = normalized.replace('.', '')
+        normalized = normalized.replace(',', '')
+        
+        # Normalize multiple spaces to single space
+        normalized = ' '.join(normalized.split())
+        
+        # Remove parenthetical content (like LGA names)
+        if '(' in normalized:
+            normalized = normalized.split('(')[0].strip()
+        
+        return normalized
     
     def _create_table_view(self, tpr_df: pd.DataFrame, state_name: str, title: str) -> str:
         """Create a table view when map cannot be generated."""

@@ -338,8 +338,22 @@ def create_geojson_from_gdf(gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
         GeoJSON dictionary
     """
     try:
+        # Filter out null geometries before conversion
+        if 'geometry' in gdf.columns:
+            valid_geometry_mask = ~gdf.geometry.isnull()
+            gdf_valid = gdf[valid_geometry_mask].copy()
+            
+            if len(gdf_valid) == 0:
+                raise ValueError("No valid geometries found in GeoDataFrame")
+                
+            # Log if any geometries were filtered out
+            if len(gdf_valid) < len(gdf):
+                logger.warning(f"Filtered out {len(gdf) - len(gdf_valid)} null geometries")
+        else:
+            gdf_valid = gdf
+            
         # Prepare GeoDataFrame for JSON conversion
-        gdf_prepared = prepare_geodataframe_for_json(gdf)
+        gdf_prepared = prepare_geodataframe_for_json(gdf_valid)
         geojson = json.loads(gdf_prepared.to_json())
         return geojson
         
