@@ -1304,4 +1304,41 @@ Enhanced endpoints to check file-based sessions:
 - [ ] Confirm transition to risk analysis workflow
 - [ ] Check download tab has all files available
 - [ ] Test with multiple concurrent sessions
+
+## Session Persistence Fix (2025-07-24)
+
+### Problem
+Report generation was failing with "Please run an analysis before generating a report" even after completing analysis and ITN planning. The issue occurred because Flask filesystem sessions were not properly persisting data between requests.
+
+### Root Cause
+1. Gunicorn was running with multiple workers (despite configuration for single worker)
+2. `analysis_routes.py` was setting `session['analysis_complete'] = True` but NOT calling `session.modified = True`
+3. Flask-Session with filesystem backend requires `session.modified = True` to save changes
+
+### Solution Applied
+1. **Single Worker Configuration**: Set Gunicorn to use `workers = 1` to ensure all requests go to same process
+2. **Session Modified Flag**: Added `session.modified = True` after all session modifications in `analysis_routes.py`:
+   - After setting `analysis_complete = True`
+   - After pop operations that clear session data
+   - In `clear_analysis_session_state()` function
+
+### Key Code Changes
+```python
+# In analysis_routes.py
+session['analysis_complete'] = True
+session['variables_used'] = result.get('variables_used', [])
+# CRITICAL: Mark session as modified for filesystem sessions
+session.modified = True
+```
+
+### Testing
+- User completes risk analysis
+- Plans ITN distribution
+- Clicks "Generate a report" button
+- Report generation now works correctly
+
+### Future Considerations
+- For scaling beyond 10 concurrent users, implement Redis for session storage
+- Redis would allow multiple workers while maintaining session state
+- Current single-worker solution is adequate for pilot/testing phase
 - [ ] Verify session persistence after page refresh

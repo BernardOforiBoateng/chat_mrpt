@@ -80,6 +80,8 @@ def run_analysis():
             # Store JSON-serializable data in session
             session['analysis_complete'] = True
             session['variables_used'] = result.get('variables_used', [])
+            # CRITICAL: Mark session as modified for filesystem sessions
+            session.modified = True
             
             # Extract risk wards from vulnerability rankings if available
             high_risk_wards = []
@@ -432,12 +434,16 @@ def send_message():
                 session['analysis_type'] = 'composite'
             else:
                 session['analysis_type'] = 'pca'
+            # CRITICAL: Mark session as modified for filesystem sessions
+            session.modified = True
             logger.info(f"Session {session_id}: Analysis completed via Request Interpreter ({session['analysis_type']})")
         
         # Clear any pending actions if analysis was run
         if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
                 session.pop('pending_action', None)
                 session.pop('pending_variables', None)
+                # CRITICAL: Mark session as modified after pop operations
+                session.modified = True
         
         # Ensure response is JSON serializable
         formatted_response = convert_to_json_serializable(formatted_response)
@@ -784,6 +790,9 @@ def update_analysis_session_state(session, analysis_result):
         # Set analysis type if provided
         if 'analysis_type' in analysis_result:
             session['analysis_type'] = analysis_result['analysis_type']
+            
+        # CRITICAL: Mark session as modified for filesystem sessions
+        session.modified = True
         
         # Clear any pending actions
         session.pop('pending_action', None)
@@ -814,5 +823,8 @@ def clear_analysis_session_state(session):
     
     # Clear visualization state
     session.pop('last_visualization', None)
+    
+    # CRITICAL: Mark session as modified after clearing state
+    session.modified = True
     
     logger.info(f"Session {session.get('session_id')}: Analysis state cleared") 
