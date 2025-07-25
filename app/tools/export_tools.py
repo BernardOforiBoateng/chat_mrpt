@@ -173,10 +173,18 @@ class ExportITNResults(BaseTool):
             with open(itn_results_path, 'r') as f:
                 itn_results = json.load(f)
             
-            # Gather visualization paths
+            # Gather visualization paths from session folder
             viz_dir = Path(f"instance/uploads/{session_id}")
+            
+            # Look for maps in the root of session folder
             vulnerability_maps = list(viz_dir.glob("*vulnerability*map*.html"))
-            itn_maps = list(viz_dir.glob("*itn*map*.html"))
+            itn_maps = list(viz_dir.glob("*itn*distribution*map*.html"))
+            
+            # Also check in visualizations subfolder
+            viz_subdir = viz_dir / "visualizations"
+            if viz_subdir.exists():
+                vulnerability_maps.extend(list(viz_subdir.glob("*vulnerability*map*.html")))
+                itn_maps.extend(list(viz_subdir.glob("*itn*distribution*map*.html")))
             
             export_data = {
                 'unified_dataset': gdf,
@@ -285,17 +293,33 @@ class ExportITNResults(BaseTool):
         itn_results = export_data.get('itn_results', {})
         
         # Calculate additional insights
-        high_risk_count = len(gdf[gdf['composite_category'] == 'High Risk']) if 'composite_category' in gdf.columns else 0
-        very_high_risk_count = len(gdf[gdf['composite_category'] == 'Very High Risk']) if 'composite_category' in gdf.columns else 0
+        try:
+            high_risk_count = len(gdf[gdf['composite_category'] == 'High Risk']) if 'composite_category' in gdf.columns else 0
+            very_high_risk_count = len(gdf[gdf['composite_category'] == 'Very High Risk']) if 'composite_category' in gdf.columns else 0
+        except Exception as e:
+            logger.warning(f"Error calculating risk counts: {e}")
+            high_risk_count = 0
+            very_high_risk_count = 0
         
         # Get top 10 wards
         top_wards_html = ""
-        if 'composite_rank' in gdf.columns and 'ward_name' in gdf.columns:
-            top_10 = gdf.nsmallest(10, 'composite_rank')[['ward_name', 'lga_name', 'composite_score', 'composite_rank', 'population']]
-            top_wards_html = "<h3>🎯 Top 10 Highest Risk Wards</h3><table class='data-table'><tr><th>Rank</th><th>Ward</th><th>LGA</th><th>Risk Score</th><th>Population</th></tr>"
-            for _, row in top_10.iterrows():
-                top_wards_html += f"<tr><td>{int(row['composite_rank'])}</td><td>{row['ward_name']}</td><td>{row['lga_name']}</td><td>{row['composite_score']:.3f}</td><td>{int(row['population']):,}</td></tr>"
-            top_wards_html += "</table>"
+        try:
+            if 'composite_rank' in gdf.columns and 'ward_name' in gdf.columns:
+                # Select only the columns we need to avoid dict/geometry issues
+                needed_cols = ['ward_name', 'lga_name', 'composite_score', 'composite_rank', 'population']
+                available_cols = [col for col in needed_cols if col in gdf.columns]
+                
+                # Create a clean dataframe without problematic columns
+                clean_df = gdf[available_cols].copy()
+                top_10 = clean_df.nsmallest(10, 'composite_rank')
+                
+                top_wards_html = "<h3>🎯 Top 10 Highest Risk Wards</h3><table class='data-table'><tr><th>Rank</th><th>Ward</th><th>LGA</th><th>Risk Score</th><th>Population</th></tr>"
+                for _, row in top_10.iterrows():
+                    top_wards_html += f"<tr><td>{int(row['composite_rank'])}</td><td>{row['ward_name']}</td><td>{row.get('lga_name', 'N/A')}</td><td>{row['composite_score']:.3f}</td><td>{int(row.get('population', 0)):,}</td></tr>"
+                top_wards_html += "</table>"
+        except Exception as e:
+            logger.warning(f"Error creating top wards table: {e}")
+            top_wards_html = "<p>Top wards table could not be generated.</p>"
         
         html = f"""
         <!DOCTYPE html>

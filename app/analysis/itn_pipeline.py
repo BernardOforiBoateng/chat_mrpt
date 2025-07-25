@@ -817,8 +817,14 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         showlegend=False
     )
     
-    # Save map properly using fig.write_html like working maps
-    path = f'app/static/visualizations/itn_map_{session_id}.html'
+    # Save map in session folder for better organization
+    # Create visualizations directory if it doesn't exist
+    viz_dir = f'instance/uploads/{session_id}/visualizations'
+    os.makedirs(viz_dir, exist_ok=True)
+    
+    # Save map in session visualizations folder
+    filename = f'itn_distribution_map_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html'
+    path = os.path.join(viz_dir, filename)
     
     # First save the figure normally
     fig.write_html(path, include_plotlyjs='cdn')
@@ -919,5 +925,5 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
     with open(path, 'w') as f:
         f.write(html_content)
     
-    # Return web path
-    return f'/static/visualizations/itn_map_{session_id}.html'
+    # Return path to serve the file
+    return f'/serve_viz_file/{session_id}/visualizations/{filename}'
