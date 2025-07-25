@@ -458,19 +458,44 @@ class CreateVulnerabilityMapComparison(BaseTool):
             
             # Add statistics annotations if requested
             if self.include_statistics:
-                # Composite statistics
-                composite_stats = {
-                    'High Risk': len(gdf[gdf.get('composite_category', '') == 'Very High Risk']),
-                    'Medium Risk': len(gdf[gdf.get('composite_category', '').str.contains('Medium', na=False)]),
-                    'Low Risk': len(gdf[gdf.get('composite_category', '').str.contains('Low', na=False)])
-                }
+                # Determine category column names based on what's available
+                composite_cat_col = None
+                pca_cat_col = None
                 
-                # PCA statistics
-                pca_stats = {
-                    'High Risk': len(gdf[gdf.get('pca_category', '') == 'Very High Risk']),
-                    'Medium Risk': len(gdf[gdf.get('pca_category', '').str.contains('Medium', na=False)]),
-                    'Low Risk': len(gdf[gdf.get('pca_category', '').str.contains('Low', na=False)])
-                }
+                # Check for category columns
+                if 'vulnerability_category' in gdf.columns:
+                    # If using unified vulnerability_category, we need to differentiate
+                    # Check if we have separate composite and PCA scores
+                    if 'composite_score' in gdf.columns and 'composite_rank' in gdf.columns:
+                        composite_cat_col = 'vulnerability_category'
+                    if 'pca_score' in gdf.columns and 'pca_rank' in gdf.columns:
+                        pca_cat_col = 'vulnerability_category'
+                
+                # Fallback to specific category columns if they exist
+                if 'composite_category' in gdf.columns:
+                    composite_cat_col = 'composite_category'
+                if 'pca_category' in gdf.columns:
+                    pca_cat_col = 'pca_category'
+                
+                # Calculate composite statistics
+                composite_stats = {'High Risk': 0, 'Medium Risk': 0, 'Low Risk': 0}
+                if composite_cat_col and composite_cat_col in gdf.columns:
+                    categories = gdf[composite_cat_col].fillna('')
+                    composite_stats = {
+                        'High Risk': len(categories[categories.str.contains('Very High|High Risk', na=False, case=False)]),
+                        'Medium Risk': len(categories[categories.str.contains('Medium', na=False, case=False)]),
+                        'Low Risk': len(categories[categories.str.contains('Low Risk|Lower', na=False, case=False)])
+                    }
+                
+                # Calculate PCA statistics
+                pca_stats = {'High Risk': 0, 'Medium Risk': 0, 'Low Risk': 0}
+                if pca_cat_col and pca_cat_col in gdf.columns:
+                    categories = gdf[pca_cat_col].fillna('')
+                    pca_stats = {
+                        'High Risk': len(categories[categories.str.contains('Very High|High Risk', na=False, case=False)]),
+                        'Medium Risk': len(categories[categories.str.contains('Medium', na=False, case=False)]),
+                        'Low Risk': len(categories[categories.str.contains('Low Risk|Lower', na=False, case=False)])
+                    }
                 
                 annotations = [
                     dict(
@@ -519,8 +544,8 @@ class CreateVulnerabilityMapComparison(BaseTool):
             fig.write_html(file_path)
             logger.info(f"Saved vulnerability comparison map to {file_path}")
             
-            # Create web path
-            web_path = f"/serve_viz_file/{session_id}/{filename}"
+            # Create web path - include visualizations subdirectory
+            web_path = f"/serve_viz_file/{session_id}/visualizations/{filename}"
             
             result_data = {
                 'total_wards': len(gdf),

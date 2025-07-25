@@ -60,25 +60,29 @@ itn_embed_bp = Blueprint('itn_embed', __name__)
 def serve_itn_embed(session_id):
     """Serve ITN map HTML file for embedding."""
     try:
-        # For now, skip session validation to debug the issue
-        # We'll add it back once we confirm the route works
+        # This route is no longer used - ITN maps are served via /serve_viz_file
+        # Redirect to the correct endpoint
+        from flask import redirect
+        # Find the latest ITN distribution map in the session folder
+        session_dir = os.path.join('instance', 'uploads', session_id, 'visualizations')
         
-        # Serve the ITN map HTML file from static/visualizations
-        filename = f'itn_map_{session_id}.html'
+        if not os.path.exists(session_dir):
+            logger.error(f"Session directory not found: {session_dir}")
+            return "<h1>Session not found</h1>", 404
+            
+        # Find ITN distribution map files
+        itn_files = [f for f in os.listdir(session_dir) if f.startswith('itn_distribution_map_') and f.endswith('.html')]
         
-        # Use absolute path based on current_app root
-        viz_dir = os.path.join(current_app.root_path, 'static', 'visualizations')
+        if not itn_files:
+            logger.error(f"No ITN map files found in: {session_dir}")
+            return "<h1>ITN map not found</h1>", 404
+            
+        # Get the most recent file
+        itn_files.sort()
+        latest_file = itn_files[-1]
         
-        # Check if file exists
-        file_path = os.path.join(viz_dir, filename)
-        if not os.path.exists(file_path):
-            logger.error(f"ITN map file not found: {file_path}")
-            return f"<h1>File not found: {file_path}</h1>", 404
-        
-        # Log successful file access
-        logger.info(f"Serving ITN map from: {file_path}")
-        
-        return send_from_directory(viz_dir, filename)
+        # Redirect to the correct serve_viz_file endpoint
+        return redirect(f'/serve_viz_file/{session_id}/visualizations/{latest_file}')
         
     except Exception as e:
         logger.error(f"Error serving ITN embed: {str(e)}", exc_info=True)
