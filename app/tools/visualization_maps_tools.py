@@ -1008,5 +1008,6 @@ __all__ = [
     'CreateDecisionTree',
     'CreateCompositeScoreMaps',
     'CreateBoxPlot',
-    'CreateInterventionMap'
+    'CreateInterventionMap',
+    'CreateVulnerabilityMapComparison'
 ]
