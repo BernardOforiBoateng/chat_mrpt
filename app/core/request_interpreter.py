@@ -520,36 +520,73 @@ class RequestInterpreter:
         except Exception as e:
             return f"Error running PCA analysis: {str(e)}"
     
-    def _create_vulnerability_map(self, session_id: str, method: str = 'composite'):
-        """Create vulnerability choropleth map for malaria risk visualization."""
+    def _create_vulnerability_map(self, session_id: str, method: str = None):
+        """Create vulnerability choropleth map for malaria risk visualization.
+        
+        If method is not specified, creates a side-by-side comparison of both methods.
+        If method is specified ('composite' or 'pca'), creates a single map for that method.
+        """
         try:
-            result = self.visualization_service.create_vulnerability_map(session_id, method=method)
-            message = result.get('message', f'Vulnerability map created using {method} method')
-            
-            # Auto-explain the visualization if file_path exists
-            if result.get('file_path'):
-                explanation = self._explain_visualization_universally(
-                    result['file_path'], 'vulnerability_map', session_id
+            # If no method specified, use the comparison tool
+            if method is None:
+                # Use the new comparison tool from the tool registry
+                from app.core.tool_registry import ToolRegistry
+                tool_registry = ToolRegistry()
+                
+                # Execute the comparison tool
+                result = tool_registry.execute_tool(
+                    'create_vulnerability_map_comparison',
+                    session_id=session_id,
+                    include_statistics=True
                 )
-                message += f"\\n\\n{explanation}"
+                
+                if result.get('status') == 'success':
+                    # Convert tool result to expected format
+                    return {
+                        'response': result.get('message', 'Created side-by-side vulnerability map comparison'),
+                        'visualizations': [{
+                            'type': 'vulnerability_comparison',
+                            'file_path': result.get('data', {}).get('file_path', ''),
+                            'path': result.get('data', {}).get('web_path', ''),
+                            'url': result.get('data', {}).get('web_path', ''),
+                            'title': "Vulnerability Assessment Comparison",
+                            'description': "Side-by-side comparison of Composite and PCA vulnerability methods"
+                        }],
+                        'tools_used': ['create_vulnerability_map_comparison'],
+                        'status': 'success'
+                    }
+                else:
+                    return f"Error creating vulnerability comparison: {result.get('message', 'Unknown error')}"
             
-            # Return structured response if successful
-            if result.get('status') == 'success' and result.get('web_path'):
-                return {
-                    'response': message,
-                    'visualizations': [{
-                        'type': result.get('visualization_type', 'vulnerability_map'),
-                        'file_path': result.get('file_path', ''),
-                        'path': result.get('web_path', ''),
-                        'url': result.get('web_path', ''),
-                        'title': f"Vulnerability Map ({method.title()} Method)",
-                        'description': f"Ward vulnerability classification using {method} method"
-                    }],
-                    'tools_used': ['create_vulnerability_map'],
-                    'status': 'success'
-                }
+            # Otherwise use the specific method requested
             else:
-                return f"Error creating vulnerability map: {result.get('message', 'Unknown error')}"
+                result = self.visualization_service.create_vulnerability_map(session_id, method=method)
+                message = result.get('message', f'Vulnerability map created using {method} method')
+                
+                # Auto-explain the visualization if file_path exists
+                if result.get('file_path'):
+                    explanation = self._explain_visualization_universally(
+                        result['file_path'], 'vulnerability_map', session_id
+                    )
+                    message += f"\\n\\n{explanation}"
+                
+                # Return structured response if successful
+                if result.get('status') == 'success' and result.get('web_path'):
+                    return {
+                        'response': message,
+                        'visualizations': [{
+                            'type': result.get('visualization_type', 'vulnerability_map'),
+                            'file_path': result.get('file_path', ''),
+                            'path': result.get('web_path', ''),
+                            'url': result.get('web_path', ''),
+                            'title': f"Vulnerability Map ({method.title()} Method)",
+                            'description': f"Ward vulnerability classification using {method} method"
+                        }],
+                        'tools_used': ['create_vulnerability_map'],
+                        'status': 'success'
+                    }
+                else:
+                    return f"Error creating vulnerability map: {result.get('message', 'Unknown error')}"
         except Exception as e:
             return f"Error creating vulnerability map: {str(e)}"
     
@@ -998,11 +1035,19 @@ The map below shows ITN allocation focusing on complete coverage of highest-risk
             }
         
         if 'map' in tool_name or 'plot' in tool_name:
-            base_params['properties']['method'] = {
-                'type': 'string',
-                'enum': ['composite', 'pca'],
-                'description': 'Analysis method to visualize'
-            }
+            if tool_name == 'create_vulnerability_map':
+                # For vulnerability map, method is optional - defaults to side-by-side comparison
+                base_params['properties']['method'] = {
+                    'type': 'string',
+                    'enum': ['composite', 'pca'],
+                    'description': 'Analysis method to visualize. If not specified, shows side-by-side comparison of both methods.'
+                }
+            else:
+                base_params['properties']['method'] = {
+                    'type': 'string',
+                    'enum': ['composite', 'pca'],
+                    'description': 'Analysis method to visualize'
+                }
         
         if tool_name == 'execute_data_query':
             base_params['properties'].update({
@@ -1316,7 +1361,9 @@ Use execute_data_query with Python code, then INTERPRET the results:
 
 **INTENT: Create Visualizations**
 - "Map the rainfall" → create_variable_distribution with variable_name="rainfall"
-- "Show vulnerability map" → create_vulnerability_map with method="composite"
+- "Show vulnerability map" → create_vulnerability_map (NO method parameter - shows side-by-side comparison)
+- "Show composite vulnerability map" → create_vulnerability_map with method="composite"
+- "Show PCA vulnerability map" → create_vulnerability_map with method="pca"
 - "Box plot of scores" → create_box_plot with method="composite"
 
 **INTENT: Plan Interventions (ITN Distribution)**

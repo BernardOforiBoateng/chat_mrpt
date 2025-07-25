@@ -269,6 +269,280 @@ class CreatePCAMap(BaseTool):
             return self._create_error_result(f"PCA map creation failed: {str(e)}")
 
 
+class CreateVulnerabilityMapComparison(BaseTool):
+    """
+    Create side-by-side comparison of vulnerability maps using both composite and PCA methods.
+    
+    Shows both methodologies in a single view for easy comparison of risk assessments.
+    This is the default view when users ask for vulnerability maps without specifying a method.
+    """
+    
+    include_statistics: bool = Field(
+        True,
+        description="Include statistics panel on each map"
+    )
+    
+    sync_zoom: bool = Field(
+        True,
+        description="Synchronize zoom and pan between the two maps"
+    )
+    
+    @classmethod
+    def get_tool_name(cls) -> str:
+        return "create_vulnerability_map_comparison"
+    
+    @classmethod
+    def get_category(cls) -> ToolCategory:
+        return ToolCategory.VISUALIZATION
+    
+    @classmethod
+    def get_description(cls) -> str:
+        return "Create side-by-side vulnerability map comparison showing both composite and PCA methods"
+    
+    @classmethod
+    def get_examples(cls) -> List[str]:
+        return [
+            "Show me the vulnerability maps",
+            "Create vulnerability map comparison",
+            "Compare composite and PCA vulnerability maps",
+            "Show both vulnerability analysis methods"
+        ]
+    
+    def execute(self, session_id: str) -> ToolExecutionResult:
+        """Create side-by-side vulnerability map comparison"""
+        try:
+            # Check if session has data
+            if not validate_session_data_exists(session_id):
+                return self._create_error_result(
+                    "No data available for this session. Please upload data first."
+                )
+            
+            # Get unified dataset with geometry required for map visualization
+            gdf = get_session_unified_dataset(session_id, require_geometry=True)
+            if gdf is None:
+                return self._create_error_result("No data available for analysis")
+            
+            # Check for both composite and PCA scores
+            composite_exists, composite_col = variable_resolver.check_column_exists('composite_score', list(gdf.columns))
+            if not composite_exists:
+                return self._create_error_result(
+                    "Composite scores not found. Please run composite analysis first."
+                )
+            
+            pca_exists, pca_col = variable_resolver.check_column_exists('pca_score', list(gdf.columns))
+            if not pca_exists:
+                # Try alternative PCA column names
+                alt_names = ['pc1_risk_score', 'pca_risk_score', 'pc1_score']
+                found_alt = False
+                for alt_name in alt_names:
+                    alt_exists, alt_resolved = variable_resolver.check_column_exists(alt_name, list(gdf.columns))
+                    if alt_exists:
+                        pca_col = alt_resolved
+                        found_alt = True
+                        break
+                
+                if not found_alt:
+                    return self._create_error_result(
+                        "PCA scores not found. Please run PCA analysis first."
+                    )
+            
+            # Check for geometry
+            if not hasattr(gdf, 'geometry') or gdf.geometry.isnull().all():
+                return self._create_error_result("No geographic boundaries found. Please upload shapefile data.")
+            
+            # Create side-by-side comparison using plotly subplots
+            from plotly.subplots import make_subplots
+            import plotly.graph_objects as go
+            
+            # Create subplot figure with 1 row and 2 columns of map type
+            fig = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=('Composite Score Method', 'PCA Method'),
+                specs=[[{'type': 'mapbox'}, {'type': 'mapbox'}]],
+                horizontal_spacing=0.05
+            )
+            
+            # Get map bounds
+            bounds = gdf.total_bounds
+            center_lat = (bounds[1] + bounds[3]) / 2
+            center_lon = (bounds[0] + bounds[2]) / 2
+            
+            # Add composite score map (left)
+            fig.add_trace(
+                go.Choroplethmapbox(
+                    geojson=gdf.geometry.__geo_interface__,
+                    locations=gdf.index,
+                    z=gdf[composite_col],
+                    colorscale='Reds',
+                    reversescale=True,
+                    text=gdf['WardName'] if 'WardName' in gdf.columns else gdf.index,
+                    hovertemplate='<b>%{text}</b><br>' +
+                                  'Composite Score: %{z:.3f}<br>' +
+                                  'Rank: %{customdata[0]}<br>' +
+                                  'Category: %{customdata[1]}<br>' +
+                                  '<extra></extra>',
+                    customdata=np.column_stack((
+                        gdf['composite_rank'] if 'composite_rank' in gdf.columns else np.arange(len(gdf)),
+                        gdf['composite_category'] if 'composite_category' in gdf.columns else [''] * len(gdf)
+                    )),
+                    marker_opacity=0.8,
+                    marker_line_width=1,
+                    marker_line_color='white',
+                    showscale=True,
+                    colorbar=dict(
+                        title="Composite<br>Score",
+                        x=0.45,
+                        len=0.8,
+                        thickness=15
+                    ),
+                    name='Composite'
+                ),
+                row=1, col=1
+            )
+            
+            # Add PCA score map (right)
+            fig.add_trace(
+                go.Choroplethmapbox(
+                    geojson=gdf.geometry.__geo_interface__,
+                    locations=gdf.index,
+                    z=gdf[pca_col],
+                    colorscale='Viridis',
+                    reversescale=False,
+                    text=gdf['WardName'] if 'WardName' in gdf.columns else gdf.index,
+                    hovertemplate='<b>%{text}</b><br>' +
+                                  'PCA Score: %{z:.3f}<br>' +
+                                  'Rank: %{customdata[0]}<br>' +
+                                  'Category: %{customdata[1]}<br>' +
+                                  '<extra></extra>',
+                    customdata=np.column_stack((
+                        gdf['pca_rank'] if 'pca_rank' in gdf.columns else np.arange(len(gdf)),
+                        gdf['pca_category'] if 'pca_category' in gdf.columns else [''] * len(gdf)
+                    )),
+                    marker_opacity=0.8,
+                    marker_line_width=1,
+                    marker_line_color='white',
+                    showscale=True,
+                    colorbar=dict(
+                        title="PCA<br>Score",
+                        x=1.0,
+                        len=0.8,
+                        thickness=15
+                    ),
+                    name='PCA'
+                ),
+                row=1, col=2
+            )
+            
+            # Update layout
+            fig.update_layout(
+                title=dict(
+                    text="Vulnerability Assessment Comparison: Composite vs PCA Methods",
+                    x=0.5,
+                    xanchor='center',
+                    font=dict(size=20)
+                ),
+                mapbox=dict(
+                    style="open-street-map",
+                    center=dict(lat=center_lat, lon=center_lon),
+                    zoom=8
+                ),
+                mapbox2=dict(
+                    style="open-street-map",
+                    center=dict(lat=center_lat, lon=center_lon),
+                    zoom=8
+                ),
+                height=700,
+                margin={"r": 0, "t": 60, "l": 0, "b": 0},
+                showlegend=False
+            )
+            
+            # Add statistics annotations if requested
+            if self.include_statistics:
+                # Composite statistics
+                composite_stats = {
+                    'High Risk': len(gdf[gdf.get('composite_category', '') == 'Very High Risk']),
+                    'Medium Risk': len(gdf[gdf.get('composite_category', '').str.contains('Medium', na=False)]),
+                    'Low Risk': len(gdf[gdf.get('composite_category', '').str.contains('Low', na=False)])
+                }
+                
+                # PCA statistics
+                pca_stats = {
+                    'High Risk': len(gdf[gdf.get('pca_category', '') == 'Very High Risk']),
+                    'Medium Risk': len(gdf[gdf.get('pca_category', '').str.contains('Medium', na=False)]),
+                    'Low Risk': len(gdf[gdf.get('pca_category', '').str.contains('Low', na=False)])
+                }
+                
+                annotations = [
+                    dict(
+                        text=f"<b>Composite Method</b><br>" +
+                             f"High Risk: {composite_stats['High Risk']}<br>" +
+                             f"Medium Risk: {composite_stats['Medium Risk']}<br>" +
+                             f"Low Risk: {composite_stats['Low Risk']}",
+                        showarrow=False,
+                        xref="paper", yref="paper",
+                        x=0.02, y=0.98,
+                        xanchor="left", yanchor="top",
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor="black",
+                        borderwidth=1,
+                        font=dict(size=11)
+                    ),
+                    dict(
+                        text=f"<b>PCA Method</b><br>" +
+                             f"High Risk: {pca_stats['High Risk']}<br>" +
+                             f"Medium Risk: {pca_stats['Medium Risk']}<br>" +
+                             f"Low Risk: {pca_stats['Low Risk']}",
+                        showarrow=False,
+                        xref="paper", yref="paper",
+                        x=0.52, y=0.98,
+                        xanchor="left", yanchor="top",
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor="black",
+                        borderwidth=1,
+                        font=dict(size=11)
+                    )
+                ]
+                fig.update_layout(annotations=annotations)
+            
+            # Save the comparison map
+            timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+            
+            # Save in session folder
+            viz_dir = f'instance/uploads/{session_id}/visualizations'
+            import os
+            os.makedirs(viz_dir, exist_ok=True)
+            
+            filename = f'vulnerability_comparison_{timestamp}.html'
+            file_path = os.path.join(viz_dir, filename)
+            
+            # Save the figure
+            fig.write_html(file_path)
+            logger.info(f"Saved vulnerability comparison map to {file_path}")
+            
+            # Create web path
+            web_path = f"/serve_viz_file/{session_id}/{filename}"
+            
+            result_data = {
+                'total_wards': len(gdf),
+                'composite_score_range': f"{gdf[composite_col].min():.3f} to {gdf[composite_col].max():.3f}",
+                'pca_score_range': f"{gdf[pca_col].min():.3f} to {gdf[pca_col].max():.3f}",
+                'web_path': web_path,
+                'file_path': file_path,
+                'map_type': 'vulnerability_comparison'
+            }
+            
+            message = f"Created side-by-side vulnerability map comparison for {len(gdf)} wards showing both composite and PCA methods"
+            
+            return self._create_success_result(
+                message=message,
+                data=result_data
+            )
+            
+        except Exception as e:
+            logger.error(f"Error creating vulnerability map comparison: {e}")
+            return self._create_error_result(f"Vulnerability map comparison failed: {str(e)}")
+
+
 class CreateUrbanExtentMap(BaseTool):
     """
     Create urban extent map using existing agent functions.
