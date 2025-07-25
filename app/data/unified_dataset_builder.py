@@ -441,9 +441,12 @@ class UnifiedDatasetBuilder:
             shp_key = self._detect_ward_key_column(shp_gdf)
             
             if csv_key and shp_key:
-                # PRESERVE CSV WARDS: Use left join to keep all CSV wards, add geometry where possible
-                unified_gdf = self._preserve_csv_wards_merge(csv_df, shp_gdf, csv_key, shp_key)
-                print(f"🔗 Preserved CSV wards with geometry: {unified_gdf.shape[0]} wards (maintaining original {original_ward_count})")
+                # IMPORTANT: Use outer join to preserve ALL wards from both CSV and shapefile
+                # This ensures all shapefile geometries are shown on the map
+                unified_gdf = self._preserve_all_wards_merge(csv_df, shp_gdf, csv_key, shp_key)
+                print(f"🔗 Preserved all wards from both sources: {unified_gdf.shape[0]} total wards")
+                print(f"   - CSV wards: {original_ward_count}")
+                print(f"   - Shapefile wards: {len(shp_gdf)}")
             else:
                 print("⚠️ Could not match CSV and shapefile - using CSV only")
                 unified_gdf = gpd.GeoDataFrame(csv_df)
@@ -570,6 +573,13 @@ class UnifiedDatasetBuilder:
                 
                 # Import fuzzy matching functions
                 try:
+                    # Try to use SequenceMatcher like TPR service does
+                    from difflib import SequenceMatcher
+                    use_sequencematcher = True
+                except ImportError:
+                    use_sequencematcher = False
+                    
+                try:
                     from fuzzywuzzy import fuzz, process
                     
                     # Create shapefile ward name to geometry mapping
@@ -578,17 +588,49 @@ class UnifiedDatasetBuilder:
                     
                     # Fuzzy match each unmatched ward
                     fuzzy_matches = 0
+                    no_match_wards = []
+                    
                     for csv_ward in unmatched_wards:
-                        # Find best match in shapefile
-                        best_match = process.extractOne(csv_ward, shp_ward_names, scorer=fuzz.token_sort_ratio)
+                        # Try multiple fuzzy matching strategies
+                        matches = []
                         
-                        if best_match and best_match[1] >= 80:  # 80% similarity threshold
-                            matched_shp_ward = best_match[0]
-                            # Update geometry for all rows with this ward name
-                            mask = (unified_gdf[csv_key] == csv_ward) & (unified_gdf['geometry'].isna())
-                            unified_gdf.loc[mask, 'geometry'] = shp_ward_geom[matched_shp_ward]
-                            fuzzy_matches += mask.sum()
-                            print(f"  ✓ Matched '{csv_ward}' → '{matched_shp_ward}' (score: {best_match[1]})")
+                        # Strategy 1: Token sort ratio (handles word order differences)
+                        match1 = process.extractOne(csv_ward, shp_ward_names, scorer=fuzz.token_sort_ratio)
+                        if match1:
+                            matches.append(match1)
+                        
+                        # Strategy 2: Partial ratio (handles substring matches)
+                        match2 = process.extractOne(csv_ward, shp_ward_names, scorer=fuzz.partial_ratio)
+                        if match2:
+                            matches.append(match2)
+                        
+                        # Strategy 3: Token set ratio (handles extra words)
+                        match3 = process.extractOne(csv_ward, shp_ward_names, scorer=fuzz.token_set_ratio)
+                        if match3:
+                            matches.append(match3)
+                        
+                        # Get best match from all strategies
+                        if matches:
+                            best_match = max(matches, key=lambda x: x[1])
+                            
+                            if best_match[1] >= 75:  # Good match threshold
+                                matched_shp_ward = best_match[0]
+                                # Update geometry for all rows with this ward name
+                                mask = (unified_gdf[csv_key] == csv_ward) & (unified_gdf['geometry'].isna())
+                                unified_gdf.loc[mask, 'geometry'] = shp_ward_geom[matched_shp_ward]
+                                fuzzy_matches += mask.sum()
+                                logger.info(f"  ✓ Fuzzy matched '{csv_ward}' → '{matched_shp_ward}' (score: {best_match[1]})")
+                            else:
+                                # Log near misses for debugging
+                                if best_match[1] >= 60:
+                                    logger.warning(f"  ⚠️ Near miss: '{csv_ward}' ≈ '{best_match[0]}' (score: {best_match[1]})")
+                                    no_match_wards.append(csv_ward)
+                                else:
+                                    logger.warning(f"  ❌ No match for ward: '{csv_ward}' (best score: {best_match[1]})")
+                                    no_match_wards.append(csv_ward)
+                        else:
+                            logger.warning(f"  ❌ No match found for ward: '{csv_ward}'")
+                            no_match_wards.append(csv_ward)
                     
                     final_matched = unified_gdf['geometry'].notna().sum()
                     print(f"🎯 After fuzzy matching: {final_matched}/{len(unified_gdf)} wards matched (+{fuzzy_matches} fuzzy)")
@@ -600,6 +642,157 @@ class UnifiedDatasetBuilder:
         
         print(f"✅ Preserved all {len(unified_gdf)} CSV wards with geometry where possible")
         return unified_gdf
+    
+    def _preserve_all_wards_merge(self, csv_df: pd.DataFrame, shp_gdf: gpd.GeoDataFrame,
+                                 csv_key: str, shp_key: str) -> gpd.GeoDataFrame:
+        """
+        Merge CSV and shapefile while preserving ALL wards from BOTH sources.
+        This ensures all shapefile geometries appear on maps, even without data.
+        Uses fuzzy matching to maximize matches between sources.
+        """
+        print(f"🔄 Starting comprehensive merge to preserve all wards...")
+        
+        # Normalize ward names for better matching
+        csv_df = csv_df.copy()
+        shp_gdf = shp_gdf.copy()
+        
+        # Create normalized columns for matching
+        csv_df['ward_norm'] = csv_df[csv_key].apply(self._normalize_ward_name_for_matching)
+        shp_gdf['ward_norm'] = shp_gdf[shp_key].apply(self._normalize_ward_name_for_matching)
+        
+        # First, try exact match on normalized names
+        merged = shp_gdf.merge(
+            csv_df,
+            left_on='ward_norm',
+            right_on='ward_norm',
+            how='outer',
+            suffixes=('_shp', '_csv')
+        )
+        
+        # Count initial matches
+        matched_mask = merged[csv_key].notna() & merged[shp_key].notna()
+        initial_matched = matched_mask.sum()
+        print(f"📊 Initial exact match: {initial_matched} wards matched")
+        
+        # Find unmatched wards from both sources
+        csv_unmatched = merged[merged[shp_key].isna() & merged[csv_key].notna()]
+        shp_unmatched = merged[merged[csv_key].isna() & merged[shp_key].notna()]
+        
+        print(f"🔍 Unmatched: {len(csv_unmatched)} CSV wards, {len(shp_unmatched)} shapefile wards")
+        
+        # Apply fuzzy matching for unmatched wards
+        if len(csv_unmatched) > 0 and len(shp_unmatched) > 0:
+            print(f"🔍 Attempting fuzzy matching for unmatched wards...")
+            
+            try:
+                from difflib import SequenceMatcher
+                
+                # Get unmatched ward names
+                csv_unmatched_names = csv_unmatched[csv_key].unique()
+                shp_unmatched_names = shp_unmatched[shp_key].unique()
+                
+                fuzzy_matches = []
+                
+                # For each unmatched CSV ward, find best shapefile match
+                for csv_ward in csv_unmatched_names:
+                    if pd.isna(csv_ward):
+                        continue
+                        
+                    csv_norm = self._normalize_ward_name_for_matching(csv_ward)
+                    best_score = 0
+                    best_match = None
+                    
+                    for shp_ward in shp_unmatched_names:
+                        if pd.isna(shp_ward):
+                            continue
+                            
+                        shp_norm = self._normalize_ward_name_for_matching(shp_ward)
+                        
+                        # Calculate similarity
+                        similarity = SequenceMatcher(None, csv_norm, shp_norm).ratio()
+                        
+                        if similarity > best_score and similarity >= 0.75:  # 75% threshold
+                            best_score = similarity
+                            best_match = shp_ward
+                    
+                    if best_match:
+                        fuzzy_matches.append((csv_ward, best_match, best_score))
+                        logger.info(f"  ✓ Fuzzy matched '{csv_ward}' → '{best_match}' (score: {best_score:.2f})")
+                
+                print(f"🎯 Found {len(fuzzy_matches)} fuzzy matches")
+                
+                # Apply fuzzy matches by updating the merged dataframe
+                for csv_ward, shp_ward, score in fuzzy_matches:
+                    # Find rows for these wards
+                    csv_idx = merged[(merged[csv_key] == csv_ward) & merged[shp_key].isna()].index
+                    shp_idx = merged[(merged[shp_key] == shp_ward) & merged[csv_key].isna()].index
+                    
+                    if len(csv_idx) > 0 and len(shp_idx) > 0:
+                        # Get data from both rows
+                        csv_row = merged.loc[csv_idx[0]]
+                        shp_row = merged.loc[shp_idx[0]]
+                        
+                        # Merge data into the shapefile row (to preserve geometry)
+                        for col in csv_df.columns:
+                            if col not in [csv_key, 'ward_norm', 'geometry']:
+                                merged.loc[shp_idx[0], col] = csv_row[col]
+                        
+                        # Update the ward name to use CSV version
+                        merged.loc[shp_idx[0], csv_key] = csv_ward
+                        
+                        # Remove the CSV-only row
+                        merged = merged.drop(csv_idx[0])
+                
+            except Exception as e:
+                logger.warning(f"Fuzzy matching error: {e}")
+        
+        # Clean up the merged dataframe
+        # Ensure we have a proper ward name column
+        if 'WardName' not in merged.columns:
+            # Use whichever ward name is available
+            merged['WardName'] = merged[csv_key].fillna(merged[shp_key])
+        
+        # Drop temporary normalized columns
+        merged = merged.drop(columns=['ward_norm'], errors='ignore')
+        
+        # Convert to GeoDataFrame
+        unified_gdf = gpd.GeoDataFrame(merged, geometry='geometry')
+        
+        # Report final statistics
+        has_geometry = unified_gdf.geometry.notna().sum()
+        has_data = unified_gdf[csv_key].notna().sum()
+        has_both = (unified_gdf.geometry.notna() & unified_gdf[csv_key].notna()).sum()
+        
+        print(f"✅ Final merge results:")
+        print(f"   - Total wards: {len(unified_gdf)}")
+        print(f"   - With geometry: {has_geometry}")
+        print(f"   - With CSV data: {has_data}")
+        print(f"   - With both: {has_both}")
+        
+        return unified_gdf
+    
+    def _normalize_ward_name_for_matching(self, name: str) -> str:
+        """
+        Normalize ward name for fuzzy matching.
+        Similar to TPR service normalization.
+        """
+        if pd.isna(name):
+            return ""
+            
+        # Convert to lowercase and strip
+        normalized = str(name).lower().strip()
+        
+        # Remove common punctuation and normalize spaces
+        normalized = normalized.replace('-', ' ')
+        normalized = normalized.replace('_', ' ')
+        normalized = normalized.replace('/', ' ')
+        normalized = normalized.replace('  ', ' ')
+        
+        # Remove parentheses and their contents (like ward codes)
+        import re
+        normalized = re.sub(r'\([^)]*\)', '', normalized).strip()
+        
+        return normalized
     
     def _smart_merge_with_duplicates(self, shp_gdf: gpd.GeoDataFrame, csv_df: pd.DataFrame, 
                                    shp_key: str, csv_key: str) -> gpd.GeoDataFrame:
