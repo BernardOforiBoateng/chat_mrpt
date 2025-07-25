@@ -727,42 +727,77 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         logger.error("No valid geometries found in shapefile data")
         return None
     
-    # Add choropleth layer - use geometry.__geo_interface__ like working maps
-    fig.add_trace(go.Choroplethmapbox(
-        geojson=shp_data_valid.geometry.__geo_interface__,
-        locations=shp_data_valid.index,
-        z=shp_data_valid['nets_allocated'],
-        colorscale='Plasma',  # Purple to Pink to Yellow (matching vulnerability map)
-        reversescale=False,   # Yellow for high allocation (most nets)
-        text=shp_data_valid['WardName'],
-        hovertemplate='<b>%{text}</b><br>' +
-                      '─────────────────<br>' +
-                      '<b>Allocation Status:</b> %{customdata[2]}<br>' +
-                      '<b>Urban %:</b> %{customdata[3]:.1f}%<br>' +
-                      '<b>Threshold:</b> ' + str(urban_threshold) + '%<br>' +
-                      '─────────────────<br>' +
-                      '<b>Nets Allocated:</b> %{z:,.0f}<br>' +
-                      '<b>Population:</b> %{customdata[0]:,.0f}<br>' +
-                      '<b>Coverage:</b> %{customdata[1]:.1f}%<br>' +
-                      '<extra></extra>',
-        customdata=np.column_stack((
-            shp_data_valid['Population'].fillna(0),
-            shp_data_valid['coverage_percent'],
-            shp_data_valid['allocation_phase'],
-            shp_data_valid['urban_pct_display'].fillna(0)
-        )),
-        marker_opacity=0.7,
-        marker_line_width=1,
-        marker_line_color='white',
-        showscale=True,
-        colorbar=dict(
-            title="Nets<br>Allocated",
-            thickness=15,
-            len=0.7,
-            x=0.98,
-            y=0.5
-        )
-    ))
+    # Create separate traces for covered and uncovered areas for better visual distinction
+    covered_mask = shp_data_valid['nets_allocated'] > 0
+    uncovered_mask = shp_data_valid['nets_allocated'] == 0
+    
+    # Add uncovered areas first (so they appear behind covered areas)
+    if uncovered_mask.any():
+        uncovered_data = shp_data_valid[uncovered_mask]
+        fig.add_trace(go.Choroplethmapbox(
+            geojson=uncovered_data.geometry.__geo_interface__,
+            locations=uncovered_data.index,
+            z=[0] * len(uncovered_data),  # All zeros for consistent gray color
+            colorscale=[[0, '#f0f0f0'], [1, '#f0f0f0']],  # Light gray
+            text=uncovered_data['WardName'],
+            hovertemplate='<b>%{text}</b><br>' +
+                          '─────────────────<br>' +
+                          '<b>Status:</b> No nets allocated<br>' +
+                          '<b>Urban %:</b> %{customdata[3]:.1f}%<br>' +
+                          '<b>Population:</b> %{customdata[0]:,.0f}<br>' +
+                          '<extra></extra>',
+            customdata=np.column_stack((
+                uncovered_data['Population'].fillna(0),
+                uncovered_data['coverage_percent'],
+                uncovered_data['allocation_phase'],
+                uncovered_data['urban_pct_display'].fillna(0)
+            )),
+            marker_opacity=0.3,  # Much lower opacity for uncovered areas
+            marker_line_width=0.5,
+            marker_line_color='#cccccc',
+            showscale=False,
+            name='No Allocation'
+        ))
+    
+    # Add covered areas with prominent colors
+    if covered_mask.any():
+        covered_data = shp_data_valid[covered_mask]
+        fig.add_trace(go.Choroplethmapbox(
+            geojson=covered_data.geometry.__geo_interface__,
+            locations=covered_data.index,
+            z=covered_data['nets_allocated'],
+            colorscale='Plasma',  # Purple to Pink to Yellow
+            reversescale=False,   # Yellow for high allocation
+            text=covered_data['WardName'],
+            hovertemplate='<b>%{text}</b><br>' +
+                          '─────────────────<br>' +
+                          '<b>Allocation Status:</b> %{customdata[2]}<br>' +
+                          '<b>Urban %:</b> %{customdata[3]:.1f}%<br>' +
+                          '<b>Threshold:</b> ' + str(urban_threshold) + '%<br>' +
+                          '─────────────────<br>' +
+                          '<b>Nets Allocated:</b> %{z:,.0f}<br>' +
+                          '<b>Population:</b> %{customdata[0]:,.0f}<br>' +
+                          '<b>Coverage:</b> %{customdata[1]:.1f}%<br>' +
+                          '<extra></extra>',
+            customdata=np.column_stack((
+                covered_data['Population'].fillna(0),
+                covered_data['coverage_percent'],
+                covered_data['allocation_phase'],
+                covered_data['urban_pct_display'].fillna(0)
+            )),
+            marker_opacity=0.9,  # High opacity for covered areas
+            marker_line_width=1.5,
+            marker_line_color='white',
+            showscale=True,
+            colorbar=dict(
+                title="Nets<br>Allocated",
+                thickness=15,
+                len=0.7,
+                x=0.98,
+                y=0.5
+            ),
+            name='Allocated'
+        ))
     
     # Add annotations for threshold info
     annotations = [
@@ -807,7 +842,7 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         ),
         margin={"r": 0, "t": 60, "l": 0, "b": 0},
         title=dict(
-            text=f"ITN Distribution Plan<br><sub>Areas with urban percentage < {urban_threshold}% are prioritized</sub>",
+            text=f"ITN Distribution Plan<br><sub>Highlighted areas receive bed nets | Faded areas have no allocation</sub>",
             x=0.5,
             xanchor='center',
             font=dict(size=18)
