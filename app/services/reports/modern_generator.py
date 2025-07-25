@@ -213,3 +213,4 @@ class ModernReportGenerator:
         """Generate JSON report (placeholder)"""
         # Placeholder for JSON generation
         return {"report": "json_report_placeholder"}
+    

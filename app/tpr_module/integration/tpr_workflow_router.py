@@ -46,6 +46,7 @@ class TPRWorkflowRouter:
             from ..core.tpr_state_manager import TPRStateManager
             state_manager = TPRStateManager(self.session_id)
             tpr_state = state_manager.get_state()
+            logger.info(f"TPR Router: Retrieved TPR state: workflow_stage={tpr_state.get('workflow_stage', 'unknown')}")
             
             # Merge TPR state with session data for context
             enhanced_session_data = {**session_data}
@@ -54,6 +55,28 @@ class TPRWorkflowRouter:
             
             logger.info(f"TPR Router: Current stage='{enhanced_session_data['tpr_stage']}', "
                        f"Available states={len(enhanced_session_data.get('available_states', []))}")
+            logger.info(f"TPR Router: Full tpr_state keys: {list(tpr_state.keys()) if isinstance(tpr_state, dict) else 'Not a dict'}")
+            logger.info(f"TPR Router: User message: '{user_message}'")
+            
+            # CRITICAL FIX: Check if TPR is complete and user is confirming to proceed to risk analysis
+            if enhanced_session_data['tpr_stage'] == 'complete':
+                logger.info(f"TPR Router: TPR stage is 'complete', checking for confirmation")
+                # Check if user is saying yes to proceed to risk analysis
+                confirmation_words = {'yes', 'y', 'ok', 'okay', 'sure', 'proceed', 'continue', 'go', 'yep', 'yeah'}
+                if any(word in user_message.lower().split() for word in confirmation_words):
+                    logger.info(f"TPR Router: TPR complete, user confirmed to proceed to risk analysis")
+                    # Return special trigger to show exploration menu
+                    return {
+                        'status': 'tpr_to_main_transition',
+                        'workflow': 'tpr',
+                        'stage': 'transition',
+                        'response': '__DATA_UPLOADED__',
+                        'trigger_exploration': True
+                    }
+                else:
+                    logger.info(f"TPR Router: TPR complete but no confirmation words found in: '{user_message}'")
+            else:
+                logger.info(f"TPR Router: TPR stage is NOT 'complete', current stage: '{enhanced_session_data['tpr_stage']}'")
             
             # Classify the intent using LLM
             intent = self._classify_intent(user_message, enhanced_session_data)
@@ -200,6 +223,17 @@ Return only the intent classification, nothing else."""
             tpr_handler = get_tpr_handler(self.session_id)
             result = tpr_handler.process_tpr_message(user_message)
             
+            # Check if TPR handler is returning the special __DATA_UPLOADED__ trigger
+            if result.get('response') == '__DATA_UPLOADED__' and result.get('trigger_exploration'):
+                logger.info(f"TPR Router: Detected __DATA_UPLOADED__ trigger, passing through for main interpreter")
+                # Return a special format that tells the request interpreter to handle this
+                return {
+                    'status': 'tpr_to_main_transition',
+                    'response': '__DATA_UPLOADED__',
+                    'trigger_exploration': True,
+                    'workflow': 'transition'
+                }
+            
             # Convert TPR response format to standard format
             return {
                 'status': result.get('status', 'success'),
@@ -208,7 +242,8 @@ Return only the intent classification, nothing else."""
                 'visualizations': result.get('visualizations', []),
                 'download_links': result.get('download_links', {}),
                 'workflow': 'tpr',
-                'stage': result.get('stage')
+                'stage': result.get('stage'),
+                'trigger_data_uploaded': result.get('trigger_data_uploaded', False)
             }
         except Exception as e:
             logger.error(f"Error processing TPR message: {e}")

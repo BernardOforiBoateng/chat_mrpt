@@ -141,6 +141,24 @@ export class MessageHandler {
                             document.dispatchEvent(new CustomEvent('tprAnalysisComplete', {
                                 detail: { download_links: fullResponse.download_links }
                             }));
+                            
+                            // Check if we should trigger data exploration after TPR
+                            if (fullResponse.trigger_data_uploaded) {
+                                console.log('🎯 TPR complete - triggering data exploration menu');
+                                // Give user time to see the TPR completion message
+                                setTimeout(() => {
+                                    this.sendMessage('__DATA_UPLOADED__');
+                                }, 2000);
+                            }
+                        }
+                        
+                        // Check if TPR wants to trigger exploration workflow
+                        if (fullResponse.trigger_exploration && fullResponse.response === '__DATA_UPLOADED__') {
+                            console.log('🎯 TPR triggering exploration workflow');
+                            // Automatically send the trigger message
+                            setTimeout(() => {
+                                this.sendMessage('__DATA_UPLOADED__');
+                            }, 100);
                         }
                         
                         this.isWaitingForResponse = false;

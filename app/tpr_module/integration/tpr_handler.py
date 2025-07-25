@@ -640,6 +640,10 @@ Your data is now ready for the next steps in malaria intervention planning! The 
             
             # Update workflow stage
             self.state_manager.update_state('workflow_stage', 'complete')
+            logger.info(f"TPR Handler: Set workflow_stage to 'complete' for session {self.session_id}")
+            
+            # Ensure session is marked as modified
+            session.modified = True
             
             # Automatically prepare for risk analysis transition
             try:
@@ -652,14 +656,14 @@ Your data is now ready for the next steps in malaria intervention planning! The 
                 if transition_result['status'] == 'success':
                     logger.info(f"Successfully prepared TPR data for risk analysis - session {self.session_id}")
                     
-                    # CRITICAL: Clear TPR workflow flags after successful transition
-                    # This allows the permission system to take over
-                    session.pop('tpr_workflow_active', None)
-                    session.pop('tpr_session_id', None)
+                    # CRITICAL: DO NOT clear TPR workflow flags here
+                    # Keep them active until user responds to transition prompt
+                    # session.pop('tpr_workflow_active', None)
+                    # session.pop('tpr_session_id', None)
                     # Set flag to trigger data exploration menu
                     session['trigger_data_uploaded'] = True
                     session.modified = True
-                    logger.info(f"TPR workflow flags cleared for risk transition - session {self.session_id}")
+                    logger.info(f"TPR workflow flags kept active waiting for user confirmation - session {self.session_id}")
                 else:
                     logger.warning(f"Could not prepare for risk transition: {transition_result.get('message')}")
                     

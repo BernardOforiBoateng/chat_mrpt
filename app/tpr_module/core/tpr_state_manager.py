@@ -70,11 +70,40 @@ class TPRStateManager:
             session_id: Unique session identifier
         """
         self.session_id = session_id or self._generate_session_id()
-        self.state = ConversationState(
-            session_id=self.session_id,
-            start_time=datetime.now(),
-            current_stage='initial'
-        )
+        
+        # Try to load existing state from Flask session
+        try:
+            from flask import session
+            session_key = f'tpr_state_{self.session_id}'
+            if session_key in session:
+                saved_state = session[session_key]
+                # Reconstruct state from saved data
+                self.state = ConversationState(
+                    session_id=saved_state.get('session_id', self.session_id),
+                    start_time=datetime.fromisoformat(saved_state.get('start_time', datetime.now().isoformat())),
+                    current_stage=saved_state.get('current_stage', 'initial')
+                )
+                # Restore other attributes
+                for key, value in saved_state.items():
+                    if hasattr(self.state, key) and key not in ['session_id', 'start_time', 'current_stage']:
+                        setattr(self.state, key, value)
+                logger.info(f"TPR State Manager: Loaded existing state for session {self.session_id}")
+            else:
+                # Create new state
+                self.state = ConversationState(
+                    session_id=self.session_id,
+                    start_time=datetime.now(),
+                    current_stage='initial'
+                )
+                logger.info(f"TPR State Manager: Created new state for session {self.session_id}")
+        except Exception as e:
+            logger.warning(f"TPR State Manager: Could not load from session: {e}, creating new state")
+            self.state = ConversationState(
+                session_id=self.session_id,
+                start_time=datetime.now(),
+                current_stage='initial'
+            )
+        
         self.state_history = []
         
     def _generate_session_id(self) -> str:
@@ -98,31 +127,32 @@ class TPRStateManager:
             for key, val in key_or_dict.items():
                 if hasattr(self.state, key):
                     setattr(self.state, key, val)
-                    logger.debug(f"State updated: {key} = {val}")
                 else:
-                    # Store in extra attrs if not a standard attribute
-                    if self.state._extra_attrs is None:
+                    # Store in extra attrs
+                    if not self.state._extra_attrs:
                         self.state._extra_attrs = {}
                     self.state._extra_attrs[key] = val
-                    logger.debug(f"State updated (extra): {key} = {val}")
-            
-            # Increment interaction count once for batch update
-            self.state.interaction_count += 1
         else:
-            # Single key-value update
+            # Handle single key-value update
             if hasattr(self.state, key_or_dict):
                 setattr(self.state, key_or_dict, value)
-                logger.debug(f"State updated: {key_or_dict} = {value}")
             else:
-                # Store in extra attrs if not a standard attribute
-                if self.state._extra_attrs is None:
+                # Store in extra attrs
+                if not self.state._extra_attrs:
                     self.state._extra_attrs = {}
                 self.state._extra_attrs[key_or_dict] = value
-                logger.debug(f"State updated (extra): {key_or_dict} = {value}")
-                
-            # Increment interaction count
-            if key_or_dict not in ['interaction_count', 'clarification_count']:
-                self.state.interaction_count += 1
+                logger.debug(f"TPR State Manager: Stored {key_or_dict}={value} in _extra_attrs")
+        
+        # Save to Flask session for persistence
+        try:
+            from flask import session
+            session_key = f'tpr_state_{self.session_id}'
+            state_dict = self.state.to_dict()
+            session[session_key] = state_dict
+            session.modified = True
+            logger.debug(f"TPR State Manager: Saved state to session for {self.session_id}, workflow_stage={state_dict.get('workflow_stage', 'not_found')}")
+        except Exception as e:
+            logger.warning(f"TPR State Manager: Could not save to session: {e}")
     
     def _save_to_history(self) -> None:
         """Save current state to history."""

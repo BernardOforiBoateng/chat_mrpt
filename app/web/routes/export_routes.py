@@ -7,7 +7,7 @@ Completely modular - doesn't affect existing functionality.
 
 import os
 import logging
-from flask import Blueprint, send_file, abort, session as flask_session
+from flask import Blueprint, send_file, abort, session as flask_session, current_app
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,8 @@ def download_export(session_id, filename):
         
         # Construct safe path (prevent directory traversal)
         safe_filename = os.path.basename(filename)
-        export_base_dir = Path('instance/exports') / session_id
+        # Use absolute path from Flask app root
+        export_base_dir = Path(current_app.root_path).parent / 'instance' / 'exports' / session_id
         
         # First try direct path
         file_path = export_base_dir / safe_filename

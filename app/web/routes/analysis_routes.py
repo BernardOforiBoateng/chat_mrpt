@@ -265,28 +265,49 @@ def send_message():
                 router = TPRWorkflowRouter(session_id, llm_manager)
                 tpr_result = router.route_message(user_message, dict(session))
                 
-                # Format response for frontend
-                formatted_response = {
-                    'status': tpr_result.get('status', 'success'),
-                    'message': tpr_result.get('response', ''),
-                    'response': tpr_result.get('response', ''),  # Frontend expects this field
-                    'tools_used': tpr_result.get('tools_used', []),
-                    'workflow': tpr_result.get('workflow', 'tpr'),
-                    'stage': tpr_result.get('stage'),
-                    'processing_time': f"{time.time() - request_start_time:.2f}s",
-                    'total_response_time': f"{time.time() - request_start_time:.2f}s"
-                }
-                
-                # Add visualizations if present
-                if tpr_result.get('visualizations'):
-                    formatted_response['visualizations'] = tpr_result['visualizations']
-                
-                # Add download links if present
-                if tpr_result.get('download_links'):
-                    formatted_response['download_links'] = tpr_result['download_links']
-                
-                logger.info(f"TPR response sent: status={formatted_response.get('status')}, stage={tpr_result.get('stage')}")
-                return jsonify(formatted_response)
+                # Check if TPR router wants to transition to main interpreter
+                if tpr_result.get('response') == '__DATA_UPLOADED__':
+                    logger.info(f"TPR router requesting transition to main interpreter for __DATA_UPLOADED__")
+                    # Clear TPR flags and fall through to main request interpreter
+                    session.pop('tpr_workflow_active', None)
+                    session.pop('tpr_session_id', None)
+                    session.modified = True
+                    # Set the message to trigger exploration menu
+                    user_message = '__DATA_UPLOADED__'
+                    # Let it fall through to normal processing
+                elif tpr_result.get('status') == 'tpr_to_main_transition':
+                    logger.info(f"TPR router requesting transition to main interpreter for __DATA_UPLOADED__")
+                    # Clear TPR flags and fall through to main request interpreter
+                    session.pop('tpr_workflow_active', None)
+                    session.pop('tpr_session_id', None)
+                    session.modified = True
+                    # Set the message to trigger exploration menu
+                    user_message = '__DATA_UPLOADED__'
+                    # Let it fall through to normal processing
+                else:
+                    # Format response for frontend
+                    formatted_response = {
+                        'status': tpr_result.get('status', 'success'),
+                        'message': tpr_result.get('response', ''),
+                        'response': tpr_result.get('response', ''),  # Frontend expects this field
+                        'tools_used': tpr_result.get('tools_used', []),
+                        'workflow': tpr_result.get('workflow', 'tpr'),
+                        'stage': tpr_result.get('stage'),
+                        'processing_time': f"{time.time() - request_start_time:.2f}s",
+                        'total_response_time': f"{time.time() - request_start_time:.2f}s",
+                        'trigger_data_uploaded': tpr_result.get('trigger_data_uploaded', False)
+                    }
+                    
+                    # Add visualizations if present
+                    if tpr_result.get('visualizations'):
+                        formatted_response['visualizations'] = tpr_result['visualizations']
+                    
+                    # Add download links if present
+                    if tpr_result.get('download_links'):
+                        formatted_response['download_links'] = tpr_result['download_links']
+                    
+                    logger.info(f"TPR response sent: status={formatted_response.get('status')}, stage={tpr_result.get('stage')}")
+                    return jsonify(formatted_response)
                 
             except Exception as e:
                 logger.error(f"Error routing to TPR handler: {e}")
@@ -538,27 +559,48 @@ def send_message_streaming():
                 router = TPRWorkflowRouter(session_id, llm_manager)
                 tpr_result = router.route_message(user_message, dict(session))
                 
-                # Convert TPR result to streaming format
-                def generate_tpr():
-                    yield json.dumps({
-                        'content': tpr_result.get('response', ''),
-                        'status': tpr_result.get('status', 'success'),
-                        'visualizations': tpr_result.get('visualizations', []),
-                        'tools_used': tpr_result.get('tools_used', []),
-                        'workflow': tpr_result.get('workflow', 'tpr'),
-                        'stage': tpr_result.get('stage'),
-                        'done': True
-                    })
-                
-                # Return streaming response with TPR result
-                response = Response(
-                    (f"data: {chunk}\n\n" for chunk in generate_tpr()), 
-                    mimetype='text/event-stream'
-                )
-                response.headers['Cache-Control'] = 'no-cache'
-                response.headers['Connection'] = 'keep-alive'
-                response.headers['Access-Control-Allow-Origin'] = '*'
-                return response
+                # Check if TPR router wants to transition to main interpreter
+                if tpr_result.get('response') == '__DATA_UPLOADED__':
+                    logger.info(f"TPR router requesting transition to main interpreter for __DATA_UPLOADED__")
+                    # Clear TPR flags and fall through to main request interpreter
+                    session.pop('tpr_workflow_active', None)
+                    session.pop('tpr_session_id', None)
+                    session.modified = True
+                    # Set the message to trigger exploration menu
+                    user_message = '__DATA_UPLOADED__'
+                    # Let it fall through to normal processing
+                elif tpr_result.get('status') == 'tpr_to_main_transition':
+                    logger.info(f"TPR router requesting transition to main interpreter for __DATA_UPLOADED__")
+                    # Clear TPR flags and fall through to main request interpreter
+                    session.pop('tpr_workflow_active', None)
+                    session.pop('tpr_session_id', None)
+                    session.modified = True
+                    # Set the message to trigger exploration menu
+                    user_message = '__DATA_UPLOADED__'
+                    # Let it fall through to normal processing
+                else:
+                    # Convert TPR result to streaming format
+                    def generate_tpr():
+                        yield json.dumps({
+                            'content': tpr_result.get('response', ''),
+                            'status': tpr_result.get('status', 'success'),
+                            'visualizations': tpr_result.get('visualizations', []),
+                            'tools_used': tpr_result.get('tools_used', []),
+                            'workflow': tpr_result.get('workflow', 'tpr'),
+                            'stage': tpr_result.get('stage'),
+                            'trigger_data_uploaded': tpr_result.get('trigger_data_uploaded', False),
+                            'done': True
+                        })
+                    
+                    # Return streaming response with TPR result
+                    response = Response(
+                        (f"data: {chunk}\n\n" for chunk in generate_tpr()), 
+                        mimetype='text/event-stream'
+                    )
+                    response.headers['Cache-Control'] = 'no-cache'
+                    response.headers['Connection'] = 'keep-alive'
+                    response.headers['Access-Control-Allow-Origin'] = '*'
+                    return response
                 
             except Exception as e:
                 logger.error(f"Error routing to TPR handler: {e}")

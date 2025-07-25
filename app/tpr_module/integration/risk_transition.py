@@ -122,7 +122,8 @@ class TPRToRiskTransition:
             # Mimic session state from handle_full_dataset_path
             session['upload_type'] = 'csv_shapefile'
             session['raw_data_stored'] = True
-            session['should_ask_analysis_permission'] = True
+            # REMOVED: session['should_ask_analysis_permission'] = True
+            # Don't set permission flag - we want to show exploration menu, not auto-run analysis
             
             # Critical flags for request interpreter
             session['csv_loaded'] = True
@@ -151,7 +152,7 @@ class TPRToRiskTransition:
                 from app.core.session_state import SessionStateManager
                 state_manager = SessionStateManager()
                 state_manager.update_state(self.session_id, {
-                    'should_ask_analysis_permission': True,
+                    # REMOVED: 'should_ask_analysis_permission': True,
                     'data_loaded': True,
                     'risk_workflow_active': True,
                     'tpr_transition_complete': True
