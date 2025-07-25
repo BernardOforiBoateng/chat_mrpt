@@ -107,10 +107,10 @@ class ExportITNResults(BaseTool):
                 exported_files.extend(map_files)
                 logger.info(f"Copied {len(map_files)} map files")
             
-            # 4. Create metadata file
-            metadata_path = self._create_metadata(export_data, export_dir)
-            if metadata_path:
-                exported_files.append(metadata_path)
+            # 4. Create summary report instead of JSON metadata
+            summary_path = self._create_summary_report(export_data, export_dir)
+            if summary_path:
+                exported_files.append(summary_path)
             
             # 5. Create ZIP package
             zip_path = self._create_zip_package(exported_files, export_dir, session_id)
@@ -213,25 +213,53 @@ class ExportITNResults(BaseTool):
             gdf = export_data['unified_dataset']
             itn_results = export_data['itn_results']
             
+            # Get actual column names from the data
+            # Handle different naming conventions
+            ward_col = next((col for col in gdf.columns if col.lower() in ['wardname', 'ward_name', 'ward']), None)
+            lga_col = next((col for col in gdf.columns if col.upper() == 'LGA' or col.lower() in ['lga_name', 'lganame']), None)
+            
             # Select ALL relevant columns for comprehensive export
-            export_columns = [
-                # Location info
-                'ward_name', 'lga_name', 'state',
-                # Composite analysis
+            export_columns = []
+            
+            # Always include ward and LGA if available
+            if ward_col:
+                export_columns.append(ward_col)
+            if lga_col:
+                export_columns.append(lga_col)
+                
+            # Add other important columns
+            export_columns.extend([
+                # Analysis results
                 'composite_score', 'composite_rank', 'composite_category',
-                # PCA analysis
                 'pca_score', 'pca_rank', 'pca_category',
-                # Key demographics
-                'population', 'households', 'urbanPercentage',
                 # Health indicators
-                'TPR', 'U5_population', 
-                # ITN distribution
-                'nets_allocated', 'nets_needed', 'coverage_percent',
-                'allocation_phase',
-                # Risk factors (if available)
-                'malaria_prevalence', 'poverty_rate', 'improved_housing',
-                'improved_sanitation', 'safe_water'
-            ]
+                'TPR', 'U5_population',
+                # Urban status
+                'Urban', 'urbanPercentage',
+                # Environmental factors
+                'housing_quality', 'evi', 'ndwi', 'soil_wetness'
+            ])
+            
+            # Now merge with ITN results to get allocation data
+            if 'prioritized' in itn_results:
+                # Create a dataframe from ITN results
+                itn_df = pd.DataFrame(itn_results['prioritized'])
+                if 'reprioritized' in itn_results and itn_results['reprioritized']:
+                    repri_df = pd.DataFrame(itn_results['reprioritized'])
+                    itn_df = pd.concat([itn_df, repri_df], ignore_index=True)
+                
+                # Merge ITN allocation data
+                if ward_col and 'ward_name' in itn_df.columns:
+                    gdf = gdf.merge(
+                        itn_df[['ward_name', 'population', 'nets_allocated', 'nets_needed', 
+                               'coverage_percent', 'allocation_phase']],
+                        left_on=ward_col,
+                        right_on='ward_name',
+                        how='left'
+                    )
+                    # Add ITN columns to export
+                    export_columns.extend(['population', 'nets_allocated', 'nets_needed', 
+                                         'coverage_percent', 'allocation_phase'])
             
             # Filter to existing columns
             available_columns = [col for col in export_columns if col in gdf.columns]
@@ -605,6 +633,66 @@ class ExportITNResults(BaseTool):
             logger.error(f"Error copying maps: {e}")
         
         return copied_files
+    
+    def _create_summary_report(self, export_data: Dict[str, Any], export_dir: Path) -> Optional[Path]:
+        """Create human-readable summary report"""
+        try:
+            stats = export_data.get('summary_stats', {})
+            
+            summary_text = f"""ITN DISTRIBUTION ANALYSIS SUMMARY
+============================================
+Generated: {export_data['export_date'].strftime('%B %d, %Y at %I:%M %p')}
+Session ID: {export_data['session_id']}
+Analysis Method: {export_data['analysis_method'].title()}
+
+COVERAGE STATISTICS
+-------------------
+Total Wards Analyzed: {export_data['total_wards']}
+Wards Receiving Nets: {stats.get('prioritized_wards', 'N/A')}
+- Fully Covered (100%): {stats.get('fully_covered_wards', 'N/A')}
+- Partially Covered: {stats.get('partially_covered_wards', 'N/A')}
+
+NET DISTRIBUTION
+----------------
+Total Nets Available: {stats.get('total_nets', 'N/A'):,}
+Nets Allocated: {stats.get('allocated', 'N/A'):,}
+Nets Remaining: {stats.get('remaining', 'N/A'):,}
+
+POPULATION IMPACT
+-----------------
+Total Population: {stats.get('total_population', 'N/A'):,}
+Population Covered: {stats.get('covered_population', 'N/A'):,}
+Coverage Percentage: {stats.get('coverage_percent', 'N/A')}%
+
+WARD COVERAGE DETAILS
+--------------------
+Average Coverage: {stats.get('ward_coverage_stats', {}).get('avg_coverage_percent', 'N/A')}%
+Minimum Coverage: {stats.get('ward_coverage_stats', {}).get('min_coverage_percent', 'N/A')}%
+Maximum Coverage: {stats.get('ward_coverage_stats', {}).get('max_coverage_percent', 'N/A')}%
+
+FILES INCLUDED IN THIS PACKAGE
+------------------------------
+1. itn_distribution_results.csv - Detailed ward-level data
+2. itn_distribution_dashboard.html - Interactive visualization
+3. Vulnerability and ITN distribution maps
+4. This summary report
+
+NOTES
+-----
+- Wards are prioritized based on composite malaria risk scores
+- Each household receives 2 nets (WHO standard)
+- Full coverage means 100% of households in a ward receive nets
+"""
+            
+            summary_path = export_dir / 'Analysis_Summary.txt'
+            with open(summary_path, 'w') as f:
+                f.write(summary_text)
+            
+            return summary_path
+            
+        except Exception as e:
+            logger.error(f"Error creating summary report: {e}")
+            return None
     
     def _create_metadata(self, export_data: Dict[str, Any], export_dir: Path) -> Optional[Path]:
         """Create metadata file with export information"""
