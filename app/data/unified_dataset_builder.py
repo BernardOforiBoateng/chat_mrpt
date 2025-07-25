@@ -669,14 +669,17 @@ class UnifiedDatasetBuilder:
             suffixes=('_shp', '_csv')
         )
         
-        # Count initial matches
-        matched_mask = merged[csv_key].notna() & merged[shp_key].notna()
+        # Count initial matches - use suffixed column names
+        csv_key_col = f"{csv_key}_csv" if f"{csv_key}_csv" in merged.columns else csv_key
+        shp_key_col = f"{shp_key}_shp" if f"{shp_key}_shp" in merged.columns else shp_key
+        
+        matched_mask = merged[csv_key_col].notna() & merged[shp_key_col].notna()
         initial_matched = matched_mask.sum()
         print(f"📊 Initial exact match: {initial_matched} wards matched")
         
         # Find unmatched wards from both sources
-        csv_unmatched = merged[merged[shp_key].isna() & merged[csv_key].notna()]
-        shp_unmatched = merged[merged[csv_key].isna() & merged[shp_key].notna()]
+        csv_unmatched = merged[merged[shp_key_col].isna() & merged[csv_key_col].notna()]
+        shp_unmatched = merged[merged[csv_key_col].isna() & merged[shp_key_col].notna()]
         
         print(f"🔍 Unmatched: {len(csv_unmatched)} CSV wards, {len(shp_unmatched)} shapefile wards")
         
@@ -687,9 +690,9 @@ class UnifiedDatasetBuilder:
             try:
                 from difflib import SequenceMatcher
                 
-                # Get unmatched ward names
-                csv_unmatched_names = csv_unmatched[csv_key].unique()
-                shp_unmatched_names = shp_unmatched[shp_key].unique()
+                # Get unmatched ward names - use suffixed column names
+                csv_unmatched_names = csv_unmatched[csv_key_col].unique()
+                shp_unmatched_names = shp_unmatched[shp_key_col].unique()
                 
                 fuzzy_matches = []
                 
@@ -724,8 +727,8 @@ class UnifiedDatasetBuilder:
                 # Apply fuzzy matches by updating the merged dataframe
                 for csv_ward, shp_ward, score in fuzzy_matches:
                     # Find rows for these wards
-                    csv_idx = merged[(merged[csv_key] == csv_ward) & merged[shp_key].isna()].index
-                    shp_idx = merged[(merged[shp_key] == shp_ward) & merged[csv_key].isna()].index
+                    csv_idx = merged[(merged[csv_key_col] == csv_ward) & merged[shp_key_col].isna()].index
+                    shp_idx = merged[(merged[shp_key_col] == shp_ward) & merged[csv_key_col].isna()].index
                     
                     if len(csv_idx) > 0 and len(shp_idx) > 0:
                         # Get data from both rows
@@ -738,7 +741,7 @@ class UnifiedDatasetBuilder:
                                 merged.loc[shp_idx[0], col] = csv_row[col]
                         
                         # Update the ward name to use CSV version
-                        merged.loc[shp_idx[0], csv_key] = csv_ward
+                        merged.loc[shp_idx[0], csv_key_col] = csv_ward
                         
                         # Remove the CSV-only row
                         merged = merged.drop(csv_idx[0])
@@ -750,7 +753,7 @@ class UnifiedDatasetBuilder:
         # Ensure we have a proper ward name column
         if 'WardName' not in merged.columns:
             # Use whichever ward name is available
-            merged['WardName'] = merged[csv_key].fillna(merged[shp_key])
+            merged['WardName'] = merged[csv_key_col].fillna(merged[shp_key_col])
         
         # Drop temporary normalized columns
         merged = merged.drop(columns=['ward_norm'], errors='ignore')
@@ -760,8 +763,8 @@ class UnifiedDatasetBuilder:
         
         # Report final statistics
         has_geometry = unified_gdf.geometry.notna().sum()
-        has_data = unified_gdf[csv_key].notna().sum()
-        has_both = (unified_gdf.geometry.notna() & unified_gdf[csv_key].notna()).sum()
+        has_data = unified_gdf[csv_key_col].notna().sum()
+        has_both = (unified_gdf.geometry.notna() & unified_gdf[csv_key_col].notna()).sum()
         
         print(f"✅ Final merge results:")
         print(f"   - Total wards: {len(unified_gdf)}")
