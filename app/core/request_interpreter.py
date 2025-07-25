@@ -1194,14 +1194,14 @@ For example:
                 df = data_state.current_data
             except:
                 pass
+            
+            # Initialize variables_used outside the conditional block
+            variables_used = session_context.get('variables_used', [])
                 
             if columns and df is not None:
                 # Separate computed vs original columns
                 computed_cols = ['composite_score', 'composite_rank', 'composite_category', 
                                'pca_score', 'pca_rank', 'vulnerability_category', 'overall_rank']
-                
-                # Get variables used in analysis from session
-                variables_used = session_context.get('variables_used', [])
                 
                 column_info = f"""
 ## TABLE SCHEMA: df
