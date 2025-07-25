@@ -317,8 +317,27 @@ class ExportITNResults(BaseTool):
         
         # Calculate additional insights
         try:
-            high_risk_count = len(gdf[gdf['composite_category'] == 'High Risk']) if 'composite_category' in gdf.columns else 0
-            very_high_risk_count = len(gdf[gdf['composite_category'] == 'Very High Risk']) if 'composite_category' in gdf.columns else 0
+            # Find category column
+            category_col = None
+            if 'composite_category' in gdf.columns:
+                category_col = 'composite_category'
+            elif 'vulnerability_category' in gdf.columns:
+                category_col = 'vulnerability_category'
+            
+            if category_col:
+                # Create a clean series for comparison
+                categories = gdf[category_col].fillna('')
+                # Convert to string if needed to avoid dict comparison issues
+                if categories.dtype == 'object' and len(categories) > 0:
+                    sample = categories.iloc[0]
+                    if isinstance(sample, (dict, list)):
+                        categories = categories.astype(str)
+                
+                high_risk_count = len(categories[categories.str.contains('High Risk', na=False, case=False) & ~categories.str.contains('Very High', na=False, case=False)])
+                very_high_risk_count = len(categories[categories.str.contains('Very High', na=False, case=False)])
+            else:
+                high_risk_count = 0
+                very_high_risk_count = 0
         except Exception as e:
             logger.warning(f"Error calculating risk counts: {e}")
             high_risk_count = 0
@@ -327,21 +346,61 @@ class ExportITNResults(BaseTool):
         # Get top 10 wards
         top_wards_html = ""
         try:
-            if 'composite_rank' in gdf.columns and 'ward_name' in gdf.columns:
+            # Find the actual column names (case-insensitive)
+            ward_col = next((col for col in gdf.columns if col.lower() in ['wardname', 'ward_name', 'ward']), None)
+            lga_col = next((col for col in gdf.columns if col.upper() == 'LGA' or col.lower() in ['lga_name', 'lganame']), None)
+            pop_col = next((col for col in gdf.columns if col.lower() in ['population', 'pop', 'total_population']), None)
+            
+            if 'composite_rank' in gdf.columns and ward_col:
                 # Select only the columns we need to avoid dict/geometry issues
-                needed_cols = ['ward_name', 'lga_name', 'composite_score', 'composite_rank', 'population']
+                needed_cols = [ward_col, 'composite_score', 'composite_rank']
+                if lga_col:
+                    needed_cols.append(lga_col)
+                if pop_col:
+                    needed_cols.append(pop_col)
+                
+                # Filter to only columns that exist
                 available_cols = [col for col in needed_cols if col in gdf.columns]
                 
                 # Create a clean dataframe without problematic columns
                 clean_df = gdf[available_cols].copy()
+                
+                # Convert any dict/list columns to strings
+                for col in clean_df.columns:
+                    if clean_df[col].dtype == 'object':
+                        # Check if first non-null value is dict or list
+                        sample = clean_df[col].dropna().iloc[0] if len(clean_df[col].dropna()) > 0 else None
+                        if isinstance(sample, (dict, list)):
+                            clean_df[col] = clean_df[col].astype(str)
+                
                 top_10 = clean_df.nsmallest(10, 'composite_rank')
                 
-                top_wards_html = "<h3>🎯 Top 10 Highest Risk Wards</h3><table class='data-table'><tr><th>Rank</th><th>Ward</th><th>LGA</th><th>Risk Score</th><th>Population</th></tr>"
+                top_wards_html = "<h3>🎯 Top 10 Highest Risk Wards</h3><table class='data-table'><tr><th>Rank</th><th>Ward</th>"
+                if lga_col:
+                    top_wards_html += "<th>LGA</th>"
+                top_wards_html += "<th>Risk Score</th>"
+                if pop_col:
+                    top_wards_html += "<th>Population</th>"
+                top_wards_html += "</tr>"
+                
                 for _, row in top_10.iterrows():
-                    top_wards_html += f"<tr><td>{int(row['composite_rank'])}</td><td>{row['ward_name']}</td><td>{row.get('lga_name', 'N/A')}</td><td>{row['composite_score']:.3f}</td><td>{int(row.get('population', 0)):,}</td></tr>"
+                    top_wards_html += f"<tr><td>{int(row['composite_rank'])}</td><td>{row[ward_col]}</td>"
+                    if lga_col:
+                        top_wards_html += f"<td>{row.get(lga_col, 'N/A')}</td>"
+                    top_wards_html += f"<td>{row['composite_score']:.3f}</td>"
+                    if pop_col:
+                        pop_val = row.get(pop_col, 0)
+                        # Handle case where population might be string or have issues
+                        try:
+                            pop_int = int(float(pop_val)) if pd.notna(pop_val) else 0
+                            top_wards_html += f"<td>{pop_int:,}</td>"
+                        except:
+                            top_wards_html += "<td>N/A</td>"
+                    top_wards_html += "</tr>"
                 top_wards_html += "</table>"
         except Exception as e:
             logger.warning(f"Error creating top wards table: {e}")
+            logger.warning(f"Available columns: {list(gdf.columns)[:10]}")  # Log first 10 columns for debugging
             top_wards_html = "<p>Top wards table could not be generated.</p>"
         
         html = f"""
