@@ -456,78 +456,8 @@ class CreateVulnerabilityMapComparison(BaseTool):
                 showlegend=False
             )
             
-            # Add statistics annotations if requested
-            if self.include_statistics:
-                # Determine category column names based on what's available
-                composite_cat_col = None
-                pca_cat_col = None
-                
-                # Check for category columns
-                if 'vulnerability_category' in gdf.columns:
-                    # If using unified vulnerability_category, we need to differentiate
-                    # Check if we have separate composite and PCA scores
-                    if 'composite_score' in gdf.columns and 'composite_rank' in gdf.columns:
-                        composite_cat_col = 'vulnerability_category'
-                    if 'pca_score' in gdf.columns and 'pca_rank' in gdf.columns:
-                        pca_cat_col = 'vulnerability_category'
-                
-                # Fallback to specific category columns if they exist
-                if 'composite_category' in gdf.columns:
-                    composite_cat_col = 'composite_category'
-                if 'pca_category' in gdf.columns:
-                    pca_cat_col = 'pca_category'
-                
-                # Calculate composite statistics
-                composite_stats = {'High Risk': 0, 'Medium Risk': 0, 'Low Risk': 0}
-                if composite_cat_col and composite_cat_col in gdf.columns:
-                    categories = gdf[composite_cat_col].fillna('')
-                    composite_stats = {
-                        'High Risk': len(categories[categories.str.contains('Very High|High Risk', na=False, case=False)]),
-                        'Medium Risk': len(categories[categories.str.contains('Medium', na=False, case=False)]),
-                        'Low Risk': len(categories[categories.str.contains('Low Risk|Lower', na=False, case=False)])
-                    }
-                
-                # Calculate PCA statistics
-                pca_stats = {'High Risk': 0, 'Medium Risk': 0, 'Low Risk': 0}
-                if pca_cat_col and pca_cat_col in gdf.columns:
-                    categories = gdf[pca_cat_col].fillna('')
-                    pca_stats = {
-                        'High Risk': len(categories[categories.str.contains('Very High|High Risk', na=False, case=False)]),
-                        'Medium Risk': len(categories[categories.str.contains('Medium', na=False, case=False)]),
-                        'Low Risk': len(categories[categories.str.contains('Low Risk|Lower', na=False, case=False)])
-                    }
-                
-                annotations = [
-                    dict(
-                        text=f"<b>Composite Method</b><br>" +
-                             f"High Risk: {composite_stats['High Risk']}<br>" +
-                             f"Medium Risk: {composite_stats['Medium Risk']}<br>" +
-                             f"Low Risk: {composite_stats['Low Risk']}",
-                        showarrow=False,
-                        xref="paper", yref="paper",
-                        x=0.02, y=0.98,
-                        xanchor="left", yanchor="top",
-                        bgcolor="rgba(255, 255, 255, 0.8)",
-                        bordercolor="black",
-                        borderwidth=1,
-                        font=dict(size=11)
-                    ),
-                    dict(
-                        text=f"<b>PCA Method</b><br>" +
-                             f"High Risk: {pca_stats['High Risk']}<br>" +
-                             f"Medium Risk: {pca_stats['Medium Risk']}<br>" +
-                             f"Low Risk: {pca_stats['Low Risk']}",
-                        showarrow=False,
-                        xref="paper", yref="paper",
-                        x=0.52, y=0.98,
-                        xanchor="left", yanchor="top",
-                        bgcolor="rgba(255, 255, 255, 0.8)",
-                        bordercolor="black",
-                        borderwidth=1,
-                        font=dict(size=11)
-                    )
-                ]
-                fig.update_layout(annotations=annotations)
+            # Skip statistics annotations to avoid categorical data errors
+            # Per user request, removing high/low risk statistics that cause categorical errors
             
             # Save the comparison map
             timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')

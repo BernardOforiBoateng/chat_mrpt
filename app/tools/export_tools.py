@@ -96,10 +96,15 @@ class ExportITNResults(BaseTool):
             
             # 2. Generate dashboard if requested
             if self.include_dashboard:
+                logger.info(f"include_dashboard is True, generating dashboard...")
                 dashboard_path = self._generate_dashboard(export_data, export_dir, session_id)
                 if dashboard_path:
                     exported_files.append(dashboard_path)
-                    logger.info(f"Generated dashboard: {dashboard_path}")
+                    logger.info(f"Dashboard added to export list: {dashboard_path}")
+                else:
+                    logger.error("Dashboard generation returned None")
+            else:
+                logger.info("include_dashboard is False, skipping dashboard generation")
             
             # 3. Copy maps if requested
             if self.include_maps:
@@ -111,6 +116,11 @@ class ExportITNResults(BaseTool):
             summary_path = self._create_summary_report(export_data, export_dir)
             if summary_path:
                 exported_files.append(summary_path)
+            
+            # Log all files before creating ZIP
+            logger.info(f"Total files to be zipped: {len(exported_files)}")
+            for i, file in enumerate(exported_files):
+                logger.info(f"  File {i+1}: {file.name} (exists: {file.exists()})")
             
             # 5. Create ZIP package
             zip_path = self._create_zip_package(exported_files, export_dir, session_id)
@@ -295,18 +305,30 @@ class ExportITNResults(BaseTool):
     def _generate_dashboard(self, export_data: Dict[str, Any], export_dir: Path, session_id: str) -> Optional[Path]:
         """Generate interactive HTML dashboard"""
         try:
-            # For now, create a placeholder dashboard
-            # In the next step, we'll create the actual template
+            logger.info(f"Starting dashboard generation for session {session_id}")
+            logger.info(f"Export directory: {export_dir}")
+            
+            # Create dashboard HTML
             dashboard_html = self._create_dashboard_html(export_data)
+            logger.info(f"Dashboard HTML created, length: {len(dashboard_html)} characters")
             
             dashboard_path = export_dir / 'itn_distribution_dashboard.html'
+            logger.info(f"Writing dashboard to: {dashboard_path}")
+            
             with open(dashboard_path, 'w', encoding='utf-8') as f:
                 f.write(dashboard_html)
+            
+            # Verify the file was created
+            if dashboard_path.exists():
+                logger.info(f"Dashboard successfully created at {dashboard_path}, size: {dashboard_path.stat().st_size} bytes")
+            else:
+                logger.error(f"Dashboard file not found after writing: {dashboard_path}")
+                return None
             
             return dashboard_path
             
         except Exception as e:
-            logger.error(f"Error generating dashboard: {e}")
+            logger.error(f"Error generating dashboard: {e}", exc_info=True)
             return None
     
     def _create_dashboard_html(self, export_data: Dict[str, Any]) -> str:
