@@ -5,11 +5,14 @@ import geopandas as gpd
 import numpy as np
 import os
 import json
+import re
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 import plotly.graph_objects as go
 from pandas.api.types import is_datetime64_any_dtype
 from app.data.population_data.itn_population_loader import get_population_loader
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +49,7 @@ def detect_state(data_handler) -> str:
             if pd.notna(state_code) and state_code in state_mapping:
                 return state_mapping[state_code]
     
-    # Check CSV data as fallback
+    # Check CSV data
     if hasattr(data_handler, 'csv_data') and data_handler.csv_data is not None:
         # Check for State column
         if 'State' in data_handler.csv_data.columns:
@@ -59,28 +62,53 @@ def detect_state(data_handler) -> str:
             if pd.notna(state_code) and state_code in state_mapping:
                 return state_mapping[state_code]
     
-    # Log warning and return default
-    logger.warning("Could not detect state from data, defaulting to 'Kano'")
-    return 'Kano'  # Default to Kano since that's most common in the system
+    # Check unified dataset as another fallback
+    if hasattr(data_handler, 'unified_dataset') and data_handler.unified_dataset is not None:
+        if 'StateCode' in data_handler.unified_dataset.columns:
+            state_code = data_handler.unified_dataset['StateCode'].iloc[0]
+            if pd.notna(state_code) and state_code in state_mapping:
+                logger.info(f"Detected state from unified dataset: {state_mapping[state_code]}")
+                return state_mapping[state_code]
+    
+    # Try to detect from session or file paths
+    try:
+        from flask import session
+        if 'state_name' in session:
+            state = session['state_name']
+            logger.info(f"Detected state from session: {state}")
+            return state
+    except:
+        pass
+    
+    # Log error - state detection failed
+    logger.error("Could not detect state from data. State detection is required for ITN planning.")
+    return None  # Return None to indicate detection failure
 
 def load_population_data(state: str) -> Optional[pd.DataFrame]:
     """Load and aggregate population data for the state."""
     loader = get_population_loader()
     
     # Try new format first
-    pop_df = loader.load_state_population(state, use_new_format=True)
+    pop_df = loader.load_state_population(state)
     
     if pop_df is not None:
-        # New format data is already clean with Ward, LGA, Population
+        # New format data is already clean with WardName, LGA, Population
         logger.info(f"Using new cleaned population data for {state}")
         
-        # Create output format matching old function's return
+        # Create output format matching expected structure
         ward_population = pop_df.copy()
-        ward_population.columns = ['WardName', 'AdminLevel2', 'Population']
+        
+        # Ensure we have the expected column names
+        if 'Ward' in ward_population.columns and 'WardName' not in ward_population.columns:
+            ward_population = ward_population.rename(columns={'Ward': 'WardName'})
+        if 'LGA' in ward_population.columns and 'AdminLevel2' not in ward_population.columns:
+            ward_population['AdminLevel2'] = ward_population['LGA']
         
         # Add dummy coordinates for now (will be matched from shapefile)
-        ward_population['AvgLatitude'] = np.nan
-        ward_population['AvgLongitude'] = np.nan
+        if 'AvgLatitude' not in ward_population.columns:
+            ward_population['AvgLatitude'] = np.nan
+        if 'AvgLongitude' not in ward_population.columns:
+            ward_population['AvgLongitude'] = np.nan
         
         # Add lowercase version for case-insensitive matching
         ward_population['WardName_lower'] = ward_population['WardName'].str.lower()
@@ -142,6 +170,99 @@ def load_population_data(state: str) -> Optional[pd.DataFrame]:
     # Return the full dataset with coordinates
     return ward_population
 
+def normalize_ward_name(ward_name: str) -> str:
+    """
+    Normalize ward name for better matching.
+    
+    Args:
+        ward_name: Original ward name
+        
+    Returns:
+        Normalized ward name
+    """
+    if pd.isna(ward_name):
+        return ""
+        
+    # Convert to lowercase
+    normalized = str(ward_name).lower().strip()
+    
+    # Remove content in parentheses
+    normalized = normalized.split('(')[0].strip()
+    
+    # Replace roman numerals with numbers (order matters!)
+    # Using regex to match word boundaries
+    roman_replacements = [
+        (r'\bviii\b', '8'), (r'\bvii\b', '7'), (r'\bvi\b', '6'), 
+        (r'\biv\b', '4'), (r'\biii\b', '3'), (r'\bii\b', '2'), 
+        (r'\bix\b', '9'), (r'\bv\b', '5'), (r'\bi\b', '1')
+    ]
+    for pattern, replacement in roman_replacements:
+        normalized = re.sub(pattern, replacement, normalized)
+    
+    # Remove common suffixes
+    suffixes = [' ward', ' wards']
+    for suffix in suffixes:
+        if normalized.endswith(suffix):
+            normalized = normalized[:-len(suffix)].strip()
+    
+    # Replace common separators with space
+    normalized = normalized.replace('/', ' ').replace('-', ' ').replace('_', ' ')
+    
+    # Remove extra spaces
+    normalized = ' '.join(normalized.split())
+    
+    return normalized
+
+def fuzzy_match_ward_names(analysis_wards: List[str], population_wards: List[str], 
+                          threshold: int = 80) -> Dict[str, Tuple[str, int]]:
+    """
+    Perform fuzzy matching between analysis ward names and population ward names.
+    
+    Args:
+        analysis_wards: List of ward names from analysis data
+        population_wards: List of ward names from population data
+        threshold: Minimum matching score (0-100)
+        
+    Returns:
+        Dictionary mapping analysis ward names to (matched_population_ward, score)
+    """
+    matches = {}
+    unmatched = []
+    
+    # Normalize all ward names
+    pop_ward_dict = {normalize_ward_name(w): w for w in population_wards}
+    pop_normalized = list(pop_ward_dict.keys())
+    
+    for ward in analysis_wards:
+        normalized_ward = normalize_ward_name(ward)
+        
+        # First try exact match
+        if normalized_ward in pop_ward_dict:
+            matches[ward] = (pop_ward_dict[normalized_ward], 100)
+            continue
+        
+        # Try fuzzy matching
+        best_match = process.extractOne(normalized_ward, pop_normalized, 
+                                       scorer=fuzz.token_sort_ratio)
+        
+        if best_match and best_match[1] >= threshold:
+            matched_original = pop_ward_dict[best_match[0]]
+            matches[ward] = (matched_original, best_match[1])
+        else:
+            # Try partial ratio for substring matches
+            best_partial = process.extractOne(normalized_ward, pop_normalized, 
+                                            scorer=fuzz.partial_ratio)
+            if best_partial and best_partial[1] >= 90:  # Higher threshold for partial matches
+                matched_original = pop_ward_dict[best_partial[0]]
+                matches[ward] = (matched_original, best_partial[1])
+            else:
+                unmatched.append(ward)
+    
+    if unmatched:
+        logger.warning(f"Could not match {len(unmatched)} wards: {unmatched[:5]}...")
+    
+    return matches
+
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the great circle distance between two points on Earth (in km)."""
     from math import radians, cos, sin, asin, sqrt
@@ -165,6 +286,15 @@ def calculate_nets_needed(population: float, avg_household_size: float) -> int:
 def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 10000, avg_household_size: float = 5.0, urban_threshold: float = 30.0, method: str = 'composite') -> Dict[str, Any]:
     """Perform two-phase ITN distribution calculation."""
     state = detect_state(data_handler)
+    
+    if state is None:
+        return {
+            'status': 'error', 
+            'message': 'Could not detect state from the data. Please ensure your data includes state information (State or StateCode column).'
+        }
+    
+    logger.info(f"Detected state: {state}")
+    
     pop_data = load_population_data(state)
     
     # Use unified dataset if available - it has all the data we need
@@ -207,127 +337,46 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
     
     # Merge population if available
     if pop_data is not None:
-        # Extract original ward name from "WardName (WardCode)" format for duplicates
-        rankings['WardName_original'] = rankings['WardName'].str.replace(r'\s*\([A-Z]{2}\d+\)$', '', regex=True)
-        rankings['WardName_original_lower'] = rankings['WardName_original'].str.lower()
+        logger.info(f"Starting fuzzy matching between {len(rankings)} ranking wards and {len(pop_data)} population wards")
         
-        # Identify which ward names have duplicates in rankings
-        ward_counts = rankings.groupby('WardName_original')['WardName'].count()
-        duplicate_ward_names = set(ward_counts[ward_counts > 1].index)
+        # Get unique ward names from both datasets
+        ranking_ward_names = rankings['WardName'].unique().tolist()
+        pop_ward_names = pop_data['WardName'].unique().tolist()
         
-        # Also check which ward names have duplicates in population data
-        pop_ward_counts = pop_data.groupby('WardName')['AdminLevel2'].count()
-        pop_duplicate_names = set(pop_ward_counts[pop_ward_counts > 1].index)
+        # Perform fuzzy matching
+        matches = fuzzy_match_ward_names(ranking_ward_names, pop_ward_names, threshold=75)
         
-        # Ward names that need coordinate matching (duplicates in either dataset)
-        needs_coord_matching = duplicate_ward_names | pop_duplicate_names
-        logger.info(f"Ward names needing coordinate matching: {len(needs_coord_matching)}")
+        # Create a mapping dataframe
+        match_df = pd.DataFrame([
+            {'WardName': analysis_ward, 'PopWardName': pop_ward, 'MatchScore': score}
+            for analysis_ward, (pop_ward, score) in matches.items()
+        ])
         
-        # Split rankings into two groups
-        needs_coords_mask = rankings['WardName_original'].isin(needs_coord_matching)
-        unique_wards = rankings[~needs_coords_mask].copy()
-        duplicate_wards = rankings[needs_coords_mask].copy()
-        
-        logger.info(f"Matching strategy: {len(unique_wards)} unique wards (simple match), {len(duplicate_wards)} duplicate wards (coordinate match)")
-        
-        # 1. Simple matching for unique ward names
-        if len(unique_wards) > 0:
-            # Get population data for unique wards only
-            pop_unique = pop_data[~pop_data['WardName'].isin(pop_duplicate_names)]
+        # Log matching results
+        logger.info(f"Fuzzy matching results: {len(matches)} out of {len(ranking_ward_names)} wards matched")
+        if len(match_df) > 0:
+            avg_score = match_df['MatchScore'].mean()
+            logger.info(f"Average match score: {avg_score:.1f}")
             
-            unique_wards = unique_wards.merge(
-                pop_unique[['WardName_lower', 'Population']],
-                left_on='WardName_original_lower',
-                right_on='WardName_lower',
-                how='left'
-            )
-            
-            # Handle known spelling variations for unmatched wards
-            spelling_map = {
-                'jauben kudu': 'jaube',
-                'rigar duka': 'rugar duka'
-            }
-            
-            for idx, row in unique_wards[unique_wards['Population'].isna()].iterrows():
-                ward_lower = row['WardName_original_lower']
-                if ward_lower in spelling_map:
-                    alt_spelling = spelling_map[ward_lower]
-                    pop_match = pop_unique[pop_unique['WardName_lower'] == alt_spelling]
-                    if len(pop_match) > 0:
-                        unique_wards.at[idx, 'Population'] = pop_match.iloc[0]['Population']
-                        logger.info(f"Fuzzy matched: '{row['WardName']}' -> '{alt_spelling}'")
-            
-            unique_matched = unique_wards['Population'].notna().sum()
-            logger.info(f"Simple matching: {unique_matched}/{len(unique_wards)} unique wards matched")
+            # Show some examples of matches
+            examples = match_df.nlargest(5, 'MatchScore').head(3)
+            for _, row in examples.iterrows():
+                logger.info(f"  '{row['WardName']}' -> '{row['PopWardName']}' (score: {row['MatchScore']})")
         
-        # 2. Coordinate-based matching for duplicate ward names
-        if len(duplicate_wards) > 0 and hasattr(data_handler, 'unified_dataset') and 'centroid_lat' in data_handler.unified_dataset.columns:
-            # Get coordinates from unified dataset
-            coord_info = data_handler.unified_dataset[['WardName', 'centroid_lat', 'centroid_lon']].copy()
-            duplicate_wards = duplicate_wards.merge(coord_info, on='WardName', how='left')
-            
-            # Match each duplicate ward to nearest population ward
-            duplicate_wards['Population'] = np.nan
-            duplicate_wards['matched_pop_ward'] = ''
-            duplicate_wards['match_distance_km'] = np.nan
-            
-            for idx, ward_row in duplicate_wards.iterrows():
-                if pd.notna(ward_row['centroid_lat']) and pd.notna(ward_row['centroid_lon']):
-                    # Get all population wards with same name
-                    pop_candidates = pop_data[pop_data['WardName'].str.lower() == ward_row['WardName_original_lower']]
-                    
-                    if len(pop_candidates) > 0:
-                        # Calculate distances to all candidates
-                        distances = []
-                        for _, pop_row in pop_candidates.iterrows():
-                            if pd.notna(pop_row['AvgLatitude']) and pd.notna(pop_row['AvgLongitude']):
-                                dist = haversine_distance(
-                                    ward_row['centroid_lat'], ward_row['centroid_lon'],
-                                    pop_row['AvgLatitude'], pop_row['AvgLongitude']
-                                )
-                                distances.append((dist, pop_row))
-                        
-                        if distances:
-                            # Find nearest match
-                            distances.sort(key=lambda x: x[0])
-                            nearest_dist, nearest_pop = distances[0]
-                            
-                            # Accept match if within threshold (5km for most, 15km for Falgore special case)
-                            threshold = 15.0 if 'falgore' in ward_row['WardName_original_lower'] else 5.0
-                            if nearest_dist <= threshold:
-                                duplicate_wards.at[idx, 'Population'] = nearest_pop['Population']
-                                duplicate_wards.at[idx, 'matched_pop_ward'] = f"{nearest_pop['WardName']} ({nearest_pop['AdminLevel2']})"
-                                duplicate_wards.at[idx, 'match_distance_km'] = nearest_dist
-            
-            coord_matched = duplicate_wards['Population'].notna().sum()
-            logger.info(f"Coordinate matching: {coord_matched}/{len(duplicate_wards)} duplicate wards matched")
-            
-            # Log some examples of coordinate matches
-            matched_examples = duplicate_wards[duplicate_wards['Population'].notna()].head(3)
-            for _, ex in matched_examples.iterrows():
-                logger.info(f"  {ex['WardName']} -> {ex['matched_pop_ward']} ({ex['match_distance_km']:.2f} km)")
+        # Merge the matching results back to rankings
+        rankings = rankings.merge(match_df, on='WardName', how='left')
         
-        # Combine results
-        if len(unique_wards) > 0 and len(duplicate_wards) > 0:
-            rankings = pd.concat([unique_wards, duplicate_wards], ignore_index=True)
-        elif len(unique_wards) > 0:
-            rankings = unique_wards
-        else:
-            rankings = duplicate_wards
+        # Now merge with population data using the matched names
+        # Rename population ward column for merging
+        pop_data_renamed = pop_data.rename(columns={'WardName': 'PopWardName'})
         
-        # Calculate total matches
-        total_matched = rankings['Population'].notna().sum()
-        logger.info(f"Total matched: {total_matched}/{len(rankings)} ({(total_matched/len(rankings)*100):.1f}%)")
+        # Merge population data
+        rankings = rankings.merge(
+            pop_data_renamed[['PopWardName', 'Population']],
+            on='PopWardName',
+            how='left'
+        )
         
-        # Log unmatched wards
-        unmatched = rankings[rankings['Population'].isna()]['WardName'].tolist()
-        if unmatched:
-            logger.warning(f"Unmatched wards ({len(unmatched)}): {unmatched[:5]}...")
-        
-        # Drop helper columns
-        cols_to_drop = ['WardName_lower', 'WardName_original', 'WardName_original_lower', 
-                        'centroid_lat', 'centroid_lon', 'matched_pop_ward', 'match_distance_km']
-        rankings = rankings.drop(columns=[col for col in cols_to_drop if col in rankings.columns])
         
         # Check if we have any matches
         matched_count = rankings['Population'].notna().sum()
@@ -347,7 +396,14 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
         if len(rankings) == 0:
             return {'status': 'error', 'message': 'No ward names matched between ranking data and population data. Please check ward name consistency.'}
     else:
-        return {'status': 'error', 'message': 'Population data not available for this state. Please provide it or choose a supported state.'}
+        # Get list of available states
+        loader = get_population_loader()
+        available_states = loader.get_available_states()
+        if available_states:
+            states_list = ', '.join(available_states)
+            return {'status': 'error', 'message': f'Population data not available for {state}. Available states with population data: {states_list}'}
+        else:
+            return {'status': 'error', 'message': f'Population data not available for {state}. No population data files found in the system.'}
     
     # FULL COVERAGE STRATEGY: Give 100% coverage to highest risk wards until nets run out
     # Handle both 'UrbanPercent' and 'urbanPercentage' column names
@@ -676,8 +732,8 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         geojson=shp_data_valid.geometry.__geo_interface__,
         locations=shp_data_valid.index,
         z=shp_data_valid['nets_allocated'],
-        colorscale='RdYlGn',  # Red to Yellow to Green
-        reversescale=True,    # Green for high allocation
+        colorscale='Plasma',  # Purple to Pink to Yellow (matching vulnerability map)
+        reversescale=False,   # Yellow for high allocation (most nets)
         text=shp_data_valid['WardName'],
         hovertemplate='<b>%{text}</b><br>' +
                       '─────────────────<br>' +

@@ -118,11 +118,16 @@ class ExportITNResults(BaseTool):
             # Calculate package size
             package_size_mb = os.path.getsize(zip_path) / (1024 * 1024)
             
-            # Prepare success message
-            message = self._format_export_summary(export_data, len(exported_files), package_size_mb)
-            
             # Create web path for download
             web_path = f"/export/download/{session_id}/{os.path.basename(zip_path)}"
+            
+            # Prepare success message with download link
+            message = self._format_export_summary(export_data, len(exported_files), package_size_mb)
+            # Add the actual download link to the message
+            message = message.replace(
+                "Click the download button below to get your complete ITN distribution analysis package.",
+                f"**[📦 Download ITN Distribution Package]({web_path})**"
+            )
             
             result_data = {
                 'export_path': zip_path,

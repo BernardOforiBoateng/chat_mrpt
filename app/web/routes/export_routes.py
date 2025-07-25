@@ -40,11 +40,14 @@ def download_export(session_id, filename):
         
         # If not found, search in timestamped subdirectories
         if not file_path.exists():
-            # Look for the file in any itn_export_* subdirectory
-            for subdir in export_base_dir.glob('itn_export_*'):
-                potential_path = subdir / safe_filename
-                if potential_path.exists():
-                    file_path = potential_path
+            # Look for the file in any export subdirectory (itn_export_* or analysis_export_*)
+            for pattern in ['itn_export_*', 'analysis_export_*']:
+                for subdir in export_base_dir.glob(pattern):
+                    potential_path = subdir / safe_filename
+                    if potential_path.exists():
+                        file_path = potential_path
+                        break
+                if file_path.exists():
                     break
         
         # Ensure file exists

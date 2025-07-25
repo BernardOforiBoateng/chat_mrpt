@@ -519,7 +519,7 @@ class UnifiedDatasetBuilder:
                                 csv_key: str, shp_key: str) -> gpd.GeoDataFrame:
         """
         Merge CSV and shapefile while preserving all CSV wards and their original names.
-        Uses WardCode system for proper duplicate handling.
+        Uses WardCode system for proper duplicate handling and fuzzy matching for name variations.
         """
         
         # Start with CSV data as base (to preserve original ward count)
@@ -546,10 +546,10 @@ class UnifiedDatasetBuilder:
             print(f"🎯 Matched geometry for {matched_count}/{len(unified_gdf)} wards using WardCode")
             
         else:
-            # Fallback to ward name matching, but use left join to preserve all CSV wards
-            print(f"🏘️ Using ward name matching as fallback (WardCode not available)")
+            # Fallback to ward name matching with fuzzy matching support
+            print(f"🏘️ Using ward name matching (with fuzzy matching for unmatched wards)")
             
-            # Use left join to preserve all CSV wards
+            # First try exact match
             merged = csv_df.merge(
                 shp_gdf[[shp_key, 'geometry']], 
                 left_on=csv_key, 
@@ -558,8 +558,45 @@ class UnifiedDatasetBuilder:
             )
             
             unified_gdf = gpd.GeoDataFrame(merged)
-            matched_count = unified_gdf['geometry'].notna().sum()
-            print(f"🎯 Matched geometry for {matched_count}/{len(unified_gdf)} wards using ward names")
+            initial_matched = unified_gdf['geometry'].notna().sum()
+            print(f"🎯 Exact match: {initial_matched}/{len(unified_gdf)} wards")
+            
+            # Apply fuzzy matching for unmatched wards
+            if initial_matched < len(unified_gdf):
+                unmatched_mask = unified_gdf['geometry'].isna()
+                unmatched_wards = unified_gdf.loc[unmatched_mask, csv_key].unique()
+                
+                print(f"🔍 Attempting fuzzy matching for {len(unmatched_wards)} unmatched wards...")
+                
+                # Import fuzzy matching functions
+                try:
+                    from fuzzywuzzy import fuzz, process
+                    
+                    # Create shapefile ward name to geometry mapping
+                    shp_ward_geom = shp_gdf.set_index(shp_key)['geometry'].to_dict()
+                    shp_ward_names = list(shp_ward_geom.keys())
+                    
+                    # Fuzzy match each unmatched ward
+                    fuzzy_matches = 0
+                    for csv_ward in unmatched_wards:
+                        # Find best match in shapefile
+                        best_match = process.extractOne(csv_ward, shp_ward_names, scorer=fuzz.token_sort_ratio)
+                        
+                        if best_match and best_match[1] >= 80:  # 80% similarity threshold
+                            matched_shp_ward = best_match[0]
+                            # Update geometry for all rows with this ward name
+                            mask = (unified_gdf[csv_key] == csv_ward) & (unified_gdf['geometry'].isna())
+                            unified_gdf.loc[mask, 'geometry'] = shp_ward_geom[matched_shp_ward]
+                            fuzzy_matches += mask.sum()
+                            print(f"  ✓ Matched '{csv_ward}' → '{matched_shp_ward}' (score: {best_match[1]})")
+                    
+                    final_matched = unified_gdf['geometry'].notna().sum()
+                    print(f"🎯 After fuzzy matching: {final_matched}/{len(unified_gdf)} wards matched (+{fuzzy_matches} fuzzy)")
+                    
+                except ImportError:
+                    print("⚠️ fuzzywuzzy not available, skipping fuzzy matching")
+                except Exception as e:
+                    print(f"⚠️ Error during fuzzy matching: {e}")
         
         print(f"✅ Preserved all {len(unified_gdf)} CSV wards with geometry where possible")
         return unified_gdf
