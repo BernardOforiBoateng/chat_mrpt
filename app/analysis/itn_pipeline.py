@@ -88,8 +88,11 @@ def load_population_data(state: str) -> Optional[pd.DataFrame]:
     """Load and aggregate population data for the state."""
     loader = get_population_loader()
     
+    # Clean state name by removing " State" suffix if present
+    clean_state = state.replace(' State', '').strip()
+    
     # Try new format first
-    pop_df = loader.load_state_population(state)
+    pop_df = loader.load_state_population(clean_state)
     
     if pop_df is not None:
         # New format data is already clean with WardName, LGA, Population
@@ -873,7 +876,7 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         <style>
             .threshold-control {
                 position: absolute;
-                top: 80px;
+                top: 120px;
                 left: 20px;
                 background: rgba(255, 255, 255, 0.9);
                 padding: 15px;
