@@ -1522,3 +1522,111 @@ The team provided cleaned ITN population data files with simpler structure (Ward
 - Osun: 332 wards, 7.1M population  
 - All 9 states loaded successfully
 - Backward compatibility maintained
+
+## AWS Infrastructure Investigation Report (July 28, 2025)
+
+### Investigation Date: July 28, 2025
+
+### Executive Summary
+ChatMRPT is currently deployed on AWS using minimal services. The application runs on a single EC2 instance (t3.medium) in the us-east-2 region, with an Application Load Balancer (ALB) for public access. The infrastructure is functional but significantly underutilizes the $10,000 AWS credit available.
+
+### Current AWS Infrastructure
+
+#### 1. Compute Resources
+- **EC2 Instance**: t3.medium (2 vCPUs, 4GB RAM)
+  - Instance ID: Not accessible due to IAM limitations
+  - OS: Amazon Linux 2023.7
+  - Private IP: 172.31.43.200/20
+  - Public IP: 3.137.158.17
+  - Availability Zone: us-east-2
+  - Storage: 20GB NVMe SSD (70% utilized - 14GB used)
+
+#### 2. Application Deployment
+- **Web Server**: Gunicorn with 1 worker process
+  - Binding: 0.0.0.0:8080
+  - Service: systemd service (chatmrpt.service) with auto-restart
+  - Timeout: 300 seconds
+  - Max requests per worker: 1000
+- **Application Framework**: Flask 3.1.1
+- **Python Environment**: Python 3.11 in virtual environment
+- **Process Management**: systemd with automatic restart on failure
+
+#### 3. Database Architecture
+- **Current Database**: SQLite (local file storage)
+  - Main DB: instance/interactions.db (16MB)
+  - Location: /home/ec2-user/ChatMRPT/instance/
+  - User uploads: 1.2GB in instance/uploads/
+- **Database Configuration**: 
+  - Development mode using SQLite
+  - PostgreSQL connection string present but commented out
+  - Redis configuration present but not active
+
+#### 4. Network Architecture
+- **Load Balancer**: Application Load Balancer (ALB)
+  - DNS: chatmrpt-alb-319454030.us-east-2.elb.amazonaws.com
+  - Target IPs: 3.22.131.82, 3.131.216.79
+- **Security**:
+  - SELinux: Enabled in permissive mode
+  - Firewall: No iptables/firewalld configured
+  - SSL/TLS: Handled at ALB level (not on instance)
+
+#### 5. Monitoring & Logging
+- **Application Logs**:
+  - Access log: 3.1MB (26,162 lines)
+  - Error log: 21MB (184,285 lines)
+  - No log rotation configured
+- **System Monitoring**: 
+  - No CloudWatch agent installed
+  - No custom metrics collection
+  - No automated backups or snapshots
+
+#### 6. AWS Services Currently in Use
+1. **EC2**: Single t3.medium instance
+2. **ELB**: Application Load Balancer
+3. **VPC**: Default VPC configuration
+4. **EBS**: 20GB root volume
+
+#### 7. Missing AWS Integrations
+- No IAM role attached to EC2 instance (AWS CLI commands fail)
+- No S3 integration for file storage
+- No CloudWatch for monitoring
+- No RDS for database
+- No ElastiCache for Redis
+- No CloudFormation/CDK for infrastructure as code
+- No Auto Scaling Groups
+- No CloudFront CDN
+- No Route 53 for DNS management
+- No AWS Backup for data protection
+
+### Critical Findings
+
+#### Strengths
+1. Application is running stable with systemd management
+2. ALB provides basic load balancing capability
+3. Structured codebase with modular architecture
+4. Development environment well-configured
+
+#### Weaknesses
+1. **Single Point of Failure**: One EC2 instance with no redundancy
+2. **No Scalability**: Fixed capacity, manual scaling only
+3. **Limited Monitoring**: No proactive monitoring or alerting
+4. **Data Risk**: SQLite database with no automated backups
+5. **Security Gaps**: No WAF, minimal IAM configuration
+6. **Resource Waste**: Running in development mode in production
+7. **Performance Limitations**: Single worker process, no caching layer
+8. **Storage Concerns**: 70% disk utilization with growing data
+
+### Resource Utilization vs Credit Available
+- **Current Monthly Cost Estimate**: ~$50-100
+- **Available Credit**: $10,000
+- **Utilization**: <1% of available resources
+
+### Immediate Concerns
+1. No disaster recovery plan
+2. No automated backups
+3. Growing log files without rotation
+4. SQLite not suitable for production workloads
+5. No horizontal scaling capability
+
+### Next Steps
+Ready to create a comprehensive improvement plan leveraging the full spectrum of AWS services to build a robust, scalable, and enterprise-ready infrastructure for ChatMRPT.
