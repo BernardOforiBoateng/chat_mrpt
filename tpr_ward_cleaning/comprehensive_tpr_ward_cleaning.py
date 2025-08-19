@@ -2,7 +2,7 @@
 """
 Comprehensive TPR Ward Name Cleaning Script
 ============================================
-Author: ChatMRPT Development Team
+Author: Bernard Boateng
 Date: 2025
 Version: 1.0
 
