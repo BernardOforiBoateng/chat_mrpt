@@ -139,15 +139,65 @@ class ComprehensiveTPRCleaner:
                 state_wards = self.gdf[self.gdf['StateName'] == state]['WardName'].dropna().unique()
                 self.state_ward_mapping[state] = list(state_wards)
         
+        # Create state-LGA-ward mapping for strict LGA matching
+        self.state_lga_ward_mapping = {}
+        for state in self.gdf['StateName'].unique():
+            if pd.notna(state):
+                self.state_lga_ward_mapping[state] = {}
+                state_gdf = self.gdf[self.gdf['StateName'] == state]
+                
+                for lga in state_gdf['LGAName'].unique():
+                    if pd.notna(lga):
+                        lga_wards = state_gdf[state_gdf['LGAName'] == lga]['WardName'].dropna().unique()
+                        self.state_lga_ward_mapping[state][lga] = list(lga_wards)
+        
         print(f"Loaded {len(self.state_ward_mapping)} states with ward data")
+        print("✓ LGA-aware matching enabled - wards will be matched within their LGA boundaries")
         
         # Statistics tracking
         self.overall_stats = {
             'total_rows': 0,
             'total_matched': 0,
             'total_unmatched': 0,
-            'states_processed': 0
+            'states_processed': 0,
+            'lga_mismatches_prevented': 0
         }
+    
+    def clean_lga_name(self, lga_name):
+        """Clean LGA name for matching"""
+        if pd.isna(lga_name):
+            return ""
+        
+        # Remove state prefix
+        clean_lga = re.sub(r'^[a-z]{2}\s+', '', str(lga_name))
+        # Remove 'Local Government Area' suffix
+        clean_lga = clean_lga.replace(' Local Government Area', '').strip()
+        
+        return clean_lga
+    
+    def find_matching_lga(self, tpr_lga, shapefile_lgas):
+        """Find the best matching LGA from shapefile"""
+        clean_tpr_lga = self.clean_lga_name(tpr_lga)
+        
+        if not clean_tpr_lga:
+            return None
+        
+        # Try exact match first
+        for sf_lga in shapefile_lgas:
+            if clean_tpr_lga.lower() == str(sf_lga).lower():
+                return sf_lga
+        
+        # Try fuzzy matching
+        best_match = None
+        best_score = 0
+        
+        for sf_lga in shapefile_lgas:
+            score = fuzz.ratio(clean_tpr_lga.lower(), str(sf_lga).lower())
+            if score > best_score and score >= 85:  # High threshold for LGA matching
+                best_score = score
+                best_match = sf_lga
+        
+        return best_match
     
     def clean_ward_name_basic(self, ward_name):
         """Basic cleaning of ward name"""
@@ -356,51 +406,85 @@ class ComprehensiveTPRCleaner:
             # Create mapping for this state's wards
             ward_mapping = {}
             unmatched = []
+            lga_enforced_count = 0
+            cross_lga_prevented = 0
             
             unique_tpr_wards = df['WardName'].dropna().unique()
             print(f"  Processing {len(unique_tpr_wards)} unique ward names...")
+            
+            # Check if LGA column exists
+            has_lga = 'LGA' in df.columns
+            if has_lga:
+                print(f"  ✓ LGA column found - using LGA-aware matching")
+            else:
+                print(f"  ⚠ No LGA column - matching without LGA constraint")
             
             for tpr_ward in unique_tpr_wards:
                 best_match = None
                 best_score = 0
                 technique_used = None
+                candidate_wards = standard_wards  # Default to all wards
                 
-                # Try techniques in order of effectiveness
+                # PRIORITY: Try to get LGA-specific wards first
+                ward_lga = None
+                if has_lga:
+                    # Get LGA from TPR data
+                    ward_rows = df[df['WardName'] == tpr_ward]
+                    if len(ward_rows) > 0:
+                        tpr_lga = ward_rows.iloc[0]['LGA']
+                        
+                        # Find matching LGA in shapefile
+                        shapefile_lgas = state_gdf['LGAName'].unique()
+                        matched_lga = self.find_matching_lga(tpr_lga, shapefile_lgas)
+                        
+                        if matched_lga and state_name in self.state_lga_ward_mapping:
+                            if matched_lga in self.state_lga_ward_mapping[state_name]:
+                                # Restrict candidates to wards in this LGA only
+                                candidate_wards = self.state_lga_ward_mapping[state_name][matched_lga]
+                                ward_lga = matched_lga
+                                lga_enforced_count += 1
+                                
+                                # Check if this would have matched incorrectly without LGA constraint
+                                unconstrained_match, _ = self.technique_1_fuzzy_matching(tpr_ward, standard_wards)
+                                if unconstrained_match and unconstrained_match not in candidate_wards:
+                                    cross_lga_prevented += 1
                 
-                # Technique 1: Fuzzy matching
-                match, score = self.technique_1_fuzzy_matching(tpr_ward, standard_wards)
+                # Try techniques with LGA-constrained candidates
+                
+                # Technique 1: Fuzzy matching (within LGA if available)
+                match, score = self.technique_1_fuzzy_matching(tpr_ward, candidate_wards)
                 if match and score > best_score:
                     best_match = match
                     best_score = score
-                    technique_used = "fuzzy"
+                    technique_used = f"fuzzy{'_lga' if ward_lga else ''}"
                 
                 # Technique 2: Abbreviation inference (for Rivers-style)
                 if best_score < 100:
-                    match, score = self.technique_2_abbreviation_inference(tpr_ward, standard_wards)
+                    match, score = self.technique_2_abbreviation_inference(tpr_ward, candidate_wards)
                     if match and score > best_score:
                         best_match = match
                         best_score = score
-                        technique_used = "abbreviation"
+                        technique_used = f"abbreviation{'_lga' if ward_lga else ''}"
                 
-                # Technique 3: Phonetic matching
+                # Technique 3: Phonetic matching (within LGA if available)
                 if best_score < 100 and PHONETIC_AVAILABLE:
-                    match, score = self.technique_3_phonetic_matching(tpr_ward, standard_wards)
+                    match, score = self.technique_3_phonetic_matching(tpr_ward, candidate_wards)
                     if match and score > best_score:
                         best_match = match
                         best_score = score
-                        technique_used = "phonetic"
+                        technique_used = f"phonetic{'_lga' if ward_lga else ''}"
                 
-                # Technique 4: LGA context matching
-                if best_score < 100 and 'LGA' in df.columns:
-                    # Get LGA for this ward
+                # Technique 4: LGA context matching (fallback if no LGA constraint was applied)
+                if best_score < 100 and not ward_lga and has_lga:
+                    # Try once more with explicit LGA context
                     ward_rows = df[df['WardName'] == tpr_ward]
                     if len(ward_rows) > 0:
-                        ward_lga = ward_rows.iloc[0]['LGA']
-                        match, score = self.technique_4_lga_context(tpr_ward, ward_lga, state_gdf)
+                        tpr_lga = ward_rows.iloc[0]['LGA']
+                        match, score = self.technique_4_lga_context(tpr_ward, tpr_lga, state_gdf)
                         if match and score > best_score:
                             best_match = match
                             best_score = score
-                            technique_used = "lga_context"
+                            technique_used = "lga_context_fallback"
                 
                 if best_match:
                     ward_mapping[tpr_ward] = best_match
@@ -421,6 +505,12 @@ class ComprehensiveTPRCleaner:
             # Summary statistics
             matched_count = len([w for w in ward_mapping.values() if w in standard_wards])
             print(f"  Results: {matched_count}/{len(unique_tpr_wards)} wards matched ({matched_count/len(unique_tpr_wards)*100:.1f}%)")
+            
+            if has_lga:
+                print(f"  LGA enforcement: {lga_enforced_count} wards matched within their LGA")
+                if cross_lga_prevented > 0:
+                    print(f"  ✓ Prevented {cross_lga_prevented} cross-LGA mismatches")
+                    self.overall_stats['lga_mismatches_prevented'] += cross_lga_prevented
             
             if unmatched:
                 print(f"  Unmatched wards ({len(unmatched)}):")
@@ -512,6 +602,9 @@ class ComprehensiveTPRCleaner:
         print(f"Total rows: {self.overall_stats['total_rows']:,}")
         print(f"Total matched: {self.overall_stats['total_matched']:,}")
         print(f"Total unmatched: {self.overall_stats['total_unmatched']:,}")
+        
+        if self.overall_stats.get('lga_mismatches_prevented', 0) > 0:
+            print(f"Cross-LGA mismatches prevented: {self.overall_stats['lga_mismatches_prevented']}")
         
         if self.overall_stats['total_rows'] > 0:
             match_rate = (self.overall_stats['total_matched'] / self.overall_stats['total_rows']) * 100
