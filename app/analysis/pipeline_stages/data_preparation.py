@@ -48,6 +48,17 @@ def _fix_duplicate_ward_names(data: pd.DataFrame) -> pd.DataFrame:
         # Make a copy to avoid modifying original
         fixed_data = data.copy()
         
+        # Check if ward names already contain disambiguation pattern (WardCode)
+        # This prevents double disambiguation when loading TPR output
+        import re
+        pattern = r'\s*\([A-Z0-9]+\)\s*$'  # Pattern for " (WardCode)" at end of name
+        already_disambiguated = fixed_data[ward_col].str.contains(pattern, regex=True, na=False).any()
+        
+        if already_disambiguated:
+            logger.info(f"ℹ️ Ward names already contain disambiguation (WardCode) - skipping duplicate fix")
+            logger.info(f"   Total wards: {len(fixed_data)}")
+            return fixed_data
+        
         # Find duplicates
         duplicates = fixed_data[ward_col].duplicated(keep=False)
         n_duplicates = duplicates.sum()

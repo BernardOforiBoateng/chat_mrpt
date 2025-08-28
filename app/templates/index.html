@@ -256,8 +256,8 @@
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="tpr-tab" data-bs-toggle="tab" data-bs-target="#tpr-upload" type="button" role="tab">
-                                <i class="fas fa-chart-line me-2"></i>TPR Analysis
+                            <button class="nav-link" id="data-analysis-tab" data-bs-toggle="tab" data-bs-target="#data-analysis" type="button" role="tab">
+                                <i class="fas fa-chart-line me-2"></i>Data Analysis
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
@@ -310,46 +310,30 @@
                         </div>
                         </div>
                         
-                        <!-- TPR Upload Tab -->
-                        <div class="tab-pane fade" id="tpr-upload" role="tabpanel">
-                            <div class="alert alert-info mb-4">
-                                <h5 class="alert-heading"><i class="fas fa-info-circle me-2"></i>Test Positivity Rate (TPR) Analysis</h5>
-                                <p class="mb-2">Upload your NMEP (National Malaria Elimination Programme) Excel file for TPR calculation and analysis.</p>
-                                <hr>
-                                <p class="mb-0 small">The system will guide you through:</p>
-                                <ul class="mb-0 small">
-                                    <li>State and facility selection</li>
-                                    <li>Age group analysis (Under 5, Over 5, Pregnant Women)</li>
-                                    <li>Automatic TPR calculation using RDT/Microscopy data</li>
-                                    <li>Environmental variable extraction based on geopolitical zones</li>
-                                </ul>
+                        <!-- Data Analysis Upload Tab -->
+                        <div class="tab-pane fade" id="data-analysis" role="tabpanel">
+                            <div class="mb-4">
+                                <h5 class="fw-bold">Multi-Agent Data Analysis</h5>
+                                <p class="text-muted">Upload your data for intelligent analysis using specialized AI agents working together.</p>
                             </div>
                             
                             <div class="row">
                                 <div class="col-md-8 mx-auto">
                                     <div class="file-upload-option text-center">
-                                        <h5><i class="fas fa-file-excel me-2 text-success"></i>NMEP Excel File</h5>
-                                        <p class="text-muted">Upload your NMEP facility-level malaria test data (.xlsx format)</p>
+                                        <h5><i class="fas fa-file-data me-2 text-primary"></i>Select Data File</h5>
+                                        <p class="text-muted">CSV, Excel, or JSON format</p>
+                                        
                                         <div class="input-group mb-3">
-                                            <input type="file" class="form-control" id="tpr-file-upload" accept=".xlsx,.xls">
+                                            <input type="file" class="form-control" id="data-analysis-file" accept=".csv,.xlsx,.xls,.json">
                                         </div>
                                         
-                                        <button class="btn btn-success btn-lg mt-3 w-100" type="button" id="upload-tpr-btn">
-                                            <i class="fas fa-upload me-2"></i>Start Infection Data Analysis
+                                        <button class="btn btn-primary btn-lg mt-3 w-100" type="button" id="upload-data-analysis-btn">
+                                            <i class="fas fa-upload me-2"></i>Upload for Analysis
                                         </button>
-                                        <div id="tpr-upload-status" class="upload-status mt-2"></div>
+                                        
+                                        <div id="data-analysis-upload-status" class="upload-status mt-2"></div>
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <hr class="my-4">
-                            
-                            <div class="text-center">
-                                <h6 class="text-muted mb-3">What is TPR Analysis?</h6>
-                                <p class="small text-muted">TPR (Test Positivity Rate) analysis calculates the percentage of positive malaria tests 
-                                out of total tests conducted. This helps identify high-burden areas for targeted interventions.</p>
-                                <p class="small text-muted"><strong>Formula:</strong> TPR = (Positive Cases / Total Tested) × 100</p>
-                                <p class="small text-muted">For each ward, we use: max(RDT positive, Microscopy positive) / max(RDT tested, Microscopy tested)</p>
                             </div>
                         </div>
                         
@@ -474,5 +458,8 @@
     
     <!-- Custom JS - Modular Architecture -->
     <script type="module" src="{{ url_for('static', filename='js/app.js') }}?v=20250709{{ range(100000, 999999) | random }}"></script>
+    
+    <!-- Data Analysis V3 Upload Handler -->
+    <script type="module" src="{{ url_for('static', filename='js/modules/upload/data-analysis-upload.js') }}"></script>
 </body>
 </html>

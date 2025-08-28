@@ -14,7 +14,8 @@ import time
 import traceback
 import json
 from datetime import datetime
-from flask import Blueprint, session, request, current_app, jsonify, Response
+from flask import Blueprint, session, request, current_app, jsonify, Response, stream_with_context
+from pathlib import Path
 
 from ...core.decorators import handle_errors, log_execution_time, validate_session
 from ...core.exceptions import ValidationError
@@ -209,6 +210,16 @@ def send_message():
         if not user_message: 
             raise ValidationError('No message provided')
 
+        # Get tab context from frontend
+        tab_context = data.get('tab_context', 'standard-upload')
+        is_data_analysis = data.get('is_data_analysis', False)
+        
+        # Store in session for persistence
+        if is_data_analysis:
+            session['active_tab'] = 'data-analysis'
+            session['use_data_analysis_v3'] = True
+            logger.info(f"📊 Data Analysis tab active - setting V3 mode")
+        
         # Get session ID
         session_id = session.get('session_id')
         
@@ -332,7 +343,13 @@ def send_message():
         # Process message with Request Interpreter
         logger.info(f"Processing message with Request Interpreter: '{user_message[:100]}...'")
         processing_start_time = time.time()
-        response = request_interpreter.process_message(user_message, session_id)
+        # Pass the data analysis context flags to the request interpreter
+        response = request_interpreter.process_message(
+            user_message, 
+            session_id,
+            is_data_analysis=is_data_analysis,
+            tab_context=tab_context
+        )
         processing_duration = time.time() - processing_start_time
         
         # 🎯 LOG AI RESPONSE - CRITICAL FOR DEMO ANALYTICS
@@ -539,11 +556,33 @@ def send_message_streaming():
         if not user_message: 
             raise ValidationError('No message provided')
 
+        # Get tab context from frontend
+        tab_context = data.get('tab_context', 'standard-upload')
+        is_data_analysis = data.get('is_data_analysis', False)
+        
+        # Store in session for persistence
+        if is_data_analysis:
+            session['active_tab'] = 'data-analysis'
+            session['use_data_analysis_v3'] = True
+            logger.info(f"📊 Data Analysis tab active - setting V3 mode")
+        
         # Get session ID
         session_id = session.get('session_id')
         
-        # Check for active TPR workflow FIRST
-        if session.get('tpr_workflow_active', False):
+        # Data Analysis V2 removed - will be reimplemented properly
+        
+        # Check for active data analysis workflow (OLD VERSION - DEPRECATED)
+        if session.get('data_analysis_active', False):
+            logger.info(f"Data analysis workflow active for session {session_id}, routing to data analysis handler")
+            
+            # OLD DATA ANALYSIS - DEPRECATED, will be removed
+            # For now, just clear the flag and fall through
+            session.pop('data_analysis_active', None)
+            session.modified = True
+            logger.warning("Old data analysis flag detected, clearing and falling through to main chat")
+        
+        # Check for active TPR workflow NEXT
+        elif session.get('tpr_workflow_active', False):
             logger.info(f"TPR workflow active for session {session_id}, routing to TPR handler")
             
             # Import TPR workflow router
@@ -588,6 +627,7 @@ def send_message_streaming():
                             'tools_used': tpr_result.get('tools_used', []),
                             'workflow': tpr_result.get('workflow', 'tpr'),
                             'stage': tpr_result.get('stage'),
+                            'download_links': tpr_result.get('download_links', []),  # CRITICAL: Include download links
                             'trigger_data_uploaded': tpr_result.get('trigger_data_uploaded', False),
                             'done': True
                         })
@@ -641,8 +681,14 @@ def send_message_streaming():
                     response_content = ""
                     tools_used = []
                     
-                    # Use the actual streaming method
-                    for chunk in request_interpreter.process_message_streaming(user_message, session_id, session_data):
+                    # Use the actual streaming method (pass data analysis flags)
+                    for chunk in request_interpreter.process_message_streaming(
+                        user_message, 
+                        session_id, 
+                        session_data,
+                        is_data_analysis=is_data_analysis,
+                        tab_context=tab_context
+                    ):
                         # Accumulate content for logging
                         if chunk.get('content'):
                             response_content += chunk.get('content', '')
@@ -719,6 +765,7 @@ def send_message_streaming():
         response.headers['Cache-Control'] = 'no-cache'
         response.headers['Connection'] = 'keep-alive'
         response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
         return response
     
     except ValidationError as e:

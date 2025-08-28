@@ -43,6 +43,16 @@ class BaseConfig:
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
     OPENAI_MODEL_NAME = os.environ.get('OPENAI_MODEL_NAME', 'gpt-4o')
     
+    # vLLM Configuration for GPU-Accelerated Inference
+    USE_VLLM = os.environ.get('USE_VLLM', 'false').lower() == 'true'
+    VLLM_MODEL = os.environ.get('VLLM_MODEL', 'Qwen/Qwen3-235B-A22B')  # Best Qwen 3 MoE model (235B total, 22B active)
+    VLLM_BASE_URL = os.environ.get('VLLM_BASE_URL', 'http://localhost:8000')
+    
+    # Ollama Configuration for Local CPU LLM
+    USE_OLLAMA = os.environ.get('USE_OLLAMA', 'false').lower() == 'true'
+    OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'qwen3:8b')
+    OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')
+    
     # Phase 1: Conversation Memory Configuration
     CHROMA_PERSIST_DIRECTORY = os.environ.get('CHROMA_PERSIST_DIRECTORY', str(INSTANCE_FOLDER_PATH / 'memory'))
     CHROMA_COLLECTION_NAME = os.environ.get('CHROMA_COLLECTION_NAME', 'chatmrpt_conversations')

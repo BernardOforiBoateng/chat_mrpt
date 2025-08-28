@@ -13,6 +13,8 @@ PyPDF2==3.0.1
 flask-htmx==0.3.1
 flask-session==0.8.0
 cachelib==0.13.0
+ftfy==6.3.1
+chardet==5.2.0
 numpy==2.2.6
 pandas==2.2.3
 psycopg2-binary==2.9.9
@@ -39,3 +41,8 @@ scikit-learn>=1.0.0
 duckdb>=0.10.0
 # Redis support for session management
 redis==5.0.1
+
+# LangGraph and LangChain for Data Analysis V3
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0

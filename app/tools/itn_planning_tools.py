@@ -133,6 +133,19 @@ class PlanITNDistribution(BaseTool):
                 'top_priority_wards': self._get_top_priority_wards(result['prioritized'])
             }
             
+            # CRITICAL: Mark ITN planning complete in Redis for multi-worker consistency
+            try:
+                from ..core.redis_state_manager import get_redis_state_manager
+                redis_manager = get_redis_state_manager()
+                redis_success = redis_manager.mark_itn_planning_complete(session_id)
+                if redis_success:
+                    logger.info(f"🎯 Redis: ITN planning marked complete for session {session_id}")
+                else:
+                    logger.warning(f"⚠️ Redis: Failed to mark ITN planning complete for {session_id}")
+            except Exception as e:
+                logger.error(f"Redis state manager error: {e}")
+                # Continue - fallback to session flags
+            
             # CRITICAL: Ensure analysis_complete flag is set for report generation
             try:
                 from flask import session
@@ -170,42 +183,35 @@ class PlanITNDistribution(BaseTool):
         except Exception as e:
             logger.warning(f"Could not get session ID: {e}")
         
-        # Method 1: Check Flask session flag (might not work with multi-worker)
-        try:
-            from flask import session
-            if session.get('analysis_complete', False):
-                logger.info("✅ Analysis complete flag found in Flask session")
-                return True
-            else:
-                logger.debug("Flask session flag not set")
-        except Exception as e:
-            logger.debug(f"Could not check session flag: {e}")
-        
-        # Method 2: Check unified data state (file-based, works across workers)
-        try:
-            from ..core.unified_data_state import get_data_state
-            if session_id:
-                data_state = get_data_state(session_id)
-                
-                # Check if analysis is marked complete in data state
-                if data_state.analysis_complete:
-                    logger.info("✅ Analysis complete in unified data state")
+        # Method 0: Check Redis FIRST (MOST RELIABLE for multi-worker)
+        # This is the authoritative source across ALL workers
+        if session_id:
+            try:
+                from ..core.redis_state_manager import get_redis_state_manager
+                redis_manager = get_redis_state_manager()
+                if redis_manager.is_analysis_complete(session_id):
+                    logger.info("✅ Redis confirms: Analysis is complete")
                     return True
-                
-                # Check if current data has analysis columns
-                if data_state.current_data is not None:
-                    df = data_state.current_data
-                    analysis_columns = ['composite_score', 'composite_rank', 'pca_score', 'pca_rank']
-                    has_columns = any(col in df.columns for col in analysis_columns)
-                    if has_columns:
-                        logger.info(f"✅ Analysis columns found: {[col for col in analysis_columns if col in df.columns]}")
-                        return True
-                    else:
-                        logger.debug(f"No analysis columns in dataset. Columns: {list(df.columns)[:10]}...")
-        except Exception as e:
-            logger.warning(f"Could not check unified data state: {e}")
+                else:
+                    logger.info("❌ Redis: Analysis not marked complete")
+            except Exception as e:
+                logger.warning(f"Redis check failed (will try fallbacks): {e}")
         
-        # Method 3: Direct file check (most reliable for multi-worker)
+        # Method 1: Check for analysis completion marker file (MOST RELIABLE)
+        if session_id:
+            try:
+                import os
+                from pathlib import Path
+                
+                session_folder = Path("instance/uploads") / session_id
+                marker_file = session_folder / ".analysis_complete"
+                if marker_file.exists():
+                    logger.info("✅ Found .analysis_complete marker file")
+                    return True
+            except Exception as e:
+                logger.warning(f"Could not check marker file: {e}")
+        
+        # Method 2: Direct file check (reliable for multi-worker)
         if session_id:
             try:
                 import os
@@ -220,7 +226,10 @@ class PlanITNDistribution(BaseTool):
                         "unified_dataset.csv",
                         "analysis_results_composite.csv",
                         "analysis_results_pca.csv",
-                        "composite_analysis_results.csv"
+                        "composite_analysis_results.csv",
+                        "analysis_composite_scores.csv",
+                        "analysis_vulnerability_rankings.csv",
+                        "composite_scores.csv"
                     ]
                     
                     for filename in analysis_files:
@@ -244,7 +253,42 @@ class PlanITNDistribution(BaseTool):
             except Exception as e:
                 logger.warning(f"Could not check files directly: {e}")
         
-        # Method 4: Check data handler attributes (legacy)
+        # Method 3: Check unified data state (file-based, works across workers)
+        try:
+            from ..core.unified_data_state import get_data_state
+            if session_id:
+                data_state = get_data_state(session_id)
+                
+                # Check if analysis is marked complete in data state
+                if data_state.analysis_complete:
+                    logger.info("✅ Analysis complete in unified data state")
+                    return True
+                
+                # Check if current data has analysis columns
+                if data_state.current_data is not None:
+                    df = data_state.current_data
+                    analysis_columns = ['composite_score', 'composite_rank', 'pca_score', 'pca_rank']
+                    has_columns = any(col in df.columns for col in analysis_columns)
+                    if has_columns:
+                        logger.info(f"✅ Analysis columns found: {[col for col in analysis_columns if col in df.columns]}")
+                        return True
+                    else:
+                        logger.debug(f"No analysis columns in dataset. Columns: {list(df.columns)[:10]}...")
+        except Exception as e:
+            logger.warning(f"Could not check unified data state: {e}")
+        
+        # Method 4: Check Flask session flag (might not work with multi-worker)
+        try:
+            from flask import session
+            if session.get('analysis_complete', False):
+                logger.info("✅ Analysis complete flag found in Flask session")
+                return True
+            else:
+                logger.debug("Flask session flag not set")
+        except Exception as e:
+            logger.debug(f"Could not check session flag: {e}")
+        
+        # Method 5: Check data handler attributes (legacy)
         has_composite = hasattr(data_handler, 'vulnerability_rankings') and data_handler.vulnerability_rankings is not None
         has_pca = hasattr(data_handler, 'vulnerability_rankings_pca') and data_handler.vulnerability_rankings_pca is not None
         has_unified = hasattr(data_handler, 'unified_dataset') and data_handler.unified_dataset is not None

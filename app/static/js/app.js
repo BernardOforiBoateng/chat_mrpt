@@ -4,17 +4,18 @@
  */
 
 // Import all modules - UPDATED TO USE REFACTORED CHAT MANAGER
-import chatManager from './modules/chat/chat-manager-refactored.js';
-import sidebarManager from './modules/ui/sidebar.js';
-import verticalNavManager from './modules/ui/vertical-nav-v2.js';
-import fileUploader from './modules/upload/file-uploader.js';
-import apiClient from './modules/utils/api-client.js';
-import DOMHelpers from './modules/utils/dom-helpers.js';
-import { SessionDataManager } from './modules/utils/storage.js';
-import { DataUploadManager } from './modules/data/data-upload-manager.js';
-import { TPRDownloadManager } from './modules/data/tpr-download-manager.js';
-import variableDisplayManager from './modules/utils/variable-display.js';
-import privacyNoticeManager from './modules/ui/privacy-notice.js';
+// Cache bust: v20250825
+import chatManager from './modules/chat/chat-manager-refactored.js?v=20250825';
+import sidebarManager from './modules/ui/sidebar.js?v=20250825';
+import verticalNavManager from './modules/ui/vertical-nav-v2.js?v=20250825';
+import fileUploader from './modules/upload/file-uploader.js?v=20250825';
+import apiClient from './modules/utils/api-client.js?v=20250825';
+import DOMHelpers from './modules/utils/dom-helpers.js?v=20250825';
+import { SessionDataManager } from './modules/utils/storage.js?v=20250825';
+import { DataUploadManager } from './modules/data/data-upload-manager.js?v=20250825';
+import { TPRDownloadManager } from './modules/data/tpr-download-manager.js?v=20250825';
+import variableDisplayManager from './modules/utils/variable-display.js?v=20250825';
+import privacyNoticeManager from './modules/ui/privacy-notice.js?v=20250825';
 
 /**
  * Theme Manager - Light/Dark Mode Toggle

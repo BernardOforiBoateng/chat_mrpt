@@ -4,15 +4,17 @@
 
 Use this workflow when working on a new task:
 
-1. First,  think through the problem, read the codebase for relevant files, and write a plan to tasks/todo.md.
+1. First,  think through the problem, read the codebase for relevant files, and write a plan to tasks/todo.md. Make sure to update the todo.md file as you go through the checklist. Follow the plan in the todo.md file you just wrote.
 2. The plan should have a list of todo items, that you can check off as you complete them.
 3. Before you begin, check in with me and I will verify the plan.
 4. Then, begin working on the todo items, marking them as complete as you go.
 5. Finally, add a review section to the todo.md file with a summary of the changes you made and any other relevant information.
-6. In the plan I also want to make sure we are using the right software engineering practices and scalable coding, modlular as well and ensure that no file you write is more than 600 lines.
-7. Put all your thoughts, what you learnt, what worked, what didn't, the decisions made for every task in this tasks/project.md. This will help when we want to review stuff. This is a typical project notes. So it should follow standard practice.
-8. ALWAYS update tasks/project.md frequently.
-
+6. In the plan I also want to make sure we are using the right software engineering practices and scalable coding, modlular as well and ensure that no file you write is more than 600-800 lines.
+7. Put all your thoughts, what you learnt, what worked, what didn't, the decisions made for every task in this tasks/prjoect_notes. This is a folder, so ensure you arrange the notes in order that it is easier to find, create markdown files in this folder and do not exceed a 1000 lines for each markdown file. This will help when we want to review stuff. This is a typical project notes. So it should follow standard practice. 
+8. ALWAYS update tasks/prjoect_notes. frequently.
+9. Always read all lines in context.md and terminal_output.md when attached. Never decide to read the first few lines.
+10. When you are working on a new task, if the current file can be modified, please do so. Do not create a new file if the current one can be modified to fit what is needed. However, you can also create a new file and then connect it if the current old original file exceeds 600-800 lines. Please follow these instructions. You should not always be in a hurry to create a new file.
+11. Please whenever you are testing something industry-standard unit tests using pytest. That would actually test what whats been actually implemented.
 Periodically, make sure to commit when it makes sense to do so.
 
 ## Tech Stack
@@ -126,6 +128,15 @@ Periodically, make sure to commit when it makes sense to do so.
 - **Documentation**: Document all configuration options and dynamic behaviors
 - **Testing**: Write tests that work with multiple datasets, not just one region
 
+### Multi-Worker Session Management
+- **Critical Files**: 
+  - `app/core/unified_data_state.py` - No singleton pattern, fresh instances per worker
+  - `app/core/analysis_state_handler.py` - No singleton pattern
+  - `app/core/request_interpreter.py` - File-based session detection for cross-worker compatibility
+- **Worker Configuration**: 6 workers configured in `gunicorn_config.py`
+- **Session Persistence**: File-based state checking ensures analysis completion is detected across all workers
+- **Redis Support**: ElastiCache Redis available for future session management enhancements
+
 ## Core Architecture Patterns
 - **Service Container**: `app/services/container.py` manages dependency injection
 - **Tool System**: Each analysis tool in `app/tools/` follows standard interface
@@ -174,13 +185,129 @@ Periodically, make sure to commit when it makes sense to do so.
 - Test data uploads using `app/sample_data/` templates
 
 ## Deployment
-- **Target**: AWS infrastructure /
+- **Target**: AWS infrastructure with Auto Scaling Group
 - **Production Database**: PostgreSQL with persistent storage
 - **Build Process**: `build.sh` creates directories and installs system deps
-- **Web Server**: gunicorn with Flask application
+- **Web Server**: Gunicorn with Flask application (6 workers for 50-60 concurrent users)
 - **Static Files**: Served through Flask with caching headers
 - **Logs**: Rotating file handler in `instance/app.log`
 - **Infrastructure**: Scalable for institutional deployment with large geospatial datasets
+
+### AWS Infrastructure Overview
+- **Production** (Active Environment): Multiple instances behind ALB
+  - Instance 1: `i-0994615951d0b9563` (Public: 3.21.167.170, Private: 172.31.46.84)
+  - Instance 2: `i-0f3b25b72f18a5037` (Public: 18.220.103.20, Private: 172.31.24.195)
+  - **CRITICAL**: Must deploy to ALL instances or users will experience inconsistent behavior
+- **Redis**: AWS ElastiCache for session management across workers
+  - Production Redis: `chatmrpt-redis-staging.1b3pmt.0001.use2.cache.amazonaws.com:6379`
+- **Access Points**:
+  - **Primary URL (CloudFront HTTPS)**: https://d225ar6c86586s.cloudfront.net
+  - Production ALB (HTTP): http://chatmrpt-staging-alb-752380251.us-east-2.elb.amazonaws.com
+- **Old Infrastructure (DISABLED)**:
+  - ~~Old Instance 1: `i-06d3edfcc85a1f1c7` (172.31.44.52)~~ **[STOPPED]**
+  - ~~Old Instance 2: `i-0183aaf795bf8f24e` (172.31.43.200)~~ **[STOPPED]**
+  - ~~Old ALB: http://chatmrpt-alb-319454030.us-east-2.elb.amazonaws.com~~ **[DO NOT USE]**
+  - ~~Old Redis: `chatmrpt-redis-production.1b3pmt.0001.use2.cache.amazonaws.com:6379`~~ **[DO NOT USE]**
+
+### Deployment Best Practices
+**ALWAYS deploy to ALL instances in BOTH environments!**
+
+#### Deploy to Production (2 instances)
+```bash
+# Production is now the former staging environment
+./deployment/deploy_to_production.sh
+```
+This deploys to both production instances:
+- Instance 1: 3.21.167.170
+- Instance 2: 18.220.103.20
+
+**Manual deployment to ALL production instances**:
+```bash
+# Production instances (use public IPs)
+for ip in 3.21.167.170 18.220.103.20; do
+    scp -i ~/.ssh/chatmrpt-key.pem <files> ec2-user@$ip:/home/ec2-user/ChatMRPT/
+    ssh -i ~/.ssh/chatmrpt-key.pem ec2-user@$ip 'sudo systemctl restart chatmrpt'
+done
+```
+
+⚠️ **OLD PRODUCTION INSTANCES ARE DISABLED - DO NOT USE**
+- ~~172.31.44.52~~ (STOPPED)
+- ~~172.31.43.200~~ (STOPPED)
+
+### SSH Access to AWS Instances
+
+#### Prerequisites
+- SSH key file: `aws_files/chatmrpt-key.pem`
+- Set proper permissions: `chmod 600 aws_files/chatmrpt-key.pem`
+
+#### Production Server Access (formerly Staging)
+```bash
+# Copy key to /tmp first
+cp aws_files/chatmrpt-key.pem /tmp/chatmrpt-key2.pem
+chmod 600 /tmp/chatmrpt-key2.pem
+
+# SSH to production instances
+# Instance 1:
+ssh -i /tmp/chatmrpt-key2.pem ec2-user@3.21.167.170
+
+# Instance 2:
+ssh -i /tmp/chatmrpt-key2.pem ec2-user@18.220.103.20
+```
+
+**CRITICAL**: Production has MULTIPLE instances behind an Application Load Balancer (ALB)
+- Current ACTIVE instances: 
+  - Instance 1: `i-0994615951d0b9563` (IP: 3.21.167.170)
+  - Instance 2: `i-0f3b25b72f18a5037` (IP: 18.220.103.20)
+
+**IMPORTANT**: Always deploy to ALL production instances to avoid inconsistent behavior!
+
+#### Old Production (DISABLED - DO NOT USE)
+- ~~Instance 1: `i-06d3edfcc85a1f1c7` (172.31.44.52)~~ **[STOPPED]**
+- ~~Instance 2: `i-0183aaf795bf8f24e` (172.31.43.200)~~ **[STOPPED]**
+
+1. **AWS Systems Manager Session Manager** (Recommended):
+   - Go to AWS Console → EC2 → Instances
+   - Find ASG instance (e.g., i-06d3edfcc85a1f1c7)
+   - Click "Connect" → "Session Manager"
+
+2. **EC2 Instance Connect**:
+   - Go to AWS Console → EC2 → Instances  
+   - Select instance → "Connect" → "EC2 Instance Connect"
+
+3. **SSH from Staging** (if within VPC):
+   ```bash
+   # First SSH to staging
+   ssh -i /tmp/chatmrpt-key2.pem ec2-user@18.117.115.217
+   
+   # Copy key to staging server (if not already there)
+   scp -i /tmp/chatmrpt-key2.pem aws_files/chatmrpt-key.pem ec2-user@18.117.115.217:~/.ssh/
+   ssh -i /tmp/chatmrpt-key2.pem ec2-user@18.117.115.217 'chmod 600 ~/.ssh/chatmrpt-key.pem'
+   
+   # SSH to production instances
+   # Instance 1:
+   ssh -i /tmp/chatmrpt-key2.pem ec2-user@18.117.115.217 'ssh -i ~/.ssh/chatmrpt-key.pem ec2-user@172.31.44.52'
+   
+   # Instance 2:
+   ssh -i /tmp/chatmrpt-key2.pem ec2-user@18.117.115.217 'ssh -i ~/.ssh/chatmrpt-key.pem ec2-user@172.31.43.200'
+   ```
+
+#### Common AWS Operations
+```bash
+# Check service status
+sudo systemctl status chatmrpt
+
+# View logs
+sudo journalctl -u chatmrpt -f
+
+# Restart service
+sudo systemctl restart chatmrpt
+
+# Check worker count
+ps aux | grep gunicorn | grep -v grep | wc -l
+
+# Monitor resources
+htop
+```
 
 ## Malaria Domain Context
 - **Primary Use**: Epidemiological risk assessment for malaria intervention targeting
@@ -201,3 +328,9 @@ Periodically, make sure to commit when it makes sense to do so.
 - Visualizations: `*_map_*.html`, `*_chart_*.html`
 - Raw uploads: `raw_data.csv`, `raw_shapefile.shp`
 - Settlement maps: `building_classification_map_*.html`
+
+
+
+ CloudFront is fully deployed! You can now access ChatMRPT through:
+  - CloudFront CDN: https://d225ar6c86586s.cloudfront.net
+  - Direct ALB: http://chatmrpt-alb-319454030.us-east-2.elb.amazonaws.com

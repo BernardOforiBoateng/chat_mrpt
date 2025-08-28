@@ -148,43 +148,45 @@ class VariableExtractor:
     def _extract_environmental_variable(self, areas: List[Dict[str, str]], 
                                       var_name: str, 
                                       date_range: Dict[str, str]) -> List[float]:
-        """Extract environmental variable using simulated Earth Engine API"""
+        """Extract environmental variable from actual raster files"""
         # Check cache first
         cache_key = f"{var_name}_{date_range['start']}_{date_range['end']}"
         cached_data = self._check_cache(cache_key)
         if cached_data is not None:
             return self._match_areas_to_cached_data(areas, cached_data)
         
-        # Simulate Earth Engine extraction (in real implementation, use ee Python API)
-        var_config = self.variable_sources['environmental'][var_name]
+        # Try to extract from real raster files first
+        values = self._extract_from_raster(areas, var_name)
         
-        # For now, generate realistic synthetic data based on variable type
-        values = []
-        for area in areas:
-            if var_name == 'EVI':
-                # EVI ranges from -2000 to 10000, typical values 2000-8000
-                base_value = np.random.normal(4500, 1500)
-                value = np.clip(base_value, 0, 10000)
-            elif var_name == 'NDVI':
-                # NDVI ranges from -2000 to 10000, typical values 3000-7000
-                base_value = np.random.normal(5000, 1200)
-                value = np.clip(base_value, 0, 10000)
-            elif var_name == 'rainfall':
-                # Rainfall in mm/month, varies by season
-                base_value = np.random.gamma(2, 30)  # Skewed distribution
-                value = np.clip(base_value, 0, 300)
-            elif var_name == 'temperature':
-                # Temperature in Celsius, Nigeria range 20-35
-                base_value = np.random.normal(28, 3)
-                value = np.clip(base_value, 20, 35)
-            elif var_name == 'humidity':
-                # Relative humidity percentage
-                base_value = np.random.normal(65, 15)
-                value = np.clip(base_value, 20, 95)
-            else:
-                value = np.nan
-            
-            values.append(value)
+        # If raster extraction failed, use fallback values
+        if values is None or all(v is None for v in values):
+            logger.warning(f"Raster extraction failed for {var_name}, using fallback values")
+            values = []
+            for area in areas:
+                if var_name == 'EVI':
+                    # EVI ranges from -2000 to 10000, typical values 2000-8000
+                    base_value = np.random.normal(4500, 1500)
+                    value = np.clip(base_value, 0, 10000)
+                elif var_name == 'NDVI':
+                    # NDVI ranges from -2000 to 10000, typical values 3000-7000
+                    base_value = np.random.normal(5000, 1200)
+                    value = np.clip(base_value, 0, 10000)
+                elif var_name == 'rainfall':
+                    # Rainfall in mm/month, varies by season
+                    base_value = np.random.gamma(2, 30)  # Skewed distribution
+                    value = np.clip(base_value, 0, 300)
+                elif var_name == 'temperature':
+                    # Temperature in Celsius, Nigeria range 20-35
+                    base_value = np.random.normal(28, 3)
+                    value = np.clip(base_value, 20, 35)
+                elif var_name == 'humidity':
+                    # Relative humidity percentage
+                    base_value = np.random.normal(65, 15)
+                    value = np.clip(base_value, 20, 95)
+                else:
+                    value = np.nan
+                
+                values.append(value)
         
         # Cache the results
         self._save_to_cache(cache_key, areas, values)
@@ -294,6 +296,155 @@ class VariableExtractor:
             values.append(area_value_map.get(key, np.nan))
         
         return values
+    
+    def _extract_from_raster(self, areas: List[Dict[str, str]], var_name: str) -> Optional[List[float]]:
+        """
+        Extract variable values from actual raster files.
+        
+        Args:
+            areas: List of geographic areas with ward/LGA/state info
+            var_name: Name of the variable to extract
+            
+        Returns:
+            List of values or None if extraction fails
+        """
+        try:
+            import rasterio
+            import glob
+            from shapely.geometry import Point
+            
+            # Base raster directory
+            # Use relative path that works both locally and on AWS
+            from pathlib import Path
+            current_file = Path(__file__).resolve()
+            project_root = current_file.parent.parent.parent  # Go up from app/services/
+            raster_base = os.path.join(project_root, 'rasters')
+            
+            # Map variable names to raster file patterns
+            raster_map = {
+                'rainfall': 'rainfall_monthly/2021/X2021_rainfall_year_2021_month_*.tif',
+                'temperature': 'temperature_monthly/2021/X2021_temperature_year_2021_month_*.tif',
+                'EVI': 'EVI/EVI_v6.2018.*.mean.1km.tif',
+                'NDVI': 'NDVI/*.tif',
+                'NDMI': 'NDMI/NDMI_Nigeria_2023.tif',
+                'NDWI': 'NDWI/Nigeria_NDWI_2023.tif',
+                'elevation': 'Elevation/MERIT_Elevation.max.1km.tif',
+                'humidity': 'surface_soil_wetness/GIOVANNI-g4.timeAvgMap.M2TMNXLND_5_12_4_GWETTOP.*.tif'
+            }
+            
+            # Check if we have a raster pattern for this variable
+            if var_name not in raster_map:
+                logger.debug(f"No raster mapping for variable {var_name}")
+                return None
+            
+            # Find raster files
+            raster_pattern = os.path.join(raster_base, raster_map[var_name])
+            raster_files = glob.glob(raster_pattern)
+            
+            if not raster_files:
+                logger.warning(f"No raster files found for {var_name} at {raster_pattern}")
+                return None
+            
+            # Use first file or aggregate for monthly data
+            raster_file = raster_files[0]
+            
+            # Load Nigeria shapefile to get ward coordinates if available
+            shapefile_path = 'www/complete_names_wards/wards.shp'
+            ward_coords = {}
+            
+            if os.path.exists(shapefile_path):
+                try:
+                    master_gdf = gpd.read_file(shapefile_path)
+                    # Create lookup for ward centroids
+                    for _, row in master_gdf.iterrows():
+                        ward_key = f"{row.get('StateName', '')}_{row.get('LGAName', '')}_{row.get('WardName', '')}"
+                        if row.geometry:
+                            centroid = row.geometry.centroid
+                            ward_coords[ward_key.lower()] = (centroid.x, centroid.y)
+                except Exception as e:
+                    logger.debug(f"Could not load shapefile for coordinates: {e}")
+            
+            # Extract values
+            values = []
+            with rasterio.open(raster_file) as src:
+                for area in areas:
+                    # Try to get coordinates for this area
+                    ward_key = f"{area.get('state', '')}_{area.get('lga', '')}_{area.get('ward', '')}"
+                    coords = ward_coords.get(ward_key.lower())
+                    
+                    if coords:
+                        # Sample raster at coordinates
+                        try:
+                            for val in src.sample([coords]):
+                                value = val[0] if val[0] != src.nodata else None
+                                values.append(value)
+                        except Exception:
+                            values.append(None)
+                    else:
+                        # No coordinates available, use None
+                        values.append(None)
+            
+            # For rainfall and temperature, aggregate monthly values if needed
+            if var_name == 'rainfall' and len(raster_files) > 1:
+                # Sum monthly rainfall for annual total
+                all_values = []
+                for rf in raster_files[:12]:  # Use up to 12 months
+                    month_values = []
+                    with rasterio.open(rf) as src:
+                        for area in areas:
+                            ward_key = f"{area.get('state', '')}_{area.get('lga', '')}_{area.get('ward', '')}"
+                            coords = ward_coords.get(ward_key.lower())
+                            if coords:
+                                try:
+                                    for val in src.sample([coords]):
+                                        month_values.append(val[0] if val[0] != src.nodata else 0)
+                                except:
+                                    month_values.append(0)
+                            else:
+                                month_values.append(0)
+                    all_values.append(month_values)
+                
+                # Sum across months
+                values = [sum(month_vals) for month_vals in zip(*all_values)]
+            
+            elif var_name == 'temperature' and len(raster_files) > 1:
+                # Average monthly temperature
+                all_values = []
+                for rf in raster_files[:12]:
+                    month_values = []
+                    with rasterio.open(rf) as src:
+                        for area in areas:
+                            ward_key = f"{area.get('state', '')}_{area.get('lga', '')}_{area.get('ward', '')}"
+                            coords = ward_coords.get(ward_key.lower())
+                            if coords:
+                                try:
+                                    for val in src.sample([coords]):
+                                        v = val[0] if val[0] != src.nodata else None
+                                        month_values.append(v)
+                                except:
+                                    month_values.append(None)
+                            else:
+                                month_values.append(None)
+                    all_values.append(month_values)
+                
+                # Average across months
+                values = []
+                for month_vals in zip(*all_values):
+                    valid_vals = [v for v in month_vals if v is not None]
+                    if valid_vals:
+                        values.append(sum(valid_vals) / len(valid_vals))
+                    else:
+                        values.append(None)
+            
+            logger.info(f"Extracted {var_name} from raster: {sum(1 for v in values if v is not None)}/{len(values)} valid values")
+            return values
+            
+        except ImportError:
+            logger.warning("rasterio not available, cannot extract from raster files")
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting {var_name} from raster: {e}")
+            return None
     
     def _calculate_data_quality_score(self, df: pd.DataFrame) -> List[float]:
         """Calculate data quality score for each row"""

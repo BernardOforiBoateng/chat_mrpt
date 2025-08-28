@@ -344,6 +344,9 @@ export class FileUploader {
     handleTprUploadSuccess(response, tprFile) {
         this.setUploadStatus('TPR file uploaded successfully! Starting analysis...', 'success', 'tpr');
         
+        // Dispatch event for TPR workflow started
+        document.dispatchEvent(new CustomEvent('tprWorkflowStarted'));
+        
         // Update session data for TPR
         SessionDataManager.updateSessionData({
             tprLoaded: true,
@@ -371,8 +374,7 @@ export class FileUploader {
                 );
             }
             
-            // CRITICAL: Verify TPR workflow is active in backend session (multi-worker fix)
-            this.verifyTPRSessionState();
+            // TPR verification removed - no longer needed with new data analysis pipeline
         });
 
         // Close modal after delay
@@ -829,43 +831,7 @@ export class FileUploader {
         
         // Proactive message removed - let user initiate analysis themselves
     }
-    /**
-     * Verify TPR session state in backend (multi-worker fix)
-     * Forces a check with the backend to ensure TPR workflow flags are properly set
-     */
-    async verifyTPRSessionState() {
-        try {
-            // Make a lightweight request to check session state
-            const response = await fetch('/api/session/verify-tpr', {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                credentials: 'same-origin' // Important for session cookies
-            });
-            
-            if (!response.ok) {
-                console.warn('⚠️ Could not verify TPR session state');
-                return;
-            }
-            
-            const data = await response.json();
-            
-            // If TPR workflow is not active in backend, force a reload
-            if (!data.tpr_workflow_active) {
-                console.warn('⚠️ TPR workflow not active in backend session, forcing reload...');
-                // Small delay to ensure session writes are complete
-                setTimeout(() => {
-                    window.location.reload();
-                }, 500);
-            } else {
-                console.log('✅ TPR workflow verified active in backend session');
-            }
-        } catch (error) {
-            console.error('Error verifying TPR session state:', error);
-            // Don't break the flow, just log the error
-        }
-    }
+    // TPR session verification removed - no longer needed with new data analysis pipeline
     /**
      * Reset uploader state
      */

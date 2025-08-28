@@ -19,12 +19,18 @@ class APIClient {
      */
     async sendMessage(message, language = 'en') {
         try {
+            // Detect active tab for context
+            const activeTab = document.querySelector('.tab-pane.active')?.id || 'standard-upload';
+            const isDataAnalysis = activeTab === 'data-analysis';
+            
             const response = await fetch('/send_message', {
                 method: 'POST',
                 headers: this.defaultHeaders,
                 body: JSON.stringify({
                     message: message,
-                    language: language
+                    language: language,
+                    tab_context: activeTab,
+                    is_data_analysis: isDataAnalysis
                 })
             });
 
@@ -80,20 +86,109 @@ class APIClient {
             }
         }, REQUEST_TIMEOUT);
         
-        // Send the message to initiate streaming
-        fetch('/send_message_streaming', {
+        // Detect active tab for context
+        const activeTab = document.querySelector('.tab-pane.active')?.id || 'standard-upload';
+        const isDataAnalysis = activeTab === 'data-analysis';
+        
+        // Determine which endpoint to use based on Data Analysis mode
+        let endpoint = '/send_message_streaming';
+        let requestBody = {
+            message: message,
+            language: language,
+            tab_context: activeTab,
+            is_data_analysis: isDataAnalysis
+        };
+        
+        // If Data Analysis tab is active AND we have a data file AND we haven't exited, use Data Analysis V3 endpoint
+        if (isDataAnalysis && 
+            sessionStorage.getItem('has_data_analysis_file') === 'true' && 
+            sessionStorage.getItem('data_analysis_exited') !== 'true') {
+            endpoint = '/api/v1/data-analysis/chat';
+            requestBody = {
+                message: message,
+                session_id: sessionStorage.getItem('session_id') || localStorage.getItem('session_id')
+            };
+            console.log('📊 Routing to Data Analysis V3 endpoint');
+        } else if (sessionStorage.getItem('data_analysis_exited') === 'true') {
+            console.log('📊 Data Analysis exited, routing to main workflow');
+            // Clear the exit flag for future sessions
+            sessionStorage.removeItem('data_analysis_exited');
+        }
+        
+        // Send the message to appropriate endpoint
+        fetch(endpoint, {
             method: 'POST',
             headers: this.defaultHeaders,
-            body: JSON.stringify({
-                message: message,
-                language: language
-            })
-        }).then(response => {
+            body: JSON.stringify(requestBody)
+        }).then(async response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             
-            // Read the streaming response
+            // Check if this is Data Analysis V3 endpoint (returns JSON, not streaming)
+            if (endpoint === '/api/v1/data-analysis/chat') {
+                const result = await response.json();
+                
+                // Check if we need to exit Data Analysis mode
+                if (result.exit_data_analysis_mode) {
+                    console.log('📊 Exiting Data Analysis mode, switching to main workflow');
+                    
+                    // Clear Data Analysis mode flags PERMANENTLY
+                    sessionStorage.removeItem('has_data_analysis_file');
+                    sessionStorage.setItem('data_analysis_exited', 'true');
+                    
+                    // Also clear from localStorage to be sure
+                    localStorage.removeItem('has_data_analysis_file');
+                    
+                    // Simulate tab switch to standard-upload
+                    const standardTab = document.getElementById('standard-upload-tab');
+                    if (standardTab) {
+                        standardTab.click();
+                    }
+                    
+                    // Show transition message
+                    if (onChunk) {
+                        onChunk({ content: result.message || 'Switching to main ChatMRPT workflow...' });
+                    }
+                    
+                    cleanup();
+                    if (onComplete) {
+                        onComplete({
+                            content: result.message || 'Switched to main workflow',
+                            status: 'success',
+                            redirect_message: result.redirect_message,
+                            visualizations: result.visualizations,  // CRITICAL: Pass visualizations during transition
+                            done: true
+                        });
+                    }
+                    
+                    // If there's a redirect message, handle it but don't send again
+                    if (result.redirect_message === '__DATA_UPLOADED__') {
+                        console.log('📊 Transition complete, data loaded message already shown');
+                        // The transition response already contains the exploration menu
+                        // Don't send __DATA_UPLOADED__ again to avoid duplicates
+                    }
+                    return;
+                }
+                
+                // Normal Data Analysis V3 response - convert to streaming format
+                if (onChunk) {
+                    onChunk({ content: result.message || result.response || '' });
+                }
+                
+                cleanup();
+                if (onComplete) {
+                    onComplete({
+                        content: result.message || result.response || '',
+                        status: result.success ? 'success' : 'error',
+                        visualizations: result.visualizations,
+                        done: true
+                    });
+                }
+                return;
+            }
+            
+            // Original streaming response handling for main endpoint
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';

@@ -5,6 +5,7 @@ This container provides basic dependency injection for the core services
 that work well: data handling, analysis, visualization, and reporting.
 """
 
+import os
 import logging
 from typing import Dict, Any, Optional, List
 from flask import Flask
@@ -43,7 +44,8 @@ class ServiceContainer:
         # Register core services only
         self._register_core_services()
         
-        # FIXED: Eager initialization to prevent 18-second first message delay
+        # TEMPORARY: Disable eager init as it's hanging the app
+        # TODO: Fix the hanging issue in eager init
         self._eager_init_core_services()
         
         logger.info("Service container initialized with core services")
@@ -148,17 +150,144 @@ class ServiceContainer:
             return None
     
     def _create_llm_manager(self, container: 'ServiceContainer'):
-        """Create LLM manager service."""
+        """Create LLM manager service using flexible adapter."""
         try:
-            from ..core.llm_manager import LLMManager
-            
             interaction_logger = container.get('interaction_logger')
             
-            return LLMManager(
-                api_key=self._app.config.get('OPENAI_API_KEY'),
-                model=self._app.config.get('OPENAI_MODEL_NAME', 'gpt-4o'),
-                interaction_logger=interaction_logger
-            )
+            # Use the new flexible LLM adapter
+            from ..core.llm_adapter import LLMAdapter
+            
+            # Auto-detect backend based on environment
+            # FIXED: Check environment directly since Flask config isn't loading properly
+            use_vllm = os.environ.get('USE_VLLM', 'false').lower() == 'true'
+            use_ollama = os.environ.get('USE_OLLAMA', 'false').lower() == 'true'
+            
+            # Debug logging
+            logger.info(f"🔍 DEBUG: USE_VLLM = {use_vllm} (from env: {os.environ.get('USE_VLLM')})")
+            logger.info(f"🔍 DEBUG: USE_OLLAMA = {use_ollama} (from env: {os.environ.get('USE_OLLAMA')})")
+            
+            if use_vllm:
+                logger.info("🚀 Using vLLM for GPU-accelerated inference")
+                backend = 'vllm'
+            elif use_ollama:
+                logger.info("🔒 Using Ollama for local CPU inference")
+                backend = 'ollama'
+            else:
+                logger.info("☁️ Using OpenAI for cloud inference")
+                backend = 'openai'
+            
+            # Create adapter with auto-detected backend
+            adapter = LLMAdapter(backend=backend)
+            
+            # Verify connection
+            health = adapter.health_check()
+            if health['healthy']:
+                logger.info(f"✅ LLM backend verified: {health['backend']} with {adapter.model}")
+                
+                # Create wrapper for compatibility with existing code
+                class LLMManagerWrapper:
+                    def __init__(self, adapter):
+                        self.adapter = adapter
+                        self.interaction_logger = interaction_logger
+                    
+                    def generate_response(self, prompt, **kwargs):
+                        return self.adapter.generate(prompt, **kwargs)
+                    
+                    def generate_with_functions_streaming(self, messages, system_prompt, functions, temperature=0.7, session_id=None):
+                        """Streaming wrapper that properly handles OpenAI function calling."""
+                        # Check if we're using OpenAI backend
+                        if self.adapter.backend == 'openai':
+                            # Use proper OpenAI function calling via the actual LLM manager
+                            from ..core.llm_manager import LLMManager
+                            
+                            # Create a real LLM manager for OpenAI
+                            real_llm = LLMManager(
+                                api_key=self.adapter.api_key,
+                                model='gpt-4o',
+                                interaction_logger=self.interaction_logger
+                            )
+                            
+                            # Use the real OpenAI function calling
+                            yield from real_llm.generate_with_functions_streaming(
+                                messages=messages,
+                                system_prompt=system_prompt,
+                                functions=functions,
+                                temperature=temperature,
+                                session_id=session_id
+                            )
+                            return
+                        
+                        # Fallback for non-OpenAI backends (vLLM, Ollama)
+                        # Build prompt using Llama 3 format
+                        full_prompt = f"System: {system_prompt}\n\n"
+                        
+                        for msg in messages:
+                            role = msg['role']
+                            content = msg['content']
+                            if role == 'user':
+                                full_prompt += f"User: {content}\n\n"
+                            elif role == 'assistant':
+                                full_prompt += f"Assistant: {content}\n\n"
+                        
+                        # Add function descriptions if any
+                        if functions:
+                            full_prompt += "System: Available tools:\n"
+                            for func in functions:
+                                full_prompt += f"- {func['name']}: {func['description']}\n"
+                            full_prompt += "\n"
+                        
+                        # Add assistant prompt
+                        full_prompt += "Assistant:"
+                        
+                        # Use real streaming if available
+                        if hasattr(self.adapter, 'generate_stream'):
+                            for chunk in self.adapter.generate_stream(
+                                prompt=full_prompt,
+                                max_tokens=500,  # Allow longer responses for streaming
+                                temperature=temperature
+                            ):
+                                if chunk:
+                                    yield {
+                                        'type': 'text',
+                                        'content': chunk
+                                    }
+                        else:
+                            # Fallback to sentence-based chunking
+                            response = self.adapter.generate(
+                                prompt=full_prompt,
+                                max_tokens=150,
+                                temperature=temperature,
+                                stop=["User:", "System:"]
+                            )
+                            
+                            # Yield response in smaller chunks
+                            import re
+                            # Split by sentences or every ~50 characters for smoother streaming
+                            words = response.split()
+                            chunk = []
+                            for word in words:
+                                chunk.append(word)
+                                if len(' '.join(chunk)) > 30:  # Send chunks of ~30 chars
+                                    yield {
+                                        'type': 'text',
+                                        'content': ' '.join(chunk) + ' '
+                                    }
+                                    chunk = []
+                            
+                            # Send remaining chunk
+                            if chunk:
+                                yield {
+                                    'type': 'text',
+                                    'content': ' '.join(chunk)
+                                }
+                    
+                    # Add other methods as needed for compatibility
+                
+                return LLMManagerWrapper(adapter)
+            else:
+                logger.error(f"❌ LLM backend unhealthy: {health.get('error', 'Unknown error')}")
+                return None
+                
         except Exception as e:
             logger.warning(f"Failed to create LLM manager: {e}")
             return None

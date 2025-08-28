@@ -24,13 +24,24 @@ from .itn_routes import itn_bp, itn_embed_bp
 from .export_routes import export_bp
 from .session_routes import session_bp
 
-# Import TPR routes if available
+# TPR routes removed - replaced with new data analysis pipeline
+
+# Data Analysis V3 - New implementation
 try:
-    from .tpr_routes import tpr_bp
-    TPR_ROUTES_AVAILABLE = True
-except ImportError:
-    tpr_bp = None
-    TPR_ROUTES_AVAILABLE = False
+    from .data_analysis_v3_routes import data_analysis_v3_bp
+    DATA_ANALYSIS_V3_AVAILABLE = True
+except ImportError as e:
+    data_analysis_v3_bp = None
+    DATA_ANALYSIS_V3_AVAILABLE = False
+    print(f"Data Analysis V3 not available: {e}")
+
+# Data Analysis V2 removed - will be reimplemented
+data_analysis_v2_bp = None
+DATA_ANALYSIS_V2_AVAILABLE = False
+
+# Legacy data analysis (to be removed)
+DATA_ANALYSIS_AVAILABLE = False
+data_analysis_bp = None
 
 __all__ = [
     'core_bp',
@@ -43,7 +54,7 @@ __all__ = [
     'itn_embed_bp',
     'export_bp',
     'session_bp',
-    'tpr_bp',
+    'data_analysis_bp',
     'register_all_blueprints'
 ]
 
@@ -83,10 +94,17 @@ def register_all_blueprints(app):
     logger.info("✅ Export routes registered")
     logger.info("✅ Session routes registered")
     
-    # Register TPR routes if available
-    if TPR_ROUTES_AVAILABLE and tpr_bp:
-        app.register_blueprint(tpr_bp)
-        logger.info("✅ TPR routes registered")
+    # Register Data Analysis V3 routes
+    if DATA_ANALYSIS_V3_AVAILABLE and data_analysis_v3_bp:
+        app.register_blueprint(data_analysis_v3_bp)
+        logger.info("✅ Data Analysis V3 routes registered")
+    
+    # Data Analysis V2 removed - will be reimplemented
+    
+    # Legacy data analysis routes (deprecated)
+    if DATA_ANALYSIS_AVAILABLE and data_analysis_bp:
+        app.register_blueprint(data_analysis_bp)
+        logger.info("✅ Legacy Data Analysis routes registered")
 
 
 # Legacy compatibility - provide main_bp for backward compatibility

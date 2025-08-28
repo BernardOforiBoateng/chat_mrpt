@@ -41,6 +41,9 @@ export class MessageHandler {
 
         const message = customMessage || this.messageInput?.value?.trim();
         if (!message) return;
+        
+        // Preserve 'this' context for nested functions
+        const self = this;
 
         // Clear input if using default input
         if (!customMessage && this.messageInput) {
@@ -83,6 +86,38 @@ export class MessageHandler {
                 let streamingMessageElement = null;
                 let streamingContent = '';
                 let fullResponse = {};
+                let chunkQueue = [];
+                let isProcessingQueue = false;
+                
+                // Process chunks with slight delay for smooth typing effect
+                // Use arrow function to preserve 'this' context
+                const processChunkQueue = async () => {
+                    if (isProcessingQueue || chunkQueue.length === 0) return;
+                    isProcessingQueue = true;
+                    
+                    while (chunkQueue.length > 0) {
+                        const chunkText = chunkQueue.shift();
+                        const contentDiv = streamingMessageElement?.querySelector('.message-content');
+                        if (contentDiv && chunkText) {
+                            // Update the full streamed content and reparse ALL of it
+                            // This ensures markdown that spans chunks is properly parsed
+                            const fullParsedContent = self.parseMarkdownContent(streamingContent);
+                            contentDiv.innerHTML = fullParsedContent;
+                            
+                            // Smooth scroll to show new content
+                            if (this.chatContainer) {
+                                this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+                            }
+                            
+                            // Add tiny delay between chunks for smooth flow (only if more chunks waiting)
+                            if (chunkQueue.length > 0) {
+                                await new Promise(resolve => setTimeout(resolve, 5)); // 5ms between chunks for responsive streaming
+                            }
+                        }
+                    }
+                    
+                    isProcessingQueue = false;
+                };
                 
                 apiClient.sendMessageStreaming(
                     message, 
@@ -97,14 +132,9 @@ export class MessageHandler {
                         
                         if (chunk.content) {
                             streamingContent += chunk.content;
-                            const contentDiv = streamingMessageElement.querySelector('.message-content');
-                            if (contentDiv) {
-                                // FIXED: Only show raw content during streaming, parse markdown at end
-                                // This prevents performance issues from re-parsing on every chunk
-                                contentDiv.textContent = streamingContent;
-                                // FIXED: Remove redundant scroll calls during streaming
-                                // Scroll is handled by appendMessage when element is created
-                            }
+                            // Queue the chunk for smooth processing
+                            chunkQueue.push(chunk.content);
+                            processChunkQueue();
                         }
                         
                         // Update fullResponse with latest data
@@ -114,16 +144,17 @@ export class MessageHandler {
                         if (chunk.download_links) fullResponse.download_links = chunk.download_links;
                     },
                     // onComplete callback
-                    (finalData) => {
+                    async (finalData) => {
+                        // Wait for all chunks to be processed before parsing markdown
+                        while (chunkQueue.length > 0 || isProcessingQueue) {
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                        }
+                        
                         if (streamingMessageElement) {
                             streamingMessageElement.classList.remove('streaming');
                             
-                            // FIXED: Now parse markdown only once at completion
-                            const contentDiv = streamingMessageElement.querySelector('.message-content');
-                            if (contentDiv && streamingContent) {
-                                const parsedContent = this.parseMarkdownContent(streamingContent);
-                                contentDiv.innerHTML = parsedContent;
-                            }
+                            // DON'T replace the content - it's already been streamed!
+                            // Just remove the streaming class to indicate completion
                         }
                         
                         // Prepare final response object
@@ -131,34 +162,33 @@ export class MessageHandler {
                         fullResponse.message = streamingContent;
                         fullResponse.streaming_handled = true;  // ✅ Mark as handled via streaming
                         
+                        // CRITICAL: Transfer visualizations from finalData if present
+                        if (finalData.visualizations) {
+                            fullResponse.visualizations = finalData.visualizations;
+                            console.log('📊 Transferred visualizations from finalData:', finalData.visualizations);
+                        }
+                        
+                        // Debug: Check if visualizations are present
+                        if (fullResponse.visualizations && fullResponse.visualizations.length > 0) {
+                            console.log('📊 VISUALIZATIONS PRESENT in fullResponse:', fullResponse.visualizations);
+                        }
+                        
                         // Emit event for other modules to handle
                         document.dispatchEvent(new CustomEvent('messageResponse', { 
                             detail: { response: fullResponse, originalMessage: message }
                         }));
                         
                         // Check if TPR analysis is complete (has download links)
+                        console.log('[v2.1] Checking TPR completion. Has download_links?', !!fullResponse.download_links, 'Length:', fullResponse.download_links?.length || 0);
                         if (fullResponse.download_links && fullResponse.download_links.length > 0) {
+                            console.log('[v2.1] ✅ Dispatching tprAnalysisComplete event with', fullResponse.download_links.length, 'links');
                             document.dispatchEvent(new CustomEvent('tprAnalysisComplete', {
                                 detail: { download_links: fullResponse.download_links }
                             }));
                             
-                            // Check if we should trigger data exploration after TPR
-                            if (fullResponse.trigger_data_uploaded) {
-                                console.log('🎯 TPR complete - triggering data exploration menu');
-                                // Give user time to see the TPR completion message
-                                setTimeout(() => {
-                                    this.sendMessage('__DATA_UPLOADED__');
-                                }, 2000);
-                            }
-                        }
-                        
-                        // Check if TPR wants to trigger exploration workflow
-                        if (fullResponse.trigger_exploration && fullResponse.response === '__DATA_UPLOADED__') {
-                            console.log('🎯 TPR triggering exploration workflow');
-                            // Automatically send the trigger message
-                            setTimeout(() => {
-                                this.sendMessage('__DATA_UPLOADED__');
-                            }, 100);
+                            // REMOVED: Old TPR trigger logic that caused duplicates
+                            // The V3 agent now handles the entire transition internally
+                            // No need for frontend to send __DATA_UPLOADED__ anymore
                         }
                         
                         this.isWaitingForResponse = false;
@@ -302,21 +332,26 @@ export class MessageHandler {
         // Step 3: Convert links
         text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
         
-        // Step 4: Handle bullet points more carefully
-        text = text.replace(/^[•\-] (.+)$/gm, '<li>$1</li>');
+        // Step 4: Handle bullet points more carefully (including indented bullets)
+        text = text.replace(/^\s*[•\-] (.+)$/gm, '<li>$1</li>');
         
         // Step 5: Wrap consecutive list items in ul tags
         text = text.replace(/(<li>.*?<\/li>(?:\s*<li>.*?<\/li>)*)/gs, '<ul>$1</ul>');
         
         // Step 6: Handle line breaks and paragraphs
+        // First, ensure bullets are on separate lines (handle indented bullets too)
+        text = text.replace(/([^\n])(\s{3,}•)/g, '$1\n$2');  // Add newline before indented bullets
+        text = text.replace(/([^\n])(•)/g, '$1\n$2');  // Add newline before non-indented bullets
+        
         // Split by double newlines for paragraphs
         const paragraphs = text.split(/\n\s*\n/);
         text = paragraphs.map(paragraph => {
             // Don't wrap headers, lists, iframe placeholders, or already wrapped content
             if (paragraph.includes('<h') || paragraph.includes('<ul') || 
                 paragraph.includes('__IFRAME_PLACEHOLDER_') || paragraph.startsWith('<')) {
-                return paragraph.replace(/\n/g, ' ');
+                return paragraph;  // Don't remove newlines from lists
             } else {
+                // Always preserve line breaks in paragraphs
                 return '<p>' + paragraph.replace(/\n/g, '<br>') + '</p>';
             }
         }).join('\n\n');
