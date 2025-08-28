@@ -317,6 +317,8 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
         required_cols = ['WardName', score_col, rank_col, category_col]
         if 'urbanPercentage' in data_handler.unified_dataset.columns:
             required_cols.append('urbanPercentage')
+        elif 'urban_percentage' in data_handler.unified_dataset.columns:
+            required_cols.append('urban_percentage')
         
         rankings = data_handler.unified_dataset[required_cols].copy()
         rankings = rankings.rename(columns={
@@ -409,9 +411,14 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
             return {'status': 'error', 'message': f'Population data not available for {state}. No population data files found in the system.'}
     
     # FULL COVERAGE STRATEGY: Give 100% coverage to highest risk wards until nets run out
-    # Handle both 'UrbanPercent' and 'urbanPercentage' column names
-    urban_col = 'UrbanPercent' if 'UrbanPercent' in rankings.columns else 'urbanPercentage'
-    if urban_col not in rankings.columns:
+    # Handle 'UrbanPercent', 'urbanPercentage', and 'urban_percentage' column names
+    if 'UrbanPercent' in rankings.columns:
+        urban_col = 'UrbanPercent'
+    elif 'urbanPercentage' in rankings.columns:
+        urban_col = 'urbanPercentage'
+    elif 'urban_percentage' in rankings.columns:
+        urban_col = 'urban_percentage'
+    else:
         logger.warning(f"No urban percentage column found. Available columns: {rankings.columns.tolist()}")
         # Use a default value if urban percentage is not available
         rankings['urban_pct'] = 50.0  # Default to 50% urban
@@ -528,9 +535,12 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
             'urban_threshold': urban_threshold,
             'avg_household_size': avg_household_size,
             'total_nets': total_nets,
+            'total_allocated': int(total_allocated),
+            'coverage_percentage': stats['coverage_percent'],
             'timestamp': datetime.now().isoformat(),
             'prioritized': prioritized.to_dict('records'),
             'reprioritized': reprioritized.to_dict('records') if not reprioritized.empty else [],
+            'distribution': prioritized.to_dict('records'),  # Add distribution for backward compatibility
             'map_path': map_path
         }
         

@@ -25,9 +25,19 @@ def update_itn_distribution():
         avg_household_size = float(data.get('avg_household_size', 5.0))
         method = data.get('method', 'composite')
         
-        # Load data handler
-        data_handler = DataHandler()
-        data_handler.load_from_session(session_id)
+        # Load data handler with proper session folder
+        session_folder = os.path.join('instance', 'uploads', session_id)
+        data_handler = DataHandler(session_folder)
+        
+        # Load existing analysis data
+        data_handler._attempt_data_reload()
+        
+        # Load session state for variables and relationships
+        data_handler.load_session_state()
+        
+        # Ensure we have the necessary data
+        if data_handler.csv_data is None:
+            return jsonify({'status': 'error', 'message': 'No analysis data found'}), 400
         
         # Recalculate distribution
         result = calculate_itn_distribution(
