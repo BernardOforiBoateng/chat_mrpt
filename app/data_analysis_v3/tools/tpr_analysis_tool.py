@@ -26,6 +26,20 @@ import warnings
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
+# Custom JSON encoder to handle numpy types
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types."""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int64)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        return super().default(obj)
+
 from app.core.tpr_utils import (
     is_tpr_data, 
     calculate_ward_tpr,
@@ -308,9 +322,15 @@ def match_and_merge_data(tpr_df: pd.DataFrame, state_gdf: gpd.GeoDataFrame) -> g
     Returns:
         Merged GeoDataFrame
     """
+    logger.info(f"🔄 Starting ward matching: {len(tpr_df)} TPR records, {len(state_gdf)} shapefile wards")
+    
     # Normalize ward names in both datasets
     tpr_df['WardName_norm'] = tpr_df['WardName'].apply(normalize_ward_name)
     state_gdf['WardName_norm'] = state_gdf['WardName'].apply(normalize_ward_name)
+    
+    # Log sample normalized names for debugging
+    logger.debug(f"Sample TPR ward names: {list(tpr_df['WardName_norm'].head(3))}")
+    logger.debug(f"Sample shapefile ward names: {list(state_gdf['WardName_norm'].head(3))}")
     
     # Try exact match first
     merged = state_gdf.merge(
@@ -325,7 +345,7 @@ def match_and_merge_data(tpr_df: pd.DataFrame, state_gdf: gpd.GeoDataFrame) -> g
     total = len(merged)
     match_rate = matched / total * 100 if total > 0 else 0
     
-    logger.info(f"Ward matching: {matched}/{total} ({match_rate:.1f}%) matched")
+    logger.info(f"📊 Initial ward matching: {matched}/{total} ({match_rate:.1f}%) matched")
     
     # If match rate is low, try fuzzy matching
     if match_rate < 80:
@@ -365,27 +385,42 @@ def create_tpr_map(tpr_results: pd.DataFrame, session_folder: str, state_name: s
     Returns:
         True if map was created successfully
     """
+    logger.info(f"🗺️ create_tpr_map called for {state_name} with {len(tpr_results)} TPR results")
+    
     try:
         # Load Nigeria shapefile and filter to state
+        logger.info("📂 Loading Nigeria shapefile for map creation...")
         master_gdf = load_nigeria_shapefile()
         if master_gdf is None:
-            logger.warning("Nigeria shapefile not found, skipping map creation")
+            logger.warning("❌ Nigeria shapefile not found, skipping map creation")
             return False
+        
+        logger.info(f"✅ Shapefile loaded with {len(master_gdf)} total wards")
         
         # Clean state name for matching
         clean_state = state_name.replace(' State', '').strip()
+        logger.info(f"🔍 Filtering shapefile for state: '{clean_state}'")
+        
         state_gdf = master_gdf[master_gdf['StateName'] == clean_state].copy()
         
         if state_gdf.empty:
+            logger.warning(f"⚠️ No exact match, trying case-insensitive...")
             # Try case-insensitive match
             state_gdf = master_gdf[master_gdf['StateName'].str.lower() == clean_state.lower()].copy()
         
         if state_gdf.empty:
-            logger.warning(f"No shapefile data for {state_name}, skipping map")
+            logger.warning(f"❌ No shapefile data for {state_name}, skipping map")
             return False
         
+        logger.info(f"✅ Found {len(state_gdf)} wards for {state_name}")
+        
         # Match and merge TPR data with shapefile
+        logger.info("🔄 Matching TPR data with shapefile...")
         merged_gdf = match_and_merge_data(tpr_results, state_gdf)
+        
+        # Log matching results
+        matched = merged_gdf['TPR'].notna().sum()
+        logger.info(f"✅ Matched {matched}/{len(merged_gdf)} wards with TPR data")
         
         # Create hover text
         hover_text = []
@@ -458,17 +493,31 @@ def create_tpr_map(tpr_results: pd.DataFrame, session_folder: str, state_name: s
         
         # Save the map
         map_path = os.path.join(session_folder, 'tpr_distribution_map.html')
-        fig.write_html(
-            map_path,
-            include_plotlyjs='cdn',
-            config={'displayModeBar': True, 'displaylogo': False}
-        )
+        logger.info(f"💾 Attempting to save map to: {map_path}")
         
-        logger.info(f"TPR distribution map saved to {map_path}")
-        return True
+        try:
+            fig.write_html(
+                map_path,
+                include_plotlyjs='cdn',
+                config={'displayModeBar': True, 'displaylogo': False}
+            )
+            
+            # Verify file was created
+            if os.path.exists(map_path):
+                file_size = os.path.getsize(map_path)
+                logger.info(f"✅ TPR distribution map saved successfully ({file_size} bytes)")
+                return True
+            else:
+                logger.error(f"❌ Map file was not created at {map_path}")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Failed to write HTML file: {e}")
+            return False
         
     except Exception as e:
-        logger.error(f"Error creating TPR map: {e}")
+        import traceback
+        logger.error(f"❌ Error creating TPR map: {e}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
         return False
 
 
@@ -733,15 +782,26 @@ High Risk Wards (TPR > 20%):"""
             result += f"\n\nResults saved to: tpr_results.csv"
             
             # AUTOMATICALLY PREPARE FOR RISK ANALYSIS (production approach)
-            logger.info("Preparing data for risk analysis in background")
+            logger.info("🚀 Starting automatic preparation for risk analysis")
+            
+            # Create comprehensive debug tracking
+            debug_stages = {
+                "shapefile_loading": {},
+                "ward_matching": {},
+                "env_extraction": {},
+                "file_creation": {},
+                "map_creation": {}
+            }
             
             try:
                 # Load Nigeria shapefile and filter to state
-                logger.info(f"Attempting to load Nigeria shapefile for risk preparation...")
+                logger.info(f"📂 Attempting to load Nigeria shapefile for risk preparation...")
                 
                 # Debug to file
                 with open('/tmp/tpr_debug.log', 'a') as f:
                     f.write(f"\n--- TPR Debug {session_id} ---\n")
+                    f.write(f"Timestamp: {pd.Timestamp.now()}\n")
+                    f.write(f"State: {state_name}\n")
                     f.write(f"About to call load_nigeria_shapefile()\n")
                 
                 master_gdf = load_nigeria_shapefile()
@@ -753,28 +813,71 @@ High Risk Wards (TPR > 20%):"""
                     else:
                         f.write("ERROR: master_gdf is None!\n")
                 
-                logger.info(f"Shapefile load result: {master_gdf is not None}")
                 if master_gdf is not None:
-                    logger.info(f"Successfully loaded shapefile with {len(master_gdf)} wards")
+                    logger.info(f"✅ Successfully loaded shapefile with {len(master_gdf)} wards")
+                    debug_stages["shapefile_loading"] = {
+                        "success": True,
+                        "total_wards": len(master_gdf),
+                        "columns": list(master_gdf.columns)[:10]  # First 10 columns
+                    }
+                    
                     # Clean state name for matching
                     clean_state = state_name.replace(' State', '').strip()
+                    logger.info(f"🔍 Filtering for state: '{clean_state}'")
+                    
                     state_gdf = master_gdf[master_gdf['StateName'] == clean_state].copy()
                     
                     if state_gdf.empty:
+                        logger.warning(f"⚠️ No exact match for '{clean_state}', trying case-insensitive")
                         # Try case-insensitive match
                         state_gdf = master_gdf[master_gdf['StateName'].str.lower() == clean_state.lower()].copy()
                     
                     if not state_gdf.empty:
-                        logger.info(f"Found {len(state_gdf)} wards in shapefile for {state_name}")
+                        logger.info(f"✅ Found {len(state_gdf)} wards in shapefile for {state_name}")
+                        debug_stages["shapefile_loading"]["state_wards"] = int(len(state_gdf))
                         
                         # Match and merge TPR data with shapefile
-                        merged_gdf = match_and_merge_data(tpr_results, state_gdf)
+                        logger.info("🔄 Matching TPR data with shapefile wards...")
+                        try:
+                            merged_gdf = match_and_merge_data(tpr_results, state_gdf)
+                            
+                            # Count matches
+                            matched_count = int(merged_gdf['TPR'].notna().sum())
+                            total_count = int(len(merged_gdf))
+                            match_rate = (matched_count / total_count * 100) if total_count > 0 else 0
+                            
+                            logger.info(f"✅ Ward matching complete: {matched_count}/{total_count} ({match_rate:.1f}%)")
+                            debug_stages["ward_matching"] = {
+                                "success": True,
+                                "matched": matched_count,
+                                "total": total_count,
+                                "match_rate": match_rate
+                            }
+                        except Exception as e:
+                            logger.error(f"❌ Ward matching failed: {e}")
+                            debug_stages["ward_matching"] = {"success": False, "error": str(e)}
+                            merged_gdf = state_gdf.copy()
+                            merged_gdf['TPR'] = 0
                         
                         # Extract environmental variables (zone-specific)
-                        logger.info("Extracting zone-specific environmental variables from rasters")
-                        env_data = extract_environmental_variables(merged_gdf, state_name)
+                        logger.info("🌍 Extracting zone-specific environmental variables from rasters")
+                        try:
+                            env_data = extract_environmental_variables(merged_gdf, state_name)
+                            logger.info(f"✅ Environmental data extracted: {len(env_data.columns)} variables")
+                            debug_stages["env_extraction"] = {
+                                "success": True,
+                                "variables": list(env_data.columns),
+                                "rows": int(len(env_data))
+                            }
+                        except Exception as e:
+                            logger.error(f"❌ Environmental extraction failed: {e}")
+                            debug_stages["env_extraction"] = {"success": False, "error": str(e)}
+                            # Create minimal env_data
+                            env_data = pd.DataFrame()
+                            env_data['WardCode'] = range(len(merged_gdf))
                         
                         # Prepare final dataset
+                        logger.info("📊 Preparing final dataset for risk analysis")
                         final_df = pd.DataFrame()
                         
                         # Add identifiers (CRITICAL for risk analysis)
@@ -788,32 +891,69 @@ High Risk Wards (TPR > 20%):"""
                         
                         # Add TPR metrics
                         final_df['TPR'] = merged_gdf['TPR'].fillna(0)
-                        final_df['Total_Tested'] = merged_gdf['Total_Tested'].fillna(0).astype(int)
-                        final_df['Total_Positive'] = merged_gdf['Total_Positive'].fillna(0).astype(int)
+                        # Fix: Convert to native Python int to avoid JSON serialization issues
+                        final_df['Total_Tested'] = merged_gdf['Total_Tested'].fillna(0).apply(lambda x: int(x) if pd.notna(x) else 0)
+                        final_df['Total_Positive'] = merged_gdf['Total_Positive'].fillna(0).apply(lambda x: int(x) if pd.notna(x) else 0)
                         
                         # Add environmental variables
                         for col in env_data.columns:
                             if col != 'WardCode':
                                 final_df[col] = env_data[col]
                         
+                        logger.info(f"📋 Final dataset prepared: {len(final_df)} rows, {len(final_df.columns)} columns")
+                        
                         # Save raw_data.csv
                         raw_data_path = os.path.join(session_folder, 'raw_data.csv')
-                        final_df.to_csv(raw_data_path, index=False)
-                        logger.info(f"Saved raw_data.csv with {len(final_df)} wards")
+                        try:
+                            final_df.to_csv(raw_data_path, index=False)
+                            logger.info(f"✅ Saved raw_data.csv with {len(final_df)} wards")
+                            debug_stages["file_creation"]["raw_data"] = {
+                                "success": True,
+                                "path": raw_data_path,
+                                "rows": len(final_df),
+                                "columns": len(final_df.columns)
+                            }
+                        except Exception as e:
+                            logger.error(f"❌ Failed to save raw_data.csv: {e}")
+                            debug_stages["file_creation"]["raw_data"] = {"success": False, "error": str(e)}
                         
                         # Create raw_shapefile.zip
-                        # Ensure shapefile has same columns as CSV
-                        for col in final_df.columns:
-                            if col not in merged_gdf.columns:
-                                merged_gdf[col] = final_df[col]
-                        
-                        shapefile_path = create_shapefile_package(merged_gdf, session_folder)
-                        logger.info(f"Created raw_shapefile.zip")
+                        logger.info("📦 Creating shapefile package...")
+                        try:
+                            # Ensure shapefile has same columns as CSV
+                            for col in final_df.columns:
+                                if col not in merged_gdf.columns:
+                                    merged_gdf[col] = final_df[col]
+                            
+                            shapefile_path = create_shapefile_package(merged_gdf, session_folder)
+                            logger.info(f"✅ Created raw_shapefile.zip")
+                            debug_stages["file_creation"]["shapefile"] = {
+                                "success": True,
+                                "path": shapefile_path
+                            }
+                        except Exception as e:
+                            logger.error(f"❌ Failed to create shapefile: {e}")
+                            debug_stages["file_creation"]["shapefile"] = {"success": False, "error": str(e)}
                         
                         # Create TPR map visualization
-                        map_created = create_tpr_map(tpr_results, session_folder, state_name)
-                        if map_created:
-                            result += f"\n\n📍 TPR Map Visualization created: tpr_distribution_map.html"
+                        logger.info("🗺️ Creating TPR distribution map...")
+                        try:
+                            map_created = create_tpr_map(tpr_results, session_folder, state_name)
+                            if map_created:
+                                logger.info("✅ TPR map created successfully")
+                                result += f"\n\n📍 TPR Map Visualization created: tpr_distribution_map.html"
+                                debug_stages["map_creation"] = {"success": True}
+                            else:
+                                logger.warning("⚠️ Map creation returned False")
+                                debug_stages["map_creation"] = {"success": False, "error": "Function returned False"}
+                        except Exception as e:
+                            logger.error(f"❌ Map creation failed with exception: {e}")
+                            import traceback
+                            debug_stages["map_creation"] = {
+                                "success": False,
+                                "error": str(e),
+                                "traceback": traceback.format_exc()
+                            }
                         
                         # Set session flags for risk analysis
                         flag_file = os.path.join(session_folder, '.risk_ready')
@@ -823,23 +963,58 @@ High Risk Wards (TPR > 20%):"""
                         result += f"\n   • raw_data.csv with environmental variables"
                         result += f"\n   • raw_shapefile.zip for geographic analysis"
                     else:
-                        logger.warning(f"No shapefile data found for {state_name}")
+                        logger.warning(f"⚠️ No shapefile data found for {state_name}")
+                        debug_stages["shapefile_loading"]["state_wards"] = 0
                         # Still create map if possible (it has its own shapefile loading)
+                        logger.info("🗺️ Attempting map creation despite empty state data...")
+                        try:
+                            map_created = create_tpr_map(tpr_results, session_folder, state_name)
+                            if map_created:
+                                result += f"\n\n📍 TPR Map Visualization created: tpr_distribution_map.html"
+                                debug_stages["map_creation"] = {"success": True, "fallback": True}
+                            else:
+                                debug_stages["map_creation"] = {"success": False, "error": "No state data"}
+                        except Exception as e:
+                            logger.error(f"❌ Fallback map creation failed: {e}")
+                            debug_stages["map_creation"] = {"success": False, "error": str(e)}
+                else:
+                    logger.error("❌ CRITICAL: Nigeria shapefile returned None")
+                    debug_stages["shapefile_loading"] = {"success": False, "error": "Shapefile is None"}
+                    # Still try to create map
+                    logger.info("🗺️ Attempting map creation without shapefile...")
+                    try:
                         map_created = create_tpr_map(tpr_results, session_folder, state_name)
                         if map_created:
                             result += f"\n\n📍 TPR Map Visualization created: tpr_distribution_map.html"
-                else:
-                    logger.error("CRITICAL: Nigeria shapefile returned None, cannot prepare for risk analysis")
-                    logger.warning("Nigeria shapefile not found, skipping risk preparation")
-                    # Still try to create map
-                    map_created = create_tpr_map(tpr_results, session_folder, state_name)
-                    if map_created:
-                        result += f"\n\n📍 TPR Map Visualization created: tpr_distribution_map.html"
+                            debug_stages["map_creation"] = {"success": True, "emergency": True}
+                        else:
+                            debug_stages["map_creation"] = {"success": False, "error": "No shapefile"}
+                    except Exception as e:
+                        logger.error(f"❌ Emergency map creation failed: {e}")
+                        debug_stages["map_creation"] = {"success": False, "error": str(e)}
+                
+                # Save debug stages to file
+                debug_file_path = os.path.join(session_folder, 'tpr_analysis_debug.json')
+                with open(debug_file_path, 'w') as f:
+                    json.dump(debug_stages, f, indent=2, cls=NumpyEncoder)
+                logger.info(f"💾 Debug stages saved to {debug_file_path}")
             
             except Exception as e:
-                logger.error(f"Error preparing for risk analysis: {e}")
+                import traceback
+                error_trace = traceback.format_exc()
+                logger.error(f"❌ Error preparing for risk analysis: {e}\n{error_trace}")
+                
+                # Save error debug info
+                debug_stages["critical_error"] = {
+                    "message": str(e),
+                    "traceback": error_trace
+                }
+                debug_file_path = os.path.join(session_folder, 'tpr_analysis_error.json')
+                with open(debug_file_path, 'w') as f:
+                    json.dump(debug_stages, f, indent=2, cls=NumpyEncoder)
+                
                 # Don't fail the whole TPR calculation, just log the error
-                result += f"\n\n⚠️ Note: Could not prepare risk analysis files automatically"
+                result += f"\n\n⚠️ Note: Could not prepare risk analysis files automatically (see tpr_analysis_error.json)"
             
             return result
             
@@ -894,8 +1069,9 @@ High Risk Wards (TPR > 20%):"""
             
             # Add TPR metrics
             final_df['TPR'] = merged_gdf['TPR'].fillna(0)
-            final_df['Total_Tested'] = merged_gdf['Total_Tested'].fillna(0).astype(int)
-            final_df['Total_Positive'] = merged_gdf['Total_Positive'].fillna(0).astype(int)
+            # Fix: Convert to native Python int to avoid JSON serialization issues
+            final_df['Total_Tested'] = merged_gdf['Total_Tested'].fillna(0).apply(lambda x: int(x) if pd.notna(x) else 0)
+            final_df['Total_Positive'] = merged_gdf['Total_Positive'].fillna(0).apply(lambda x: int(x) if pd.notna(x) else 0)
             
             # Add environmental variables
             for col in env_data.columns:
