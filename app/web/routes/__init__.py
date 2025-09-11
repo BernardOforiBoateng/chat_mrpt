@@ -23,6 +23,7 @@ from .debug_routes import debug_bp
 from .itn_routes import itn_bp, itn_embed_bp
 from .export_routes import export_bp
 from .session_routes import session_bp
+from .arena_routes import arena_bp
 
 # TPR routes removed - replaced with new data analysis pipeline
 
@@ -54,6 +55,7 @@ __all__ = [
     'itn_embed_bp',
     'export_bp',
     'session_bp',
+    'arena_bp',
     'data_analysis_bp',
     'register_all_blueprints'
 ]
@@ -90,9 +92,13 @@ def register_all_blueprints(app):
     # Register session routes (session state verification)
     app.register_blueprint(session_bp)
     
+    # Register Arena routes (model comparison interface)
+    app.register_blueprint(arena_bp)
+    
     logger = logging.getLogger(__name__)
     logger.info("✅ Export routes registered")
     logger.info("✅ Session routes registered")
+    logger.info("✅ Arena routes registered")
     
     # Register Data Analysis V3 routes
     if DATA_ANALYSIS_V3_AVAILABLE and data_analysis_v3_bp:

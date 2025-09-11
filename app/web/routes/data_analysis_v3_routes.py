@@ -303,6 +303,31 @@ def data_analysis_chat():
         try:
             result = loop.run_until_complete(run_analysis())
             logger.info(f"Analysis completed for session {session_id}")
+            
+            # Add debug information if not already present
+            if 'debug' not in result:
+                # Check session folder for debug files
+                import os
+                session_folder = f"instance/uploads/{session_id}"
+                debug_files = {
+                    "tpr_debug.json": os.path.exists(os.path.join(session_folder, "tpr_debug.json")),
+                    "tpr_analysis_debug.json": os.path.exists(os.path.join(session_folder, "tpr_analysis_debug.json")),
+                    "tpr_error_debug.json": os.path.exists(os.path.join(session_folder, "tpr_error_debug.json")),
+                    "tpr_results.csv": os.path.exists(os.path.join(session_folder, "tpr_results.csv")),
+                    "raw_data.csv": os.path.exists(os.path.join(session_folder, "raw_data.csv")),
+                    "raw_shapefile.zip": os.path.exists(os.path.join(session_folder, "raw_shapefile.zip")),
+                    "tpr_distribution_map.html": os.path.exists(os.path.join(session_folder, "tpr_distribution_map.html"))
+                }
+                
+                result['debug'] = {
+                    "session_id": session_id,
+                    "message_received": message[:100],  # First 100 chars
+                    "files_status": debug_files,
+                    "debug_mode": True
+                }
+                
+                logger.info(f"📊 Debug info added to response: {debug_files}")
+            
             return jsonify(result)
         finally:
             loop.close()
@@ -313,5 +338,10 @@ def data_analysis_chat():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'traceback': traceback.format_exc(),
+            'debug': {
+                'session_id': session_id,
+                'message': message[:100] if 'message' in locals() else 'Unknown',
+                'error_location': 'data_analysis_chat'
+            }
         }), 500

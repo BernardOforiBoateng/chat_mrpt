@@ -151,6 +151,14 @@ def create_app(config_name=None):
     # Register all functional route blueprints (core, upload, analysis, visualization, etc.)
     register_all_blueprints(app)
     
+    # --- Initialize Arena System ---
+    from .web.routes.arena_routes import init_arena_system
+    try:
+        init_arena_system(app)
+        app.logger.info("✅ Arena system initialized successfully")
+    except Exception as e:
+        app.logger.warning(f"Arena system initialization failed: {e}")
+    
     # --- Initialize Additional Routes ---
     from .routes import init_routes
     init_routes(app)

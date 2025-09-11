@@ -580,6 +580,314 @@ def log_explanation(db_manager: DatabaseManager, session_id, entity_type, entity
         return None
 
 
+def log_arena_battle(db_manager: DatabaseManager, battle_id, session_id, user_message, 
+                    model_a, model_b, response_a=None, response_b=None,
+                    latency_a=None, latency_b=None, tokens_a=None, tokens_b=None,
+                    user_preference=None, elo_before_a=None, elo_before_b=None,
+                    elo_after_a=None, elo_after_b=None, view_index=None):
+    """
+    Log an Arena mode battle session
+    
+    Args:
+        db_manager: DatabaseManager instance
+        battle_id: Unique battle identifier
+        session_id: Session identifier
+        user_message: User's query
+        model_a: First model name
+        model_b: Second model name
+        response_a: Response from model A
+        response_b: Response from model B
+        latency_a: Response time for model A (ms)
+        latency_b: Response time for model B (ms)
+        tokens_a: Tokens used by model A
+        tokens_b: Tokens used by model B
+        user_preference: User's vote ('left', 'right', 'tie', 'both_bad')
+        elo_before_a: ELO rating of model A before battle
+        elo_before_b: ELO rating of model B before battle
+        elo_after_a: ELO rating of model A after battle
+        elo_after_b: ELO rating of model B after battle
+        view_index: Which view/pairing was shown
+        
+    Returns:
+        bool: Success status
+    """
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        
+        now = datetime.datetime.now()
+        
+        # Check if battle exists, update if it does, insert if it doesn't
+        cursor.execute('SELECT battle_id FROM arena_battles WHERE battle_id = ?', (battle_id,))
+        exists = cursor.fetchone() is not None
+        
+        if exists:
+            # Update existing battle
+            updates = []
+            params = []
+            
+            if response_a is not None:
+                updates.append('response_a = ?')
+                params.append(response_a)
+            if response_b is not None:
+                updates.append('response_b = ?')
+                params.append(response_b)
+            if latency_a is not None:
+                updates.append('latency_a = ?')
+                params.append(latency_a)
+            if latency_b is not None:
+                updates.append('latency_b = ?')
+                params.append(latency_b)
+            if tokens_a is not None:
+                updates.append('tokens_a = ?')
+                params.append(tokens_a)
+            if tokens_b is not None:
+                updates.append('tokens_b = ?')
+                params.append(tokens_b)
+            if user_preference is not None:
+                updates.append('user_preference = ?')
+                params.append(user_preference)
+            if elo_before_a is not None:
+                updates.append('elo_before_a = ?')
+                params.append(elo_before_a)
+            if elo_before_b is not None:
+                updates.append('elo_before_b = ?')
+                params.append(elo_before_b)
+            if elo_after_a is not None:
+                updates.append('elo_after_a = ?')
+                params.append(elo_after_a)
+            if elo_after_b is not None:
+                updates.append('elo_after_b = ?')
+                params.append(elo_after_b)
+            
+            if updates:
+                params.append(battle_id)
+                query = f"UPDATE arena_battles SET {', '.join(updates)} WHERE battle_id = ?"
+                cursor.execute(query, params)
+        else:
+            # Insert new battle
+            cursor.execute('''
+            INSERT INTO arena_battles 
+            (battle_id, session_id, timestamp, user_message, model_a, model_b,
+             response_a, response_b, latency_a, latency_b, tokens_a, tokens_b,
+             user_preference, elo_before_a, elo_before_b, elo_after_a, elo_after_b, view_index)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (battle_id, session_id, now, user_message, model_a, model_b,
+                 response_a, response_b, latency_a, latency_b, tokens_a, tokens_b,
+                 user_preference, elo_before_a, elo_before_b, elo_after_a, elo_after_b, view_index))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"Logged Arena battle: {battle_id} for session: {session_id}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error logging Arena battle: {str(e)}", exc_info=True)
+        return False
+
+
+def export_arena_training_data(db_manager: DatabaseManager, export_type='dpo', format='jsonl'):
+    """
+    Export Arena battle data for model training
+    
+    Args:
+        db_manager: DatabaseManager instance
+        export_type: Type of export ('dpo', 'rlhf', 'analytics')
+        format: Output format ('jsonl', 'json', 'csv')
+        
+    Returns:
+        dict: Export result with file_path and metadata
+    """
+    import os
+    import pandas as pd
+    
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        
+        # Get all battles with preferences
+        cursor.execute('''
+        SELECT * FROM arena_battles 
+        WHERE user_preference IS NOT NULL
+        ORDER BY timestamp DESC
+        ''')
+        
+        battles = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+        
+        # Prepare export directory
+        export_dir = os.path.join('instance', 'arena_training_data')
+        os.makedirs(export_dir, exist_ok=True)
+        
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        if export_type == 'dpo':
+            # Direct Preference Optimization format
+            dpo_data = []
+            for battle in battles:
+                battle_dict = dict(zip(columns, battle))
+                
+                if battle_dict['user_preference'] == 'left':
+                    dpo_data.append({
+                        'prompt': battle_dict['user_message'],
+                        'chosen': battle_dict['response_a'],
+                        'rejected': battle_dict['response_b'],
+                        'preference_strength': 1.0,
+                        'metadata': {
+                            'battle_id': battle_dict['battle_id'],
+                            'timestamp': battle_dict['timestamp'],
+                            'chosen_model': battle_dict['model_a'],
+                            'rejected_model': battle_dict['model_b']
+                        }
+                    })
+                elif battle_dict['user_preference'] == 'right':
+                    dpo_data.append({
+                        'prompt': battle_dict['user_message'],
+                        'chosen': battle_dict['response_b'],
+                        'rejected': battle_dict['response_a'],
+                        'preference_strength': 1.0,
+                        'metadata': {
+                            'battle_id': battle_dict['battle_id'],
+                            'timestamp': battle_dict['timestamp'],
+                            'chosen_model': battle_dict['model_b'],
+                            'rejected_model': battle_dict['model_a']
+                        }
+                    })
+                elif battle_dict['user_preference'] == 'tie':
+                    # For ties, create weaker preference examples
+                    dpo_data.extend([
+                        {
+                            'prompt': battle_dict['user_message'],
+                            'chosen': battle_dict['response_a'],
+                            'rejected': battle_dict['response_b'],
+                            'preference_strength': 0.5,
+                            'metadata': {
+                                'battle_id': battle_dict['battle_id'],
+                                'preference': 'tie'
+                            }
+                        },
+                        {
+                            'prompt': battle_dict['user_message'],
+                            'chosen': battle_dict['response_b'],
+                            'rejected': battle_dict['response_a'],
+                            'preference_strength': 0.5,
+                            'metadata': {
+                                'battle_id': battle_dict['battle_id'],
+                                'preference': 'tie'
+                            }
+                        }
+                    ])
+            
+            filename = f'dpo_training_data_{timestamp}.jsonl'
+            filepath = os.path.join(export_dir, filename)
+            
+            with open(filepath, 'w') as f:
+                for item in dpo_data:
+                    f.write(json.dumps(item) + '\n')
+            
+            result = {
+                'success': True,
+                'file_path': filepath,
+                'export_type': 'dpo',
+                'format': 'jsonl',
+                'battles_included': len(battles),
+                'examples_generated': len(dpo_data)
+            }
+            
+        elif export_type == 'rlhf':
+            # RLHF format with rankings
+            rlhf_data = []
+            for battle in battles:
+                battle_dict = dict(zip(columns, battle))
+                
+                ranking = {
+                    'left': [1, 2],
+                    'right': [2, 1],
+                    'tie': [1, 1],
+                    'both_bad': [0, 0]
+                }.get(battle_dict['user_preference'], [0, 0])
+                
+                rlhf_data.append({
+                    'prompt': battle_dict['user_message'],
+                    'responses': [
+                        {
+                            'text': battle_dict['response_a'],
+                            'model': battle_dict['model_a'],
+                            'rank': ranking[0]
+                        },
+                        {
+                            'text': battle_dict['response_b'],
+                            'model': battle_dict['model_b'],
+                            'rank': ranking[1]
+                        }
+                    ],
+                    'metadata': {
+                        'battle_id': battle_dict['battle_id'],
+                        'timestamp': battle_dict['timestamp'],
+                        'preference': battle_dict['user_preference']
+                    }
+                })
+            
+            filename = f'rlhf_training_data_{timestamp}.json'
+            filepath = os.path.join(export_dir, filename)
+            
+            with open(filepath, 'w') as f:
+                json.dump(rlhf_data, f, indent=2)
+            
+            result = {
+                'success': True,
+                'file_path': filepath,
+                'export_type': 'rlhf',
+                'format': 'json',
+                'battles_included': len(battles)
+            }
+            
+        elif export_type == 'analytics':
+            # Analytics CSV format
+            df = pd.DataFrame(battles, columns=columns)
+            
+            filename = f'arena_analytics_{timestamp}.csv'
+            filepath = os.path.join(export_dir, filename)
+            df.to_csv(filepath, index=False)
+            
+            result = {
+                'success': True,
+                'file_path': filepath,
+                'export_type': 'analytics',
+                'format': 'csv',
+                'battles_included': len(battles)
+            }
+        
+        else:
+            result = {
+                'success': False,
+                'error': f'Unknown export type: {export_type}'
+            }
+        
+        # Log the export
+        if result['success']:
+            export_id = str(uuid.uuid4())
+            cursor.execute('''
+            INSERT INTO arena_training_exports
+            (export_id, export_timestamp, export_type, format, battles_included, file_path, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (export_id, datetime.datetime.now(), export_type, format, 
+                 result.get('battles_included'), result.get('file_path'), 
+                 json.dumps(result)))
+            conn.commit()
+        
+        conn.close()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error exporting Arena training data: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
 # Convenience class for event management
 class EventLogger:
     """
@@ -651,4 +959,13 @@ class EventLogger:
                        question, explanation, context_used=None, llm_interaction_id=None):
         """Log explanation"""
         return log_explanation(self.db_manager, session_id, entity_type, entity_name, question_type,
-                              question, explanation, context_used, llm_interaction_id) 
+                              question, explanation, context_used, llm_interaction_id)
+    
+    def log_arena_battle(self, battle_id, session_id, user_message, model_a, model_b, **kwargs):
+        """Log Arena battle"""
+        return log_arena_battle(self.db_manager, battle_id, session_id, user_message, 
+                              model_a, model_b, **kwargs)
+    
+    def export_arena_training_data(self, export_type='dpo', format='jsonl'):
+        """Export Arena training data"""
+        return export_arena_training_data(self.db_manager, export_type, format) 

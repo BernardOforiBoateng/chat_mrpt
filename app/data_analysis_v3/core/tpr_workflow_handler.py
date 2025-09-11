@@ -309,7 +309,18 @@ class TPRWorkflowHandler:
         
         import json
         import os
+        import time
+        from datetime import datetime
         from ..tools.tpr_analysis_tool import analyze_tpr_data
+        
+        # Start timing
+        start_time = time.time()
+        debug_info = {
+            "timestamp": datetime.now().isoformat(),
+            "session_id": self.session_id,
+            "selections": self.tpr_selections,
+            "stages": {}
+        }
         
         logger.info("🟣 Imported analyze_tpr_data successfully")
         
@@ -340,12 +351,16 @@ Analyzing test data and generating visualizations..."""
             data_path = f"instance/uploads/{self.session_id}/uploaded_data.csv"
             if not os.path.exists(data_path):
                 self.uploaded_data.to_csv(data_path, index=False)
-                logger.info(f"Saved data to {data_path} for TPR tool")
+                logger.info(f"✅ Saved data to {data_path} for TPR tool")
+                debug_info["stages"]["data_save"] = {"success": True, "path": data_path}
+            else:
+                logger.info(f"📋 Data already exists at {data_path}")
+                debug_info["stages"]["data_save"] = {"success": True, "exists": True}
             
             # Call the tool with calculate_tpr action
-            logger.info(f"Calling TPR tool with options: {options}")
-            logger.error("🔴🔴🔴 DEBUG: About to invoke analyze_tpr_data tool")
-            logger.error("🔴🔴🔴 DEBUG: Tool input - action: calculate_tpr, options: %s", options)
+            logger.info(f"🎯 Calling TPR tool with options: {options}")
+            logger.info("🔍 DEBUG: About to invoke analyze_tpr_data tool")
+            logger.info(f"🔍 DEBUG: Tool input - action: calculate_tpr, options: {json.dumps(options)}")
             
             result = analyze_tpr_data.invoke({
                 'thought': f"Calculating TPR for {self.tpr_selections['state']} with user selections",
@@ -354,21 +369,40 @@ Analyzing test data and generating visualizations..."""
                 'graph_state': graph_state
             })
             
-            logger.error("🔴🔴🔴 DEBUG: Tool invocation completed, result type: %s", type(result))
-            logger.info(f"Tool result preview: {result[:500] if result else 'None'}")
+            tool_time = time.time() - start_time
+            logger.info(f"✅ Tool invocation completed in {tool_time:.2f}s, result type: {type(result)}")
+            logger.info(f"📋 Tool result preview: {result[:500] if result else 'None'}")
+            debug_info["stages"]["tpr_calculation"] = {"success": True, "time": tool_time}
             
             # Format the tool results
             from .formatters import MessageFormatter
             formatter = MessageFormatter(self.session_id)
             message = formatter.format_tool_tpr_results(result)
             
+            # Check for various output files
+            tpr_results_path = os.path.join(self.session_folder, 'tpr_results.csv')
+            raw_data_path = os.path.join(self.session_folder, 'raw_data.csv')
+            shapefile_path = os.path.join(self.session_folder, 'raw_shapefile.zip')
+            map_path = os.path.join(self.session_folder, 'tpr_distribution_map.html')
+            
+            files_status = {
+                "tpr_results.csv": os.path.exists(tpr_results_path),
+                "raw_data.csv": os.path.exists(raw_data_path),
+                "raw_shapefile.zip": os.path.exists(shapefile_path),
+                "tpr_distribution_map.html": os.path.exists(map_path)
+            }
+            
+            logger.info(f"📂 Files created status: {json.dumps(files_status, indent=2)}")
+            debug_info["stages"]["file_creation"] = files_status
+            
             # Check if map was created and add to visualizations
             visualizations = []
-            # Use absolute path or path relative to current working directory
-            map_filename = "tpr_distribution_map.html"
-            map_path = os.path.join(self.session_folder, map_filename)
             if os.path.exists(map_path):
-                logger.info(f"TPR map found at {map_path}, adding to visualizations")
+                logger.info(f"✅ TPR map found at {map_path}, adding to visualizations")
+                file_size = os.path.getsize(map_path)
+                logger.info(f"📊 Map file size: {file_size} bytes")
+                debug_info["stages"]["map_creation"] = {"success": True, "size": file_size}
+                
                 # Create visualization object like production does
                 visualization = {
                     'type': 'iframe',
@@ -385,6 +419,9 @@ Analyzing test data and generating visualizations..."""
                     # Add note about map
                     if '📍' not in message:
                         message += "\n\n📍 TPR Map Visualization created (shown above)"
+            else:
+                logger.warning(f"❌ TPR map NOT found at {map_path}")
+                debug_info["stages"]["map_creation"] = {"success": False, "error": "File not created"}
             
             # Update stage to TPR_COMPLETE but keep workflow ACTIVE
             # We need to wait for user's decision on risk analysis
@@ -392,24 +429,59 @@ Analyzing test data and generating visualizations..."""
             self.state_manager.update_workflow_stage(self.current_stage)
             
             # DO NOT mark workflow as complete yet - wait for user response
-            logger.info("🔴 Stage set to TPR_COMPLETE, workflow still ACTIVE waiting for user decision")
+            logger.info("✅ Stage set to TPR_COMPLETE, workflow still ACTIVE waiting for user decision")
             
             # Save TPR completion flag for potential risk analysis
             self.state_manager.update_state({'tpr_completed': True})
             
+            # Calculate total time
+            total_time = time.time() - start_time
+            debug_info["total_time"] = total_time
+            logger.info(f"⏱️ Total TPR calculation time: {total_time:.2f}s")
+            
+            # Save debug info to file
+            debug_file = os.path.join(self.session_folder, 'tpr_debug.json')
+            with open(debug_file, 'w') as f:
+                json.dump(debug_info, f, indent=2)
+            logger.info(f"💾 Debug info saved to {debug_file}")
+            
         except Exception as e:
-            logger.error(f"Error calculating TPR: {e}")
+            import traceback
+            error_trace = traceback.format_exc()
+            logger.error(f"❌ Error calculating TPR: {e}\n{error_trace}")
+            
+            debug_info["stages"]["error"] = {
+                "message": str(e),
+                "trace": error_trace
+            }
+            
+            # Save error debug info
+            debug_file = os.path.join(self.session_folder, 'tpr_error_debug.json')
+            with open(debug_file, 'w') as f:
+                json.dump(debug_info, f, indent=2)
+            
             message = f"Error calculating TPR: {str(e)}"
             visualizations = []
         
-        return {
+        # Add debug info to response for browser console visibility
+        response = {
             "success": True,
             "message": message,
             "session_id": self.session_id,
             "workflow": "tpr",
             "stage": "complete",
-            "visualizations": visualizations  # Add visualizations array like production
+            "visualizations": visualizations,
+            "debug": {
+                "selections": self.tpr_selections,
+                "files_created": files_status if 'files_status' in locals() else {},
+                "total_time": total_time if 'total_time' in locals() else 0,
+                "has_map": len(visualizations) > 0,
+                "debug_file": "tpr_debug.json"
+            }
         }
+        
+        logger.info(f"📤 Returning response with debug info: {json.dumps(response['debug'], indent=2)}")
+        return response
     
     def trigger_risk_analysis(self) -> Dict[str, Any]:
         """
@@ -511,8 +583,8 @@ Analyzing test data and generating visualizations..."""
                 "workflow": "data_upload",
                 "stage": "complete",
                 "transition": "tpr_to_upload",
-                "exit_data_analysis_mode": True,  # Signal frontend to exit Data Analysis mode
-                "redirect_message": "__DATA_UPLOADED__"  # Trigger exploration menu like production
+                "exit_data_analysis_mode": True  # Signal frontend to exit Data Analysis mode
+                # Don't send redirect_message - let user choose from the menu
             }
                 
         except Exception as e:

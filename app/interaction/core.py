@@ -282,6 +282,44 @@ class DatabaseManager:
             )
             ''')
             
+            # Create arena_battles table - tracks Arena mode battle sessions
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS arena_battles (
+                battle_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                timestamp TIMESTAMP,
+                user_message TEXT,
+                model_a TEXT,
+                model_b TEXT,
+                response_a TEXT,
+                response_b TEXT,
+                latency_a REAL,
+                latency_b REAL,
+                tokens_a INTEGER,
+                tokens_b INTEGER,
+                user_preference TEXT,
+                elo_before_a REAL,
+                elo_before_b REAL,
+                elo_after_a REAL,
+                elo_after_b REAL,
+                view_index INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions (session_id)
+            )
+            ''')
+            
+            # Create arena_training_exports table - tracks training data exports
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS arena_training_exports (
+                export_id TEXT PRIMARY KEY,
+                export_timestamp TIMESTAMP,
+                export_type TEXT,
+                format TEXT,
+                battles_included INTEGER,
+                file_path TEXT,
+                metadata TEXT
+            )
+            ''')
+            
             conn.commit()
             conn.close()
             logger.info(f"Interaction database initialized at {self.db_path}")
