@@ -18,7 +18,7 @@ from .base import BaseTool, ToolCategory, ToolExecutionResult, DataAnalysisTool
 logger = logging.getLogger(__name__)
 
 
-class RunCompleteAnalysisInput(BaseModel):
+class RunMalariaRiskAnalysisInput(BaseModel):
     """Input for complete analysis workflow with custom variable selection support"""
     session_id: str = Field(..., description="Session identifier for data access")
     composite_variables: Optional[List[str]] = Field(
@@ -33,7 +33,7 @@ class RunCompleteAnalysisInput(BaseModel):
     validate_variables: bool = Field(True, description="Whether to validate custom variables against available data")
 
 
-class RunCompleteAnalysis(DataAnalysisTool):
+class RunMalariaRiskAnalysis(DataAnalysisTool):
     """
     Run complete dual-method malaria risk analysis (Composite + PCA) without settlement integration logic.
     
@@ -48,8 +48,8 @@ class RunCompleteAnalysis(DataAnalysisTool):
     Any existing settlement columns in the original data are preserved.
     """
     
-    name: str = "run_complete_analysis"
-    description: str = "Run complete dual-method malaria risk analysis (Composite Score + PCA) with support for custom variable selection. Allows different variables for each method or auto-selection based on region."
+    name: str = "run_malaria_risk_analysis"
+    description: str = "Run malaria risk analysis using dual-method approach (Composite Score + PCA) with support for custom variable selection. This is the primary tool for comprehensive malaria vulnerability assessment."
     composite_variables: Optional[List[str]] = Field(
         None, 
         description="Custom variables for composite analysis. If None, uses region-aware auto-selection"
@@ -96,8 +96,34 @@ class RunCompleteAnalysis(DataAnalysisTool):
             )
         
         try:
+            # Get variables first before logging
             composite_variables = kwargs.get('composite_variables') or getattr(self, 'composite_variables', None)
             pca_variables = kwargs.get('pca_variables') or getattr(self, 'pca_variables', None)
+            
+            # 🔍 DEBUG: Complete Analysis Execution
+            logger.info("=" * 60)
+            logger.info("🔍 DEBUG COMPLETE ANALYSIS: Starting execution")
+            logger.info(f"🔍 Session ID: {session_id}")
+            logger.info(f"🔍 Composite variables: {composite_variables}")
+            logger.info(f"🔍 PCA variables: {pca_variables}")
+            logger.info(f"🔍 Create unified dataset: {kwargs.get('create_unified_dataset', True)}")
+            
+            # Check what files exist before analysis
+            session_dir = f'instance/uploads/{session_id}'
+            if os.path.exists(session_dir):
+                files = os.listdir(session_dir)
+                logger.info(f"🔍 Files in session BEFORE analysis: {files[:10]}")
+                
+                # Check for key files
+                for key_file in ['raw_data.csv', 'raw_shapefile.zip', 'unified_dataset.csv', 'tpr_results.csv']:
+                    file_path = os.path.join(session_dir, key_file)
+                    if os.path.exists(file_path):
+                        size = os.path.getsize(file_path)
+                        logger.info(f"🔍   ✅ {key_file} exists ({size:,} bytes)")
+                    else:
+                        logger.info(f"🔍   ❌ {key_file} NOT found")
+            logger.info("=" * 60)
+            # Variables already defined above for debug logging
             create_unified_dataset = kwargs.get('create_unified_dataset', getattr(self, 'create_unified_dataset', True))
             validate_variables = kwargs.get('validate_variables', getattr(self, 'validate_variables', True))
             
@@ -378,7 +404,7 @@ class RunCompleteAnalysis(DataAnalysisTool):
             # Create analysis completion marker file for cross-worker reliability
             # NOTE: This is a FALLBACK when Redis is unavailable
             try:
-                import os
+                # os is already imported at the top of the file
                 from pathlib import Path
                 from flask import session
                 
@@ -1369,144 +1395,10 @@ What would you like to do next?
             logger.warning(f"Failed to mark {analysis_type} analysis complete: {e}")
 
 
-class RunCompositeAnalysisInput(BaseModel):
-    """Input for composite analysis only"""
-    session_id: str = Field(..., description="Session identifier for data access")
-
-
-class RunCompositeAnalysis(DataAnalysisTool):
-    """Run composite score analysis only"""
-    
-    name: str = "run_composite_analysis"
-    description: str = "Run composite score malaria risk analysis with equal weights for all variables"
-    variables: Optional[List[str]] = Field(None, description="Custom variables for composite analysis")
-    
-    def execute(self, session_id: str, **kwargs) -> ToolExecutionResult:
-        """Execute composite score analysis"""
-        kwargs['session_id'] = session_id
-        return self._execute(**kwargs)
-    
-    def _execute(self, **kwargs) -> ToolExecutionResult:
-        """Execute composite score analysis"""
-        try:
-            session_id = kwargs.get('session_id')
-            variables = kwargs.get('variables') or getattr(self, 'variables', None)
-            
-            from ..analysis.engine import AnalysisEngine
-            from ..models.data_handler import DataHandler
-            
-            # Convert session_id to session_folder path
-            session_folder = f"instance/uploads/{session_id}"
-            
-            # Initialize data handler for the session
-            data_handler = DataHandler(session_folder)
-            analysis_engine = AnalysisEngine(data_handler)
-            
-            # Pass custom variables if provided (all variables weighted equally)
-            if variables:
-                result = analysis_engine.run_composite_analysis(session_id, variables=variables)
-            else:
-                result = analysis_engine.run_composite_analysis(session_id)
-            
-            if result.get('status') == 'success':
-                # Mark partial analysis complete for workflow guidance
-                try:
-                    from flask import session
-                    session['composite_analysis_complete'] = True
-                    session['analysis_complete'] = True  # Also set general flag for ITN
-                except:
-                    pass  # Session not available in test context
-                
-                return ToolExecutionResult(
-                    success=True,
-                    message="Composite score analysis completed successfully",
-                    data=result.get('data', {}),
-                    metadata={'analysis_type': 'composite_score'}
-                )
-            else:
-                return ToolExecutionResult(
-                    success=False,
-                    message=f"Composite analysis failed: {result.get('message')}",
-                    error_details=result.get('error_details')
-                )
-                
-        except Exception as e:
-            logger.error(f"Composite analysis failed: {e}")
-            return ToolExecutionResult(
-                success=False,
-                message=f"Composite analysis failed: {str(e)}",
-                error_details=str(e)
-            )
-
-
-class RunPCAAnalysisInput(BaseModel):
-    """Input for PCA analysis only"""
-    session_id: str = Field(..., description="Session identifier for data access")
-
-
-class RunPCAAnalysis(DataAnalysisTool):
-    """Run PCA analysis only"""
-    
-    name: str = "run_pca_analysis"
-    description: str = "Run Principal Component Analysis (PCA) for malaria risk assessment"
-    variables: Optional[List[str]] = Field(None, description="Custom variables for PCA analysis")
-    
-    def execute(self, session_id: str, **kwargs) -> ToolExecutionResult:
-        """Execute PCA analysis"""
-        kwargs['session_id'] = session_id
-        return self._execute(**kwargs)
-    
-    def _execute(self, **kwargs) -> ToolExecutionResult:
-        """Execute PCA analysis"""
-        try:
-            session_id = kwargs.get('session_id')
-            variables = kwargs.get('variables') or getattr(self, 'variables', None)
-            
-            from ..analysis.engine import AnalysisEngine
-            from ..models.data_handler import DataHandler
-            
-            # Convert session_id to session_folder path
-            session_folder = f"instance/uploads/{session_id}"
-            
-            # Initialize data handler for the session
-            data_handler = DataHandler(session_folder)
-            analysis_engine = AnalysisEngine(data_handler)
-            
-            # Pass custom variables if provided
-            if variables:
-                result = analysis_engine.run_pca_analysis(session_id, variables=variables)
-            else:
-                result = analysis_engine.run_pca_analysis(session_id)
-            
-            if result.get('status') == 'success':
-                # Mark partial analysis complete for workflow guidance
-                try:
-                    from flask import session
-                    session['pca_analysis_complete'] = True
-                    session['analysis_complete'] = True  # Also set general flag for ITN
-                except:
-                    pass  # Session not available in test context
-                
-                return ToolExecutionResult(
-                    success=True,
-                    message="PCA analysis completed successfully",
-                    data=result.get('data', {}),
-                    metadata={'analysis_type': 'pca'}
-                )
-            else:
-                return ToolExecutionResult(
-                    success=False,
-                    message=f"PCA analysis failed: {result.get('message')}",
-                    error_details=result.get('error_details')
-                )
-                
-        except Exception as e:
-            logger.error(f"PCA analysis failed: {e}")
-            return ToolExecutionResult(
-                success=False,
-                message=f"PCA analysis failed: {str(e)}",
-                error_details=str(e)
-            )
+# DISABLED: Single-method tools removed to prevent confusion
+# Users should use RunMalariaRiskAnalysis for all risk analysis needs
+# The single-method tools (RunCompositeAnalysis and RunPCAAnalysis) have been removed
+# to ensure the LLM always selects the correct dual-method analysis tool.
 
 
 class GenerateComprehensiveAnalysisSummaryInput(BaseModel):

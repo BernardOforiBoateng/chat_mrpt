@@ -110,10 +110,29 @@ class ProgressiveBattleSession:
             # Subsequent rounds: winner vs next challenger
             if self.winner_chain and len(self.remaining_models) >= 2:
                 current_winner = self.winner_chain[-1]
-                # Find a challenger that isn't the winner
-                for model in self.remaining_models:
-                    if model != current_winner:
-                        return (current_winner, model)
+
+                # Find models that haven't competed yet
+                # A model has competed if it's in winner_chain or eliminated_models
+                models_that_competed = set(self.winner_chain + self.eliminated_models)
+                unused_models = [m for m in self.all_models if m not in models_that_competed]
+
+                logger.info(f"Round {self.current_round + 1} matchup selection:")
+                logger.info(f"  Current winner: {current_winner}")
+                logger.info(f"  Models that competed: {models_that_competed}")
+                logger.info(f"  Unused models: {unused_models}")
+
+                # If there are unused models, pick the first one
+                if unused_models:
+                    challenger = unused_models[0]
+                    logger.info(f"  Selected challenger: {challenger}")
+                    return (current_winner, challenger)
+                else:
+                    # All models have competed - this shouldn't happen in progressive
+                    logger.warning(f"All models have competed but tournament not complete")
+                    # Fallback: find any model that isn't the current winner
+                    for model in self.remaining_models:
+                        if model != current_winner:
+                            return (current_winner, model)
         return None
     
     def record_choice(self, choice: str) -> bool:
@@ -156,18 +175,35 @@ class ProgressiveBattleSession:
         
         # Check if more comparisons needed
         self.current_round += 1
-        
-        # For a 3-model tournament, we need exactly 2 rounds
-        if len(self.remaining_models) > 1:
+
+        # Log current state for debugging
+        logger.info(f"Round {self.current_round} complete. Winner chain: {self.winner_chain}, "
+                   f"Eliminated: {self.eliminated_models}, Remaining: {self.remaining_models}")
+
+        # Progressive tournament: need num_models - 1 rounds total
+        # Continue if we haven't had all models compete yet
+        expected_rounds = len(self.all_models) - 1
+        if self.current_round < expected_rounds and len(self.remaining_models) > 1:
             # Set up next matchup
             self.current_pair = self.get_next_matchup()
-            return True
+            if self.current_pair:
+                logger.info(f"Next matchup for round {self.current_round + 1}: {self.current_pair}")
+                return True
+            else:
+                logger.warning(f"Could not get next matchup despite having {len(self.remaining_models)} models remaining")
+
+        # Tournament complete
+        self.completed = True
+        # Build final ranking: last winner is #1, then eliminated models in reverse order
+        if self.winner_chain:
+            # The last winner is the champion
+            champion = self.winner_chain[-1]
+            # Get eliminated models in reverse order (most recent eliminated = higher rank)
+            self.final_ranking = [champion] + self.eliminated_models[::-1]
         else:
-            # All models compared, finalize ranking
-            self.completed = True
-            # Build final ranking: winner chain + eliminated models in reverse order
-            self.final_ranking = self.winner_chain + self.eliminated_models[::-1]
-            return False
+            self.final_ranking = self.eliminated_models[::-1]
+        logger.info(f"Tournament complete after {self.current_round} rounds. Final ranking: {self.final_ranking}")
+        return False
 
 
 class RedisStorage:
@@ -524,15 +560,14 @@ class ArenaManager:
         # Initialize Redis storage
         self.storage = RedisStorage()
         
-        # Simplified model pool - 3 stable models for progressive battles
-        # Using exact Ollama model names for consistency
+        # FINAL: 3 stable models for production use
         self.available_models = models_config or {
-            'llama3.1:8b': {
+            'phi3:mini': {
                 'type': 'ollama',
-                'display_name': 'Llama 3.1 8B',
+                'display_name': 'Phi-3 Mini',
                 'port': 11434,
-                'huggingface': 'meta-llama/Meta-Llama-3.1-8B-Instruct',
-                'strengths': 'Meta\'s latest model with excellent general knowledge and reasoning'
+                'huggingface': 'microsoft/Phi-3-mini-4k-instruct',
+                'strengths': 'Microsoft\'s compact model with fast inference'
             },
             'mistral:7b': {
                 'type': 'ollama',
@@ -541,12 +576,12 @@ class ArenaManager:
                 'huggingface': 'mistralai/Mistral-7B-Instruct-v0.2',
                 'strengths': 'Fast and accurate with strong performance across tasks'
             },
-            'phi3:mini': {
+            'qwen2.5:7b': {
                 'type': 'ollama',
-                'display_name': 'Phi-3 Mini',
+                'display_name': 'Qwen 2.5 7B',
                 'port': 11434,
-                'huggingface': 'microsoft/Phi-3-mini-instruct',
-                'strengths': 'Microsoft\'s efficient model with excellent reasoning capabilities'
+                'huggingface': 'Qwen/Qwen2.5-7B-Instruct',
+                'strengths': 'Alibaba\'s multilingual model with excellent performance across 140+ languages'
             }
         }
         
@@ -902,12 +937,29 @@ class ArenaManager:
         if not session_id:
             session_id = str(uuid.uuid4())
         
-        # Select models for comparison (use first 3 for now)
+        # Select models for comparison - ORDER MATTERS for progressive loading!
+        # Put faster models first for better UX
+        model_order = [
+            'phi3:mini',      # Fastest (~1.6s)
+            'mistral:7b',     # Fast (~3s)
+            'qwen2.5:7b',     # Medium (~5s)
+            'llama3.1:8b',    # Slower (~8s)
+            'gemma2:9b'       # Slowest (~30s)
+        ]
+
+        # Use ordered models if available, otherwise use default order
         available = list(self.available_models.keys())
-        if num_models > len(available):
-            num_models = len(available)
-        
-        selected_models = available[:num_models]
+        selected_models = []
+        for model in model_order:
+            if model in available and len(selected_models) < num_models:
+                selected_models.append(model)
+
+        # Fill remaining slots if needed
+        for model in available:
+            if model not in selected_models and len(selected_models) < num_models:
+                selected_models.append(model)
+
+        logger.info(f"Selected models in optimized order: {selected_models}")
         
         # Create progressive battle session
         battle = ProgressiveBattleSession(
@@ -936,22 +988,22 @@ class ArenaManager:
     async def get_all_model_responses(self, battle_id: str) -> Dict[str, Any]:
         """
         Get responses from all models in a progressive battle.
-        Pre-fetches all responses for smooth UI transitions.
+        SIMPLE APPROACH: Load all models in parallel with reasonable timeout.
         """
         battle = self.storage.get_progressive_battle(battle_id)
         if not battle:
             return {'error': 'Battle session not found'}
-        
+
         # Import ollama adapter
         from app.core.ollama_adapter import OllamaAdapter
         ollama_adapter = OllamaAdapter()
-        
+
         # Fetch responses from all models in parallel
         async def get_model_response(model_name: str):
             try:
                 start_time = time.time()
                 response = await ollama_adapter.generate_async(
-                    model_name, 
+                    model_name,
                     battle.user_message,
                     temperature=0.7,
                     max_tokens=2048
@@ -961,8 +1013,9 @@ class ArenaManager:
             except Exception as e:
                 logger.error(f"Error getting response from {model_name}: {e}")
                 return model_name, f"Error: {str(e)}", 0
-        
-        # Get all responses in parallel
+
+        # SIMPLE: Get all responses in parallel (like it was working before)
+        logger.info(f"Loading all {len(battle.all_models)} models in parallel: {battle.all_models}")
         tasks = [get_model_response(model) for model in battle.all_models]
         results = await asyncio.gather(*tasks)
         

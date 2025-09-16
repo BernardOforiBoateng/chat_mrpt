@@ -330,7 +330,7 @@ class ServiceContainer:
                     self.container = container
                     self.engine = AnalysisEngine()
                 
-                def run_complete_analysis(self, session_id: str, variables: Optional[List[str]] = None):
+                def run_malaria_risk_analysis(self, session_id: str, variables: Optional[List[str]] = None):
                     """Run complete analysis with data handler from session."""
                     data_service = self.container.get('data_service')
                     if not data_service:
@@ -341,7 +341,7 @@ class ServiceContainer:
                         return {'status': 'error', 'message': 'No data handler found for session'}
                     
                     self.engine.data_handler = data_handler
-                    return self.engine.run_complete_analysis(session_id, variables)
+                    return self.engine.run_complete_analysis(session_id, variables)  # Engine method keeps old name internally
                 
                 def run_composite_analysis(self, session_id: str, variables: Optional[List[str]] = None):
                     """Run composite analysis with data handler from session."""

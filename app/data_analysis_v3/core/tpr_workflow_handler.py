@@ -56,7 +56,13 @@ class TPRWorkflowHandler:
         Returns:
             Response dictionary or None if not in TPR workflow
         """
-        logger.info(f"🟢 handle_workflow called - Current stage: {self.current_stage}, Query: '{user_query}'")
+        logger.info("="*60)
+        logger.info("🔄 TPR: handle_workflow called")
+        logger.info(f"  📝 Query: {user_query[:100]}...")
+        logger.info(f"  🎯 Current Stage: {self.current_stage}")
+        logger.info(f"  🆔 Session ID: {self.session_id}")
+        logger.info(f"  📊 Selections: {self.tpr_selections}")
+        logger.info("="*60)
         
         if self.current_stage == ConversationStage.TPR_STATE_SELECTION:
             logger.info("🟢 Routing to handle_state_selection")
@@ -439,6 +445,147 @@ Analyzing test data and generating visualizations..."""
             debug_info["total_time"] = total_time
             logger.info(f"⏱️ Total TPR calculation time: {total_time:.2f}s")
             
+            # Generate export documents for TPR results
+            download_links = []
+            try:
+                logger.info(f"Generating TPR export documents for session {self.session_id}")
+                
+                # Check if CSV and shapefile exist
+                if os.path.exists(raw_data_path):
+                    download_links.append({
+                        'url': f'/export/download/{self.session_id}/raw_data.csv',
+                        'filename': 'raw_data.csv',
+                        'description': '📊 TPR Analysis Results (CSV)',
+                        'type': 'csv'
+                    })
+                    logger.info(f"✅ Added TPR CSV download link")
+                
+                if os.path.exists(shapefile_path):
+                    download_links.append({
+                        'url': f'/export/download/{self.session_id}/raw_shapefile.zip',
+                        'filename': 'raw_shapefile.zip',
+                        'description': '🗺️ Ward Boundaries Shapefile (ZIP)',
+                        'type': 'zip'
+                    })
+                    logger.info(f"✅ Added shapefile download link")
+                
+                # Generate comprehensive HTML dashboard
+                try:
+                    from pathlib import Path
+                    import pandas as pd
+                    
+                    # Read TPR results
+                    if os.path.exists(tpr_results_path):
+                        tpr_df = pd.read_csv(tpr_results_path)
+                    elif os.path.exists(raw_data_path):
+                        tpr_df = pd.read_csv(raw_data_path)
+                    else:
+                        tpr_df = None
+                    
+                    if tpr_df is not None:
+                        # Create HTML dashboard
+                        dashboard_html = f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <title>TPR Analysis Dashboard - {self.tpr_selections.get('state', 'State')}</title>
+                            <style>
+                                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                                h1 {{ color: #2c3e50; }}
+                                .summary {{ background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                                .metrics {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }}
+                                .metric {{ background: white; padding: 15px; border: 1px solid #dee2e6; border-radius: 5px; }}
+                                .metric-value {{ font-size: 24px; font-weight: bold; color: #007bff; }}
+                                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                                th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #dee2e6; }}
+                                th {{ background: #f8f9fa; font-weight: bold; }}
+                            </style>
+                        </head>
+                        <body>
+                            <h1>TPR Analysis Dashboard</h1>
+                            <div class="summary">
+                                <h2>Analysis Summary</h2>
+                                <div class="metrics">
+                                    <div class="metric">
+                                        <div>State</div>
+                                        <div class="metric-value">{self.tpr_selections.get('state', 'N/A')}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div>Facility Level</div>
+                                        <div class="metric-value">{self.tpr_selections.get('facility_level', 'N/A')}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div>Age Group</div>
+                                        <div class="metric-value">{self.tpr_selections.get('age_group', 'N/A')}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div>Total Wards</div>
+                                        <div class="metric-value">{len(tpr_df) if 'WardName' in tpr_df.columns else 'N/A'}</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div>Average TPR</div>
+                                        <div class="metric-value">{tpr_df['TPR'].mean():.2f}%</div>
+                                    </div>
+                                    <div class="metric">
+                                        <div>Max TPR</div>
+                                        <div class="metric-value">{tpr_df['TPR'].max():.2f}%</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <h2>Top 10 Wards by TPR</h2>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Ward Name</th>
+                                        <th>TPR (%)</th>
+                                        <th>Tests Positive</th>
+                                        <th>Tests Examined</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        """
+                        
+                        # Add top 10 wards
+                        top_wards = tpr_df.nlargest(10, 'TPR') if 'TPR' in tpr_df.columns else tpr_df.head(10)
+                        for _, row in top_wards.iterrows():
+                            dashboard_html += f"""
+                                    <tr>
+                                        <td>{row.get('WardName', 'N/A')}</td>
+                                        <td>{row.get('TPR', 0):.2f}</td>
+                                        <td>{row.get('Tests_Positive', 0):.0f}</td>
+                                        <td>{row.get('Tests_Examined', 0):.0f}</td>
+                                    </tr>
+                            """
+                        
+                        dashboard_html += """
+                                </tbody>
+                            </table>
+                        </body>
+                        </html>
+                        """
+                        
+                        # Save dashboard
+                        dashboard_path = Path(self.session_folder) / 'tpr_dashboard.html'
+                        dashboard_path.write_text(dashboard_html)
+                        
+                        download_links.append({
+                            'url': f'/export/download/{self.session_id}/tpr_dashboard.html',
+                            'filename': 'tpr_dashboard.html',
+                            'description': '📈 Interactive TPR Dashboard (HTML)',
+                            'type': 'html'
+                        })
+                        logger.info(f"✅ Generated TPR dashboard at {dashboard_path}")
+                    
+                except Exception as e:
+                    logger.warning(f"Could not generate TPR dashboard: {e}")
+                
+                if download_links:
+                    logger.info(f"✅ Generated {len(download_links)} export documents for TPR analysis")
+                    
+            except Exception as e:
+                logger.error(f"Error generating TPR export documents: {e}")
+                # Continue without exports - don't fail the main operation
+            
             # Save debug info to file
             debug_file = os.path.join(self.session_folder, 'tpr_debug.json')
             with open(debug_file, 'w') as f:
@@ -462,6 +609,7 @@ Analyzing test data and generating visualizations..."""
             
             message = f"Error calculating TPR: {str(e)}"
             visualizations = []
+            download_links = []
         
         # Add debug info to response for browser console visibility
         response = {

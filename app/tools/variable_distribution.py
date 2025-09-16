@@ -46,6 +46,22 @@ class VariableDistribution(BaseTool):
     def execute(self, session_id: str) -> ToolExecutionResult:
         """Execute variable distribution visualization"""
         try:
+            # 🔍 DEBUG: Variable Distribution Execution
+            logger.info("=" * 60)
+            logger.info(f"🔍 DEBUG VARIABLE DISTRIBUTION: Starting for variable '{self.variable_name}'")
+            logger.info(f"🔍 Session ID: {session_id}")
+            
+            # Check what data files exist
+            session_dir = f'instance/uploads/{session_id}'
+            raw_csv = os.path.join(session_dir, 'raw_data.csv')
+            unified_csv = os.path.join(session_dir, 'unified_dataset.csv')
+            shapefile_zip = os.path.join(session_dir, 'raw_shapefile.zip')
+            
+            logger.info(f"🔍 Checking data files:")
+            logger.info(f"🔍   raw_data.csv: {'EXISTS' if os.path.exists(raw_csv) else 'NOT FOUND'}")
+            logger.info(f"🔍   unified_dataset.csv: {'EXISTS' if os.path.exists(unified_csv) else 'NOT FOUND'}")
+            logger.info(f"🔍   raw_shapefile.zip: {'EXISTS' if os.path.exists(shapefile_zip) else 'NOT FOUND'}")
+            logger.info("=" * 60)
             logger.info(f"🗺️ Creating distribution map for variable: {self.variable_name}")
             
             # Load data
@@ -115,6 +131,8 @@ class VariableDistribution(BaseTool):
                 response_text = f"**{resolved_variable.upper()} Spatial Distribution**\n\n{stats_text}"
             response_text += f"\n\nI've created a spatial distribution map showing how **{resolved_variable}** varies across your study area."
             
+            # Visualization will be rendered by frontend using web_path
+            
             # Add workflow guidance if appropriate
             if workflow_guidance.get('show_guidance', False):
                 response_text += f"\n\n**💡 Next Steps**\n{workflow_guidance['message']}"
@@ -141,6 +159,9 @@ class VariableDistribution(BaseTool):
             )
     
     def _load_data(self, session_id: str) -> tuple[Optional[pd.DataFrame], Optional[gpd.GeoDataFrame]]:
+        # 🔍 DEBUG: Loading data for variable distribution
+        logger.info("🔍 DEBUG _load_data: Starting data load")
+        logger.info(f"🔍 Session ID: {session_id}")
         """Load CSV and shapefile data from session"""
         try:
             upload_dir = os.path.join('instance', 'uploads', session_id)
@@ -150,6 +171,18 @@ class VariableDistribution(BaseTool):
             csv_path = os.path.join(upload_dir, 'raw_data.csv')
             if os.path.exists(csv_path):
                 csv_data = pd.read_csv(csv_path)
+            logger.info(f"🔍 DEBUG: CSV loaded successfully")
+            logger.info(f"🔍   Shape: {csv_data.shape}")
+            logger.info(f"🔍   Columns (first 10): {list(csv_data.columns)[:10]}")
+            logger.info(f"🔍   ALL Columns: {list(csv_data.columns)}")
+            if self.variable_name in csv_data.columns:
+                logger.info(f"🔍   ✅ Variable '{self.variable_name}' FOUND in CSV")
+            else:
+                logger.error(f"🔍   ❌ Variable '{self.variable_name}' NOT in CSV")
+                # Check case-insensitive
+                matching = [col for col in csv_data.columns if col.lower() == self.variable_name.lower()]
+                if matching:
+                    logger.info(f"🔍   💡 Case-insensitive match found: {matching}")
                 logger.info(f"Loaded raw CSV data: {len(csv_data)} rows, {len(csv_data.columns)} columns")
             
             # Load raw shapefile data
@@ -170,6 +203,7 @@ class VariableDistribution(BaseTool):
                     shp_path = os.path.join(shapefile_dir, shp_files[0])
                     shapefile_data = gpd.read_file(shp_path)
                     logger.info(f"Loaded shapefile data: {len(shapefile_data)} features")
+                    logger.info(f"🔍 DEBUG: Shapefile columns: {list(shapefile_data.columns)}")
             
             return csv_data, shapefile_data
             
@@ -189,7 +223,13 @@ class VariableDistribution(BaseTool):
             for col in join_columns:
                 if col in csv_data.columns and col in shapefile.columns:
                     try:
-                        merged_data = shapefile.merge(csv_data, on=col, how='left')
+                        # Merge preserving all columns with suffixes to avoid conflicts
+                        merged_data = shapefile.merge(
+                            csv_data, 
+                            on=col, 
+                            how='left',
+                            suffixes=('_shp', '')  # Keep CSV columns unchanged, suffix shapefile duplicates
+                        )
                         join_col = col
                         logger.info(f"Successfully merged data on column: {col}")
                         break
@@ -201,9 +241,15 @@ class VariableDistribution(BaseTool):
                 logger.error("Could not merge CSV and shapefile data")
                 return None
             
+            # Debug: Log merged data columns
+            logger.info(f"🔍 DEBUG: Merged data shape: {merged_data.shape}")
+            logger.info(f"🔍 DEBUG: Merged data columns: {list(merged_data.columns)}")
+            logger.info(f"🔍 DEBUG: Looking for variable '{variable}' in merged data...")
+            
             # Ensure variable has valid data
             if variable not in merged_data.columns:
                 logger.error(f"Variable {variable} not found in merged data")
+                logger.error(f"🔍 DEBUG: Available columns after merge: {list(merged_data.columns)}")
                 return None
             
             # Remove rows with missing values for the variable

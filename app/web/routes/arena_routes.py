@@ -29,16 +29,16 @@ arena_manager = None
 def init_arena_system(app):
     """Initialize arena system with app context."""
     global arena_manager
-    
-    # Initialize arena manager with proper model names (matching Ollama)
+
+    # Initialize arena manager with 3 stable models for production
     models_config = app.config.get('ARENA_MODELS', {
-        'llama3.1:8b': {'type': 'ollama', 'display_name': 'Llama 3.1 8B'},
+        'phi3:mini': {'type': 'ollama', 'display_name': 'Phi-3 Mini'},
         'mistral:7b': {'type': 'ollama', 'display_name': 'Mistral 7B'},
-        'phi3:mini': {'type': 'ollama', 'display_name': 'Phi-3 Mini'}
+        'qwen2.5:7b': {'type': 'ollama', 'display_name': 'Qwen 2.5 7B'}
     })
-    
+
     arena_manager = ArenaManager(models_config)
-    
+
     logger.info("Arena system initialized")
 
 
@@ -161,17 +161,17 @@ def start_battle():
             battle_info = loop.run_until_complete(
                 arena_manager.start_progressive_battle(
                     user_message,
-                    num_models=3,  # Tournament with 3 models
+                    num_models=5,  # Testing with all 5 models
                     session_id=data.get('session_id')
                 )
             )
             
-            # Pre-generate ALL model responses immediately for smooth UX
+            # Pre-generate ALL model responses for smooth UX
             logger.info(f"Pre-generating all responses for battle {battle_info['battle_id']}")
             all_responses = loop.run_until_complete(
                 arena_manager.get_all_model_responses(battle_info['battle_id'])
             )
-            
+
             # Add initial responses to battle_info
             if 'error' not in all_responses:
                 # Get the battle to check cached responses
@@ -407,6 +407,29 @@ def get_battle_responses_streaming():
     )
 
 
+@arena_bp.route('/loading_status/<battle_id>', methods=['GET'])
+def get_loading_status(battle_id):
+    """Get the current loading status of models for a battle."""
+    try:
+        battle = arena_manager.storage.get_progressive_battle(battle_id)
+        if not battle:
+            return jsonify({'error': 'Battle not found'}), 404
+
+        loaded_models = list(battle.all_responses.keys())
+        pending_models = [m for m in battle.all_models if m not in battle.all_responses]
+
+        return jsonify({
+            'loaded_models': loaded_models,
+            'pending_models': pending_models,
+            'total_models': len(battle.all_models),
+            'progress_percentage': (len(loaded_models) / len(battle.all_models)) * 100,
+            'all_loaded': len(pending_models) == 0
+        })
+    except Exception as e:
+        logger.error(f"Error getting loading status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @arena_bp.route('/vote', methods=['POST'])
 def record_vote():
     """
@@ -579,19 +602,41 @@ def record_vote():
                 
                 # Final check - ensure we have responses
                 if not response_a:
-                    response_a = "Error: Could not retrieve response for this model."
+                    response_a = f"⏳ {model_a} is still loading in the background. Please wait a moment and try again."
                 if not response_b:
-                    response_b = "Error: Could not retrieve response for this model."
+                    response_b = f"⏳ {model_b} is still loading in the background. Please wait a moment and try again."
+
+                # Log the final state
+                logger.info(f"=== VOTE RESPONSE ===")
+                logger.info(f"Round {len(battle.winner_chain) + 1} responses ready")
+                logger.info(f"Model A ({model_a}): {len(response_a)} chars")
+                logger.info(f"Model B ({model_b}): {len(response_b)} chars")
                 
+                # Calculate proper response labels for progressive tournament
+                current_round = len(battle.winner_chain) + 1
+
+                # Map round numbers to response letters
+                # Round 1: A vs B, Round 2: winner vs C, Round 3: winner vs D, Round 4: winner vs E
+                response_labels = {
+                    1: ('A', 'B'),
+                    2: ('Winner', 'C'),
+                    3: ('Winner', 'D'),
+                    4: ('Winner', 'E')
+                }
+
+                label_a, label_b = response_labels.get(current_round, ('Winner', 'Challenger'))
+
                 # Return responses (either from cache or freshly fetched)
                 return jsonify({
                     'continue_battle': True,
                     'needs_responses': False,  # Responses already cached
-                    'round': len(battle.winner_chain) + 1,
+                    'round': current_round,
                     'model_a': model_a,
                     'model_b': model_b,
                     'response_a': response_a,
                     'response_b': response_b,
+                    'response_label_a': label_a,  # Add label for frontend
+                    'response_label_b': label_b,  # Add label for frontend
                     'battle_id': battle_id,
                     'eliminated_models': battle.eliminated_models,
                     'winner_chain': battle.winner_chain,
@@ -631,19 +676,19 @@ def record_vote():
 @arena_bp.route('/start_progressive', methods=['POST'])
 def start_progressive_battle():
     """
-    Start a progressive battle session with 3 models.
+    Start a progressive battle session with 5 models.
     
     Request body:
     {
         "message": "User's query",
-        "num_models": 3  # Optional, defaults to 3
+        "num_models": 5  # Optional, defaults to 5
     }
     
     Response:
     {
         "battle_id": "uuid",
         "status": "initialized",
-        "total_models": 3,
+        "total_models": 5,
         "message": "Progressive battle session created"
     }
     """
@@ -1018,7 +1063,29 @@ def get_next_responses():
             import time
             import os
             from app.core.arena_system_prompt import get_arena_system_prompt
-            arena_system_prompt = get_arena_system_prompt()
+            from app.core.arena_context_manager import get_arena_context_manager
+            
+            # Get base Arena system prompt
+            base_arena_prompt = get_arena_system_prompt()
+            
+            # Get session context to enhance the prompt
+            context_manager = get_arena_context_manager()
+            session_context = context_manager.get_session_context(
+                session_id=session.get('session_id', 'unknown'),
+                session_data=dict(session)
+            )
+            
+            # Format context for inclusion in prompt
+            context_enhancement = context_manager.format_context_for_prompt(session_context)
+            
+            # Combine base prompt with session context
+            enhanced_arena_prompt = base_arena_prompt + context_enhancement
+            
+            # Log context inclusion
+            if context_enhancement:
+                logger.info(f"Enhanced Arena prompt with session context ({len(context_enhancement)} chars)")
+            else:
+                logger.info("No session context available for Arena models")
             
             # Use GPU instance if configured, otherwise fallback
             ollama_host = os.environ.get('OLLAMA_HOST', os.environ.get('AWS_OLLAMA_HOST', '172.31.45.157'))
@@ -1037,16 +1104,17 @@ def get_next_responses():
             def call_model(model_name):
                 """Call a model and return response"""
                 try:
+                    # Include context-enhanced prompt for better understanding
                     ollama_payload = {
                         "model": model_name,
                         "messages": [
-                            {"role": "system", "content": arena_system_prompt},
+                            {"role": "system", "content": enhanced_arena_prompt},
                             {"role": "user", "content": battle.user_message}
                         ],
                         "temperature": 0.7,
                         "max_tokens": 800
                     }
-                    resp = requests.post(ollama_url, json=ollama_payload, timeout=25)
+                    resp = requests.post(ollama_url, json=ollama_payload, timeout=60)
                     if resp.status_code == 200:
                         return resp.json()['choices'][0]['message']['content']
                     else:
@@ -1062,8 +1130,8 @@ def get_next_responses():
                 
                 # Wait for both with timeout
                 try:
-                    response_a = future_a.result(timeout=28)
-                    response_b = future_b.result(timeout=28)
+                    response_a = future_a.result(timeout=65)
+                    response_b = future_b.result(timeout=65)
                 except concurrent.futures.TimeoutError:
                     logger.error("Timeout waiting for model responses")
                     response_a = response_a or "Error: Timeout"

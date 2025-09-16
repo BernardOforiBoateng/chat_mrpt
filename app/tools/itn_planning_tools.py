@@ -6,6 +6,8 @@ Activates after analysis is complete and uses composite or PCA rankings for prio
 """
 
 import logging
+import os
+import json
 from typing import Optional, List, Dict, Any
 from pydantic import Field, validator
 
@@ -123,10 +125,76 @@ class PlanITNDistribution(BaseTool):
             stats = result['stats']
             message = self._format_distribution_summary(stats, result)
             
+            # Add warning if ward matching issues were detected
+            try:
+                report_path = f"instance/uploads/{session_id}/ward_matching_report.json"
+                if os.path.exists(report_path):
+                    import json
+                    with open(report_path, 'r') as f:
+                        matching_report = json.load(f)
+                    
+                    if matching_report.get('match_percentage', 100) < 90:
+                        unmatched_count = matching_report.get('unmatched_wards', 0)
+                        message += f"\n\n⚠️ **Ward Matching Notice**: {unmatched_count} wards could not be matched with population data. "
+                        message += "These wards are shown on the map with estimated values. "
+                        message += "For more accurate results, please ensure ward names are consistent across your datasets."
+            except Exception as e:
+                logger.debug(f"Could not read matching report: {e}")
+            
+            # Visualization will be rendered by frontend using web_path
+            map_path = result.get('map_path')
+            
+            # Generate export documents
+            download_links = []
+            try:
+                logger.info(f"Generating ITN distribution export documents for session {session_id}")
+                from .export_tools import ExportITNResults
+                
+                # Create export tool instance
+                export_tool = ExportITNResults(
+                    include_dashboard=True,
+                    include_csv=True,
+                    include_maps=False  # We already have the map
+                )
+                
+                # Execute export
+                export_result = export_tool.execute(session_id)
+                
+                if export_result.success:
+                    # Extract the exported files from the result
+                    export_data = export_result.data
+                    
+                    # Add download links for exported files
+                    if 'csv_path' in export_data and export_data['csv_path']:
+                        csv_filename = export_data['csv_path'].name
+                        download_links.append({
+                            'url': f'/export/download/{session_id}/{csv_filename}',
+                            'filename': csv_filename,
+                            'description': '📊 ITN Distribution Results (CSV)',
+                            'type': 'csv'
+                        })
+                    
+                    if 'dashboard_path' in export_data and export_data['dashboard_path']:
+                        dashboard_filename = export_data['dashboard_path'].name
+                        download_links.append({
+                            'url': f'/export/download/{session_id}/{dashboard_filename}',
+                            'filename': dashboard_filename,
+                            'description': '📈 Interactive Dashboard (HTML)',
+                            'type': 'html'
+                        })
+                    
+                    if download_links:
+                        logger.info(f"✅ Generated {len(download_links)} export documents for ITN distribution")
+                else:
+                    logger.warning(f"Export generation failed: {export_result.message}")
+            except Exception as e:
+                logger.error(f"Error generating export documents: {e}")
+                # Continue without exports - don't fail the main operation
+            
             # Prepare result data
             result_data = {
                 'stats': stats,
-                'map_path': result.get('map_path'),
+                'map_path': map_path,
                 'method_used': self.method,
                 'urban_threshold': urban_threshold,
                 'household_size': avg_household_size,
@@ -159,7 +227,7 @@ class PlanITNDistribution(BaseTool):
             return self._create_success_result(
                 message=message,
                 data=result_data,
-                web_path=result.get('map_path')
+                web_path=map_path
             )
             
         except Exception as e:
@@ -337,11 +405,12 @@ Please provide these values and I'll calculate the optimal distribution plan bas
         
         # Add top priority wards if available
         if prioritized is not None and len(prioritized) > 0:
-            top_5 = prioritized.nlargest(5, 'nets_allocated')[['WardName', 'nets_allocated', 'Population']]
-            summary += "\n\n**Top 5 Priority Wards:**"
-            for idx, ward in top_5.iterrows():
+            # Show the actual highest risk wards (lowest rank numbers) that received allocations
+            top_5 = prioritized.nsmallest(5, 'overall_rank')[['WardName', 'nets_allocated', 'Population', 'overall_rank']]
+            summary += "\n\n**Top 5 Highest Risk Wards (Prioritized for Distribution):**"
+            for i, (_, ward) in enumerate(top_5.iterrows(), 1):
                 coverage = (ward['nets_allocated'] * 1.8 / ward['Population'] * 100) if ward['Population'] > 0 else 0
-                summary += f"\n{idx+1}. **{ward['WardName']}** - {ward['nets_allocated']} nets ({coverage:.1f}% coverage)"
+                summary += f"\n{i}. **{ward['WardName']}** (Risk Rank #{ward['overall_rank']}) - {ward['nets_allocated']} nets ({coverage:.1f}% coverage)"
         
         summary += "\n\n📊 View the interactive distribution map below to see the allocation across all wards."
         

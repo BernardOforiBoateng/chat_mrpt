@@ -14,16 +14,52 @@ def update_itn_distribution():
     """Update ITN distribution with new threshold."""
     try:
         data = request.get_json()
-        session_id = session.get('session_id')
+        # Get session_id from multiple sources
+        session_id = data.get('session_id') or session.get('session_id')
         
         if not session_id:
             return jsonify({'status': 'error', 'message': 'No active session'}), 400
+        
+        logger.info(f"ITN threshold update request for session {session_id}")
+        
+        # Try to retrieve stored ITN parameters
+        stored_params = None
+        try:
+            # Try Redis first
+            from app.core.redis_state_manager import get_redis_state_manager
+            redis_manager = get_redis_state_manager()
+            stored_params = redis_manager.get_custom_data(session_id, 'itn_parameters')
+            if stored_params:
+                logger.info(f"Retrieved ITN parameters from Redis: {stored_params}")
+        except Exception as e:
+            logger.debug(f"Could not get params from Redis: {e}")
             
-        # Get parameters
-        urban_threshold = float(data.get('urban_threshold', 30))
-        total_nets = int(data.get('total_nets', 10000))
-        avg_household_size = float(data.get('avg_household_size', 5.0))
-        method = data.get('method', 'composite')
+        # Fall back to file-based storage
+        if not stored_params:
+            try:
+                import json
+                params_path = f"instance/uploads/{session_id}/itn_parameters.json"
+                if os.path.exists(params_path):
+                    with open(params_path, 'r') as f:
+                        stored_params = json.load(f)
+                    logger.info(f"Retrieved ITN parameters from file: {stored_params}")
+            except Exception as e:
+                logger.debug(f"Could not get params from file: {e}")
+        
+        # Get parameters - use stored values as defaults if available
+        if stored_params:
+            urban_threshold = float(data.get('urban_threshold', stored_params.get('urban_threshold', 30)))
+            total_nets = int(data.get('total_nets', stored_params.get('total_nets', 10000)))
+            avg_household_size = float(data.get('avg_household_size', stored_params.get('avg_household_size', 5.0)))
+            method = data.get('method', stored_params.get('method', 'composite'))
+        else:
+            # Use provided values or defaults
+            urban_threshold = float(data.get('urban_threshold', 30))
+            total_nets = int(data.get('total_nets', 10000))
+            avg_household_size = float(data.get('avg_household_size', 5.0))
+            method = data.get('method', 'composite')
+        
+        logger.info(f"Using parameters: threshold={urban_threshold}, nets={total_nets}, household={avg_household_size}, method={method}")
         
         # Load data handler with proper session folder
         session_folder = os.path.join('instance', 'uploads', session_id)

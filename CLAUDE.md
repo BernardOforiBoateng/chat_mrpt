@@ -348,3 +348,25 @@ Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
 NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
+
+
+
+
+For planning use this:
+Planning Task — Next Steps
+
+Now that the investigation findings are available, create a clear plan to address the issues.
+
+Instructions:
+
+Review the findings carefully.
+
+For each issue, propose a fix.
+
+Organize the fixes into a logical sequence (what to do first, second, etc.).
+
+Keep the plan simple, actionable, and directly tied to the investigation results.
+
+Deliverable:
+A step-by-step plan that we can follow to resolve the issues.

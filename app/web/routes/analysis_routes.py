@@ -49,6 +49,102 @@ async def route_with_mistral(message: str, session_context: dict) -> str:
     if message_lower in ['thanks', 'thank you', 'bye', 'goodbye', 'ok', 'okay', 'sure', 'yes', 'no']:
         return "can_answer"
     
+    # CRITICAL: Tool-specific detection BEFORE Mistral routing
+    # This ensures tool requests go to tools, not Arena
+    if session_context.get('has_uploaded_files', False):
+        # Check for analysis tool triggers
+        analysis_triggers = [
+            'run the malaria risk analysis',
+            'run risk analysis',
+            'run analysis',
+            'perform analysis',
+            'analyze the data',
+            'analyze my data',
+            'start analysis',
+            'complete analysis',
+            'run the analysis'
+        ]
+        if any(trigger in message_lower for trigger in analysis_triggers):
+            logger.info(f"Tool detection: Analysis trigger found - routing to tools")
+            return "needs_tools"
+        
+        # Check for visualization tool triggers
+        visualization_keywords = ['plot', 'map', 'chart', 'visualize', 'graph', 'show me the', 'display']
+        if any(keyword in message_lower for keyword in visualization_keywords):
+            # Specific visualization checks
+            if 'vulnerability' in message_lower and ('map' in message_lower or 'plot' in message_lower):
+                logger.info(f"Tool detection: Vulnerability map trigger - routing to tools")
+                return "needs_tools"
+            elif 'distribution' in message_lower:
+                logger.info(f"Tool detection: Distribution visualization trigger - routing to tools")
+                return "needs_tools"
+            elif any(word in message_lower for word in ['box plot', 'boxplot', 'histogram', 'scatter', 'heatmap', 'bar chart']):
+                logger.info(f"Tool detection: Chart type trigger - routing to tools")
+                return "needs_tools"
+            # General visualization with data
+            elif any(keyword in message_lower for keyword in ['plot', 'map', 'chart', 'visualize']):
+                logger.info(f"Tool detection: General visualization trigger - routing to tools")
+                return "needs_tools"
+        
+        # Check for ranking/query tool triggers
+        ranking_triggers = [
+            'top', 'highest', 'lowest', 'rank', 'list wards', 
+            'worst', 'best', 'most at risk', 'least at risk',
+            'high risk wards', 'low risk wards'
+        ]
+        if any(trigger in message_lower for trigger in ranking_triggers) and 'ward' in message_lower:
+            logger.info(f"Tool detection: Ranking query trigger - routing to tools")
+            return "needs_tools"
+        
+        # Check for data quality and summary triggers
+        data_query_triggers = [
+            'check data quality',
+            'data quality',
+            'check quality',
+            'summarize the data',
+            'summary of data',
+            'data summary',
+            'describe the data',
+            'what variables',
+            'available variables'
+        ]
+        if any(trigger in message_lower for trigger in data_query_triggers):
+            logger.info(f"Tool detection: Data query trigger - routing to tools")
+            return "needs_tools"
+        
+        # Check for intervention planning triggers (especially ITN)
+        intervention_triggers = [
+            'bed net', 'bednet', 'bed-net', 'itn', 'intervention', 'plan distribution',
+            'insecticide', 'spray', 'irs', 'treatment',
+            'mosquito net', 'llin', 'distribute net', 'distributing net',
+            'net distribution', 'nets distribution', 'distribution of net',
+            'allocate net', 'allocation of net', 'plan itn', 'itn planning',
+            'itn distribution', 'distribute itn', 'plan high trend', 
+            'high trend distribution', 'trend distribution'
+        ]
+        if any(trigger in message_lower for trigger in intervention_triggers):
+            logger.info(f"Tool detection: Intervention planning trigger (ITN) - routing to tools")
+            return "needs_tools"
+        
+        # Check for ITN parameter responses (when user provides net count and household size)
+        # These patterns indicate user is responding to ITN prompts
+        itn_param_patterns = [
+            ('have' in message_lower and 'net' in message_lower and any(char.isdigit() for char in message)),
+            ('household size' in message_lower and any(char.isdigit() for char in message)),
+            ('average household' in message_lower and any(char.isdigit() for char in message)),
+            (any(word in message_lower for word in ['million', 'thousand', 'hundred']) and 'net' in message_lower),
+            # Common response patterns
+            ('i have' in message_lower and any(word in message_lower for word in ['nets', 'bed nets', 'bednets']) and any(char.isdigit() for char in message))
+        ]
+        if any(pattern for pattern in itn_param_patterns):
+            logger.info(f"Tool detection: ITN parameter response detected - routing to tools")
+            return "needs_tools"
+        
+        # Check for specific ward analysis
+        if 'why' in message_lower and 'ward' in message_lower and ('rank' in message_lower or 'high' in message_lower or 'risk' in message_lower):
+            logger.info(f"Tool detection: Ward analysis explanation trigger - routing to tools")
+            return "needs_tools"
+    
     try:
         # Import Ollama adapter
         from app.core.ollama_adapter import OllamaAdapter
@@ -67,41 +163,94 @@ async def route_with_mistral(message: str, session_context: dict) -> str:
         files_str = f"Uploaded files: {', '.join(files_info)}" if files_info else "No files uploaded"
         
         # Create routing prompt
-        prompt = f"""You are a routing assistant for a malaria risk analysis system.
+        prompt = f"""You are a routing assistant for ChatMRPT, a malaria risk analysis system.
+
+AVAILABLE CAPABILITIES:
+
+1. TOOLS (require uploaded data to function):
+   - Analysis Tools: RunMalariaRiskAnalysis
+     Purpose: Analyze uploaded malaria data, calculate risk scores, identify high-risk areas
+   - Visualization Tools: CreateVulnerabilityMap, CreateBoxPlot, CreateHistogram, CreateHeatmap
+     Purpose: Generate maps and charts from uploaded data
+   - Export Tools: ExportResults, GenerateReport
+     Purpose: Export analysis results to PDF/Excel
+   - Data Query Tools: CheckDataQuality, GetSummaryStatistics
+     Purpose: Query and examine uploaded data
+
+2. KNOWLEDGE RESPONSES (no data needed):
+   - Explain malaria concepts (transmission, epidemiology, prevention)
+   - Describe analysis methodologies (PCA, composite scoring, risk assessment)
+   - ChatMRPT help and guidance
+   - General public health information
+   - Answer "what is", "how does", "explain" type questions
 
 Context:
+- User has uploaded data: {session_context.get('has_uploaded_files', False)}
 - {files_str}
-- Session has data: {session_context.get('has_uploaded_files', False)}
 
 User message: "{message}"
 
-IMPORTANT: Be conversational by default. Only request tools or clarification when absolutely necessary.
+ROUTING DECISION PROCESS:
 
-Routing rules:
-1. If user wants to work with THEIR UPLOADED DATA (analyze, visualize, map, plot their specific data) → Reply: NEEDS_TOOLS
-2. If this is conversation (greetings, questions, general topics, small talk) → Reply: CAN_ANSWER
-3. ONLY if genuinely unclear AND you cannot make a reasonable guess → Reply: NEEDS_CLARIFICATION
+1. Does the user want to PERFORM AN ACTION on their uploaded data?
+   Keywords: analyze, plot, visualize, calculate, generate, create, run, export, check, perform
+   → If YES and data exists: Reply NEEDS_TOOLS
+   
+2. Does the user want INFORMATION or EXPLANATION?
+   Keywords: what is, how does, explain, tell me about, describe, why
+   → Reply CAN_ANSWER (even if data exists - they want knowledge, not action)
 
-Default to CAN_ANSWER for:
-- Greetings (hi, hello, hey, good morning, etc.)
-- Small talk and phatics
-- General questions about concepts
-- Anything that can be answered conversationally
+3. Is the message explicitly about their uploaded data?
+   Phrases: "my data", "the data", "my file", "the csv", "uploaded"
+   → If asking for action: Reply NEEDS_TOOLS
+   → If asking for explanation: Reply CAN_ANSWER
 
-Examples:
-- "hey" → CAN_ANSWER
-- "hello" → CAN_ANSWER
-- "how are you" → CAN_ANSWER
-- "thanks" → CAN_ANSWER
-- "what is malaria?" → CAN_ANSWER
-- "explain TPR" → CAN_ANSWER
-- "how does this work?" → CAN_ANSWER
-- "plot distribution of evi" (with data) → NEEDS_TOOLS
-- "analyze my data" → NEEDS_TOOLS
-- "check data quality" (with data) → NEEDS_TOOLS
+CRITICAL EXAMPLES:
+With data uploaded:
+ANALYSIS REQUESTS → NEEDS_TOOLS:
+- "Run the malaria risk analysis" → NEEDS_TOOLS (runs run_complete_analysis tool)
+- "perform analysis" → NEEDS_TOOLS (analysis action)
+- "run analysis" → NEEDS_TOOLS (analysis action)
+- "analyze my data" → NEEDS_TOOLS (explicit data operation)
+- "start the analysis" → NEEDS_TOOLS (initiate analysis)
 
-Reply ONLY: NEEDS_TOOLS, CAN_ANSWER, or NEEDS_CLARIFICATION
-Default to CAN_ANSWER when unsure."""
+VISUALIZATION REQUESTS → NEEDS_TOOLS:
+- "plot vulnerability map" → NEEDS_TOOLS (creates vulnerability visualization)
+- "plot me the map distribution of evi" → NEEDS_TOOLS (variable distribution map)
+- "show me the distribution" → NEEDS_TOOLS (distribution visualization)
+- "create a heatmap" → NEEDS_TOOLS (heatmap generation)
+- "plot box plot" → NEEDS_TOOLS (box plot visualization)
+- "visualize the data" → NEEDS_TOOLS (data visualization)
+
+RANKING/QUERY REQUESTS → NEEDS_TOOLS:
+- "show me top 10 highest risk wards" → NEEDS_TOOLS (ranking query)
+- "list the worst affected areas" → NEEDS_TOOLS (ranking query)
+- "which wards are at highest risk" → NEEDS_TOOLS (risk ranking)
+- "why is kafin dabga ward ranked so highly" → NEEDS_TOOLS (ward analysis)
+
+DATA OPERATIONS → NEEDS_TOOLS:
+- "Check data quality" → NEEDS_TOOLS (data quality check)
+- "summarize the data" → NEEDS_TOOLS (data summary)
+- "what variables do we have" → NEEDS_TOOLS (variable listing)
+- "describe my dataset" → NEEDS_TOOLS (dataset description)
+
+INTERVENTION PLANNING → NEEDS_TOOLS:
+- "plan bed net distribution" → NEEDS_TOOLS (ITN planning tool)
+- "where should we distribute mosquito nets" → NEEDS_TOOLS (intervention targeting)
+- "plan IRS campaign" → NEEDS_TOOLS (spray planning)
+
+KNOWLEDGE QUESTIONS → CAN_ANSWER:
+- "what is analysis" → CAN_ANSWER (asking for explanation)
+- "how does PCA work" → CAN_ANSWER (methodology explanation)
+- "what is malaria" → CAN_ANSWER (disease information)
+- "explain transmission" → CAN_ANSWER (educational content)
+- "who are you" → CAN_ANSWER (identity question)
+
+Without data uploaded:
+- "analyze" → CAN_ANSWER (no data to analyze, explain concept)
+- "plot" → CAN_ANSWER (no data to plot, explain concept)
+
+Reply ONLY: NEEDS_TOOLS, CAN_ANSWER, or NEEDS_CLARIFICATION"""
         
         # Get Mistral's routing decision
         import asyncio
@@ -125,41 +274,20 @@ Default to CAN_ANSWER when unsure."""
         else:
             # Fallback if Mistral gives unexpected response
             logger.warning(f"Unexpected Mistral response: {decision}. Using fallback logic.")
-            if session_context.get('has_uploaded_files'):
-                return "needs_tools"  # Default to tools when data exists
-            return "can_answer"  # Default to conversational when no data
+            # Check if message explicitly references data
+            message_lower = message.lower().strip()
+            data_references = ['my data', 'the data', 'uploaded', 'my file', 'the file', 
+                             'my csv', 'the csv', 'analyze this', 'plot my', 'visualize the']
+            if any(ref in message_lower for ref in data_references):
+                return "needs_tools"
+            # Default to conversational for general questions
+            return "can_answer"
             
     except Exception as e:
-        logger.error(f"Error in Mistral routing: {e}. Using fallback logic.")
-        message_lower = message.lower().strip()
-        
-        # Common conversational patterns - default to CAN_ANSWER
-        greetings = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening']
-        small_talk = ['thanks', 'thank you', 'bye', 'goodbye', 'ok', 'okay', 'sure', 'yes', 'no']
-        questions = ['what', 'why', 'how', 'when', 'where', 'who', 'which']
-        
-        # Check for greetings and small talk first
-        if any(word in message_lower.split() for word in greetings + small_talk):
-            return "can_answer"
-        
-        # Check if it's a question (likely conversational)
-        if message_lower.startswith(tuple(questions)):
-            # Unless it's specifically about their data
-            if not any(word in message_lower for word in ['my', 'the data', 'uploaded', 'file']):
-                return "can_answer"
-        
-        # If data is uploaded, check for data operations
-        if session_context.get('has_uploaded_files'):
-            data_keywords = ['plot', 'map', 'visualiz', 'chart', 'distribution', 'analyze', 'check data']
-            if any(keyword in message_lower for keyword in data_keywords):
-                return "needs_tools"
-        
-        # For very short messages (1-2 words), assume conversational
-        if len(message_lower.split()) <= 2:
-            return "can_answer"
-        
-        # Default to conversation rather than clarification
-        return "can_answer"
+        logger.error(f"Error in Mistral routing: {e}. Using neutral fallback.")
+        # When Mistral fails, we don't guess - we ask for clarification
+        # This prevents incorrect routing when the system is uncertain
+        return "needs_clarification"
 
 
 @analysis_bp.route('/run_analysis', methods=['POST'])
@@ -477,6 +605,11 @@ def send_message():
                     has_uploaded_files = True
                     break
         
+        # CRITICAL: Trust session flags after TPR transition or when analysis is complete
+        # TPR workflow sets these flags but may not create files in the expected location
+        if session.get('csv_loaded', False) or session.get('analysis_complete', False):
+            has_uploaded_files = True
+        
         # Build session context for Mistral routing
         session_context = {
             'has_uploaded_files': has_uploaded_files,
@@ -572,13 +705,23 @@ def send_message():
             # Use Arena mode - get responses from 2 models for comparison
             # Using Arena mode
             
-            # Import Arena manager and system prompt
+            # Import Arena manager, system prompt, and context manager
             from app.core.arena_manager import ArenaManager
             from app.core.arena_system_prompt import get_arena_system_prompt
+            from app.core.arena_context_manager import get_arena_context_manager
             arena_manager = ArenaManager()
             
-            # Get the comprehensive system prompt for Arena models
-            arena_system_prompt = get_arena_system_prompt()
+            # Get base Arena system prompt
+            base_arena_prompt = get_arena_system_prompt()
+            
+            # Enhance with session context
+            context_manager = get_arena_context_manager()
+            session_context = context_manager.get_session_context(
+                session_id=session_id,
+                session_data=dict(session)
+            )
+            context_enhancement = context_manager.format_context_for_prompt(session_context)
+            arena_system_prompt = base_arena_prompt + context_enhancement
             
             # Start battle
             import asyncio
@@ -611,7 +754,9 @@ def send_message():
                     ollama_model_map = {
                         'llama3.1:8b': 'llama3.1:8b',
                         'mistral:7b': 'mistral:7b',
-                        'phi3:mini': 'phi3:mini'
+                        'phi3:mini': 'phi3:mini',
+                        'gemma2:9b': 'gemma2:9b',
+                        'qwen2.5:7b': 'qwen2.5:7b'
                     }
                     
                     if model_a in ollama_model_map:
@@ -630,7 +775,7 @@ def send_message():
                             "max_tokens": 500
                         }
                         logger.info(f"Arena Model A - URL: {ollama_url}, Model: {ollama_model_map[model_a]}")
-                        ollama_response = requests.post(ollama_url, json=ollama_payload, timeout=30)
+                        ollama_response = requests.post(ollama_url, json=ollama_payload, timeout=60)
                         logger.info(f"Arena Model A - Status: {ollama_response.status_code}")
                         if ollama_response.status_code == 200:
                             responses['a'] = ollama_response.json()['choices'][0]['message']['content']
@@ -654,7 +799,9 @@ def send_message():
                     ollama_model_map = {
                         'llama3.1:8b': 'llama3.1:8b',
                         'mistral:7b': 'mistral:7b',
-                        'phi3:mini': 'phi3:mini'
+                        'phi3:mini': 'phi3:mini',
+                        'gemma2:9b': 'gemma2:9b',
+                        'qwen2.5:7b': 'qwen2.5:7b'
                     }
                     
                     if model_b in ollama_model_map:
@@ -673,7 +820,7 @@ def send_message():
                             "max_tokens": 500
                         }
                         logger.info(f"Arena Model B - URL: {ollama_url}, Model: {ollama_model_map[model_b]}")
-                        ollama_response = requests.post(ollama_url, json=ollama_payload, timeout=30)
+                        ollama_response = requests.post(ollama_url, json=ollama_payload, timeout=60)
                         logger.info(f"Arena Model B - Status: {ollama_response.status_code}")
                         if ollama_response.status_code == 200:
                             responses['b'] = ollama_response.json()['choices'][0]['message']['content']
@@ -1014,11 +1161,21 @@ def vote_arena():
         # Log the vote
         logger.info(f"Arena vote received: battle_id={battle_id}, vote={vote}, session={session_id}")
         
-        # Get Arena manager and progressive battle
+        # Get Arena manager, system prompt, and context manager
         from app.core.arena_manager import ArenaManager
         from app.core.arena_system_prompt import get_arena_system_prompt
+        from app.core.arena_context_manager import get_arena_context_manager
         arena_manager = ArenaManager()
-        arena_system_prompt = get_arena_system_prompt()
+        
+        # Get enhanced Arena system prompt with context
+        base_arena_prompt = get_arena_system_prompt()
+        context_manager = get_arena_context_manager()
+        session_context = context_manager.get_session_context(
+            session_id=session_id,
+            session_data=dict(session)
+        )
+        context_enhancement = context_manager.format_context_for_prompt(session_context)
+        arena_system_prompt = base_arena_prompt + context_enhancement
         
         # Get the progressive battle
         battle = arena_manager.storage.get_progressive_battle(battle_id)
@@ -1076,7 +1233,7 @@ def vote_arena():
                             ],
                             "max_tokens": 500
                         },
-                        timeout=30
+                        timeout=60
                     )
                     
                     if ollama_response.status_code == 200:
@@ -1167,6 +1324,18 @@ def send_message_streaming():
         # Get the message from the request
         data = request.json
         user_message = data.get('message', '')
+        
+        # DEBUG LOGGING
+        logger.info("="*60)
+        logger.info("🔧 BACKEND: /send_message_streaming endpoint hit")
+        logger.info(f"  📝 User Message: {user_message[:100] if user_message else 'EMPTY'}...")
+        logger.info(f"  🆔 Session ID: {session.get('session_id', 'NO SESSION')}")
+        logger.info(f"  📂 Session Keys: {list(session.keys())}")
+        logger.info(f"  🎯 Analysis Complete: {session.get('analysis_complete', False)}")
+        logger.info(f"  📊 Data Loaded: {session.get('data_loaded', False)}")
+        logger.info(f"  🔄 TPR Complete: {session.get('tpr_workflow_complete', False)}")
+        logger.info("="*60)
+        
         if not user_message:
             # Return streaming error for empty message
             def generate_error():
@@ -1316,6 +1485,11 @@ def send_message_streaming():
             session['shapefile_loaded'] = True
             session.modified = True
         
+        # CRITICAL: Trust session flags after TPR transition or when analysis is complete
+        # TPR workflow sets these flags but may not create files in the expected location
+        if session.get('csv_loaded', False) or session.get('analysis_complete', False):
+            has_uploaded_files = True
+        
         # Build session context for Mistral routing
         session_context = {
             'has_uploaded_files': has_uploaded_files,
@@ -1417,13 +1591,23 @@ def send_message_streaming():
         if use_arena:
             # Attempting Arena mode for streaming
             
-            # Import Arena manager and system prompt
+            # Import Arena manager, system prompt, and context manager
             from app.core.arena_manager import ArenaManager
             from app.core.arena_system_prompt import get_arena_system_prompt
+            from app.core.arena_context_manager import get_arena_context_manager
             arena_manager = ArenaManager()
             
-            # Get the comprehensive system prompt for Arena models
-            arena_system_prompt = get_arena_system_prompt()
+            # Get base Arena system prompt
+            base_arena_prompt = get_arena_system_prompt()
+            
+            # Enhance with session context
+            context_manager = get_arena_context_manager()
+            session_context = context_manager.get_session_context(
+                session_id=session_id,
+                session_data=dict(session)
+            )
+            context_enhancement = context_manager.format_context_for_prompt(session_context)
+            arena_system_prompt = base_arena_prompt + context_enhancement
             
             # Get model responses
             import asyncio
@@ -1467,7 +1651,9 @@ def send_message_streaming():
                 ollama_model_map = {
                     'llama3.1:8b': 'llama3.1:8b',
                     'mistral:7b': 'mistral:7b',
-                    'phi3:mini': 'phi3:mini'
+                    'phi3:mini': 'phi3:mini',
+                    'gemma2:9b': 'gemma2:9b',
+                    'qwen2.5:7b': 'qwen2.5:7b'
                 }
                 
                 # Get responses from both models
@@ -1489,7 +1675,7 @@ def send_message_streaming():
                                     ],
                                     "max_tokens": 500
                                 },
-                                timeout=30
+                                timeout=60
                             )
                             
                             if ollama_response.status_code == 200:

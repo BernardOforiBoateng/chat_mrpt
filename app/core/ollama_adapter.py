@@ -36,12 +36,14 @@ class OllamaAdapter:
         
         logger.info(f"Ollama adapter initialized with base URL: {self.base_url}")
         
-        # Direct model mapping - only the 3 Ollama models we actually have
+        # Direct model mapping - expanded to 5 Ollama models for Arena
         self.model_mapping = {
-            # Primary 3 models (exact Ollama names)
+            # Primary 5 models (exact Ollama names)
             'llama3.1:8b': 'llama3.1:8b',      # Meta's Llama 3.1
             'mistral:7b': 'mistral:7b',        # Mistral 7B
             'phi3:mini': 'phi3:mini',          # Microsoft Phi-3
+            'gemma2:9b': 'gemma2:9b',          # Google Gemma 2
+            'qwen2.5:7b': 'qwen2.5:7b',        # Alibaba Qwen 2.5
         }
         
         self._session: Optional[aiohttp.ClientSession] = None
@@ -264,8 +266,19 @@ class OllamaAdapter:
     
     def __del__(self):
         """Cleanup on deletion"""
-        if hasattr(self, '_session') and self._session:
+        if hasattr(self, '_session') and self._session and not self._session.closed:
             try:
-                asyncio.create_task(self._session.close())
-            except:
+                # Try to get the current event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Schedule the close for later execution
+                    asyncio.create_task(self._session.close())
+                else:
+                    # If no loop is running, run the close synchronously
+                    loop.run_until_complete(self._session.close())
+            except RuntimeError:
+                # No event loop available, can't close properly
+                pass
+            except Exception:
+                # Any other error, ignore
                 pass

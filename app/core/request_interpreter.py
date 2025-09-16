@@ -1,3 +1,4 @@
+import json
 """
 True py-sidebot Implementation for ChatMRPT
 
@@ -76,9 +77,10 @@ class RequestInterpreter:
         logger.info("Registering tools - py-sidebot pattern")
         
         # Register analysis tools
-        self.tools['run_complete_analysis'] = self._run_complete_analysis
-        self.tools['run_composite_analysis'] = self._run_composite_analysis
-        self.tools['run_pca_analysis'] = self._run_pca_analysis
+        self.tools['run_malaria_risk_analysis'] = self._run_malaria_risk_analysis
+        # Disabled single-method tools to prevent confusion
+        # self.tools['run_composite_analysis'] = self._run_composite_analysis
+        # self.tools['run_pca_analysis'] = self._run_pca_analysis
         
         # Register visualization tools
         self.tools['create_vulnerability_map'] = self._create_vulnerability_map
@@ -108,7 +110,23 @@ class RequestInterpreter:
         start_time = time.time()
         
         try:
-            logger.info(f"📌 Processing message for session {session_id}: {user_message[:100]}...")
+            # 🔍 DEBUG: Enhanced logging for workflow tracking
+            logger.info("=" * 60)
+            logger.info("📊 ANALYSIS: RequestInterpreter.process_message")
+            logger.info(f"  📝 User Message: {user_message[:100]}...")
+            logger.info(f"  🆔 Session ID: {session_id}")
+            logger.info(f"  📂 Session Keys: {list(session_data.keys()) if session_data else 'None'}")
+            logger.info(f"  🎯 Analysis Mode: {kwargs.get('is_data_analysis', False)}")
+            logger.info(f"  🔄 Tab Context: {kwargs.get('tab_context', 'unknown')}")
+            
+            # Check session state
+            from flask import session as flask_session
+            logger.info("  📊 Session State:")
+            logger.info(f"    - Analysis Complete: {flask_session.get('analysis_complete', False)}")
+            logger.info(f"    - Data Loaded: {flask_session.get('data_loaded', False)}")
+            logger.info(f"    - ITN Planning Complete: {flask_session.get('itn_planning_complete', False)}")
+            logger.info(f"    - TPR Workflow Complete: {flask_session.get('tpr_workflow_complete', False)}")
+            logger.info("=" * 60)
             
             # Handle special workflows first (pass kwargs for context flags)
             logger.info(f"🔄 Checking special workflows for: {user_message[:50]}...")
@@ -151,6 +169,7 @@ class RequestInterpreter:
                     'content': special_result.get('response', ''),
                     'status': special_result.get('status', 'success'),
                     'visualizations': special_result.get('visualizations', []),
+                    'download_links': special_result.get('download_links', []),
                     'tools_used': special_result.get('tools_used', []),
                     'done': True
                 }
@@ -221,6 +240,10 @@ class RequestInterpreter:
     
     def _llm_with_tools(self, user_message: str, session_context: Dict, session_id: str) -> Dict[str, Any]:
         """py-sidebot pattern: Pass message to LLM with all tools available."""
+        """LLM with tools execution - DEBUG VERSION"""
+        logger.info("🔍 DEBUG LLM_WITH_TOOLS: Starting tool selection")
+        logger.info(f"🔍 Available tools: {list(self.tools.keys())}")
+        logger.info(f"🔍 Session context data_loaded: {session_context.get('data_loaded')}")
         system_prompt = self._build_system_prompt(session_context, session_id)
         
         # Convert tools to OpenAI function format
@@ -252,22 +275,43 @@ class RequestInterpreter:
         logger.info(f"📦 Session data cache has session: {session_id in self.session_data}")
         
         # CRITICAL FIX: Ensure data is loaded in session_data before tools are called
-        # This is needed for tools to access the data after V3 transition
+        # Load the appropriate dataset based on analysis completion status
         if session_context.get('data_loaded', False) and session_id not in self.session_data:
             try:
                 import pandas as pd
                 from pathlib import Path
                 session_folder = Path(f'instance/uploads/{session_id}')
-                raw_data_path = session_folder / 'raw_data.csv'
-                
-                if raw_data_path.exists():
-                    df = pd.read_csv(raw_data_path)
+
+                # Check if analysis is complete and load appropriate file
+                analysis_complete = session_context.get('analysis_complete', False)
+                marker_file = session_folder / '.analysis_complete'
+
+                # Prioritize unified dataset if analysis is complete
+                if analysis_complete or marker_file.exists():
+                    # Try unified dataset first
+                    unified_path = session_folder / 'unified_dataset.csv'
+                    if unified_path.exists():
+                        df = pd.read_csv(unified_path)
+                        logger.info(f"✅ Loaded unified dataset for tools: {df.shape} from {unified_path}")
+                    else:
+                        # Fall back to raw data if unified not found
+                        raw_data_path = session_folder / 'raw_data.csv'
+                        if raw_data_path.exists():
+                            df = pd.read_csv(raw_data_path)
+                            logger.info(f"⚠️ Analysis complete but unified dataset not found, loaded raw data: {df.shape}")
+                else:
+                    # Load raw data for pre-analysis stage
+                    raw_data_path = session_folder / 'raw_data.csv'
+                    if raw_data_path.exists():
+                        df = pd.read_csv(raw_data_path)
+                        logger.info(f"✅ Loaded raw data for tools: {df.shape} from {raw_data_path}")
+
+                if 'df' in locals():
                     self.session_data[session_id] = {
                         'data': df,
                         'columns': list(df.columns),
                         'shape': df.shape
                     }
-                    logger.info(f"✅ Loaded data for tools: {df.shape} from {raw_data_path}")
                     logger.info(f"📋 Columns loaded: {list(df.columns)[:5]}...")
             except Exception as e:
                 logger.error(f"Failed to load data for tools: {e}")
@@ -357,8 +401,10 @@ class RequestInterpreter:
                                     session_id=session_id
                                 )
                                 if interpretation:
+                                    # Add proper spacing and section header for clarity
+                                    formatted_interpretation = f"\n\n**Analysis:**\n{interpretation}"
                                     yield {
-                                        'content': interpretation,
+                                        'content': formatted_interpretation,
                                         'status': 'success',
                                         'tools_used': tools_used_list,
                                         'done': True
@@ -368,7 +414,7 @@ class RequestInterpreter:
                             except Exception as interp_err:
                                 logger.error(f"Error during interpretation: {interp_err}")
                                 yield {
-                                    'content': f"⚠️ Interpretation failed: {interp_err}",
+                                    'content': f"\n\n⚠️ Interpretation failed: {interp_err}",
                                     'status': 'error',
                                     'tools_used': tools_used_list,
                                     'done': True
@@ -381,6 +427,7 @@ class RequestInterpreter:
                                 'content': result['response'],
                                 'status': result.get('status', 'success'),
                                 'visualizations': result.get('visualizations', []),
+                                'download_links': result.get('download_links', []),
                                 'tools_used': tools_list,
                                 'done': False
                             }
@@ -388,13 +435,40 @@ class RequestInterpreter:
                             self._store_conversation(session_id, user_message, result['response'])
                             return
 
-                        # Handle raw string response
+                        # Handle raw string response OR ToolExecutionResult
                         else:
-                            raw_output = result if isinstance(result, str) else str(result)
+                            # Check if it's a ToolExecutionResult with visualization data
+                            visualizations = []
+                            if hasattr(result, 'data') and result.data and 'web_path' in result.data:
+                                # Extract visualization information from ToolExecutionResult
+                                viz_data = {
+                                    'type': result.data.get('map_type', result.data.get('chart_type', 'visualization')),
+                                    'path': result.data.get('web_path', ''),
+                                    'url': result.data.get('web_path', ''),
+                                    'file_path': result.data.get('file_path', ''),
+                                    'title': result.data.get('title', 'Visualization')
+                                }
+                                visualizations = [viz_data]
+                                raw_output = result.message if hasattr(result, 'message') else str(result)
+                            elif isinstance(result, dict) and result.get('data') and result['data'].get('web_path'):
+                                # Handle dict format with visualization data
+                                viz_data = {
+                                    'type': result['data'].get('map_type', result['data'].get('chart_type', 'visualization')),
+                                    'path': result['data'].get('web_path', ''),
+                                    'url': result['data'].get('web_path', ''),
+                                    'file_path': result['data'].get('file_path', ''),
+                                    'title': result.get('message', 'Visualization')
+                                }
+                                visualizations = [viz_data]
+                                raw_output = result.get('message', str(result))
+                            else:
+                                raw_output = result if isinstance(result, str) else str(result)
+                            
                             tools_list = [function_name]
                             yield {
                                 'content': raw_output,
                                 'status': 'success',
+                                'visualizations': visualizations,
                                 'tools_used': tools_list,
                                 'done': False
                             }
@@ -478,6 +552,7 @@ class RequestInterpreter:
                         return {
                             'response': result['response'],
                             'visualizations': result.get('visualizations', []),
+                            'download_links': result.get('download_links', []),
                             'tools_used': result.get('tools_used', [function_name]),
                             'status': result.get('status', 'success')
                         }
@@ -503,14 +578,17 @@ class RequestInterpreter:
         }
     
     # Tool Functions - These are the actual functions registered as tools
-    def _run_complete_analysis(self, session_id: str, variables: Optional[List[str]] = None):
+    def _run_malaria_risk_analysis(self, session_id: str, variables: Optional[List[str]] = None):
         """Run complete dual-method malaria risk analysis (composite scoring + PCA).
         Use ONLY when analysis has NOT been run yet. DO NOT use if analysis is already complete.
         For ITN planning after analysis, use run_itn_planning instead."""
+        logger.info("⚡ TOOL: _run_malaria_risk_analysis called")
+        logger.info(f"  🆔 Session ID: {session_id}")
+        logger.info(f"  📊 Variables: {variables}")
         try:
             # Use the tool directly to get the comprehensive summary
-            from app.tools.complete_analysis_tools import RunCompleteAnalysis
-            tool = RunCompleteAnalysis()
+            from app.tools.complete_analysis_tools import RunMalariaRiskAnalysis
+            tool = RunMalariaRiskAnalysis()
             
             # Execute the tool with proper parameters
             tool_result = tool.execute(
@@ -553,7 +631,7 @@ class RequestInterpreter:
             return {
                 'response': message,
                 'status': 'success' if tool_result.success else 'error',
-                'tools_used': ['run_complete_analysis'],
+                'tools_used': ['run_malaria_risk_analysis'],
                 'visualizations': visualizations
             }
         except Exception as e:
@@ -583,9 +661,9 @@ class RequestInterpreter:
                 
                 # Use your proper summary function
                 try:
-                    from app.tools.complete_analysis_tools import RunCompleteAnalysis
+                    from app.tools.complete_analysis_tools import RunMalariaRiskAnalysis
                     
-                    analysis_tool = RunCompleteAnalysis()
+                    analysis_tool = RunMalariaRiskAnalysis()
                     summary = analysis_tool._generate_comprehensive_summary(
                         result, pca_result, {}, 0.0, session_id
                     )
@@ -1065,6 +1143,12 @@ ChatMRPT uses both composite scoring and PCA for comprehensive assessment:
         Use this tool when user wants to plan ITN distribution, allocate bed nets, or create intervention plans.
         This tool uses existing analysis rankings - DO NOT run analysis again if already complete.
         Keywords: ITN, bed nets, net distribution, intervention planning, allocate nets."""
+        logger.info("🛏️ ITN: _run_itn_planning called")
+        logger.info(f"  🆔 Session ID: {session_id}")
+        logger.info(f"  🔢 Total Nets: {total_nets}")
+        logger.info(f"  🏠 Household Size: {avg_household_size}")
+        logger.info(f"  🏙️ Urban Threshold: {urban_threshold}")
+        logger.info(f"  📊 Method: {method}")
         try:
             # Check if analysis is complete first
             session_context = self._get_session_context(session_id)
@@ -1122,38 +1206,42 @@ ChatMRPT uses both composite scoring and PCA for comprehensive assessment:
                 if data_handler.unified_dataset is None:
                     return 'Analysis rankings not found. Please run the malaria risk analysis first to generate vulnerability rankings.'
             
-            # If user didn't specify total_nets, ask for it
-            if total_nets == 10000:  # Default value
+            # Use the ITN planning tool to get comprehensive results with download links
+            from app.tools.itn_planning_tools import PlanITNDistribution
+            
+            # Create tool instance with parameters
+            tool = PlanITNDistribution(
+                total_nets=total_nets if total_nets != 10000 else None,
+                avg_household_size=avg_household_size,
+                urban_threshold=urban_threshold,
+                method=method
+            )
+            
+            # Execute the tool
+            tool_result = tool.execute(session_id=session_id)
+            
+            if not tool_result.success:
                 return {
-                    'response': "I'm ready to help you plan ITN distribution! To create an optimal allocation plan, I need to know:\n\n1. **How many bed nets do you have available?** (e.g., 50000, 100000)\n2. **What's the average household size in your area?** (default is 5 people)\n\nFor example, you can say: 'I have 100000 nets and average household size is 6'",
-                    'status': 'info',
+                    'response': tool_result.message,
+                    'status': 'error',
                     'tools_used': ['run_itn_planning']
                 }
             
-            result = calculate_itn_distribution(data_handler, session_id, total_nets, avg_household_size, urban_threshold, method)
-            if result['status'] != 'success':
-                return f"Error: {result.get('message', 'Unknown error')}"
+            # Extract visualizations and download links from tool result
+            visualizations = []
+            if tool_result.web_path:
+                visualizations.append({
+                    'type': 'itn_map',
+                    'path': tool_result.web_path,
+                    'url': tool_result.web_path
+                })
             
-            # Format response with embed
-            embed_url = f'/itn_embed/{session_id}'
-            message = f"""**ITN Distribution Plan Generated**
-
-📊 **Distribution Summary:**
-- Total Nets Available: {result['stats']['total_nets']:,}
-- Nets Allocated: {result['stats']['allocated']:,} 
-- Wards with Full Coverage (100%): {result['stats']['fully_covered_wards']}
-- Wards with Partial Coverage: {result['stats']['partially_covered_wards']}
-- Total Wards Receiving Nets: {result['stats']['prioritized_wards']}
-
-📈 **Population Impact:**
-- Total Population: {result['stats']['total_population']:,}
-- Population Covered: {result['stats']['covered_population']:,} ({result['stats']['coverage_percent']:.1f}%)
-
-The map below shows ITN allocation focusing on complete coverage of highest-risk wards."""
-            
+            # Return structured response with download links
             return {
-                'response': message,
-                'visualizations': [{'type': 'itn_map', 'path': result['map_path'], 'url': embed_url}],
+                'response': tool_result.message,
+                'visualizations': visualizations,
+                'download_links': tool_result.download_links if hasattr(tool_result, 'download_links') else [],
+                'tools_used': ['run_itn_planning'],
                 'status': 'success'
             }
         except Exception as e:
@@ -1447,16 +1535,34 @@ Before responding, verify:
                 computed_cols = ['composite_score', 'composite_rank', 'composite_category', 
                                'pca_score', 'pca_rank', 'vulnerability_category', 'overall_rank']
                 
+                # Build column info with defensive checks
                 column_info = f"""
 ## TABLE SCHEMA: df
-### Analysis Results (ALWAYS PRESENT):
-- {ward_col} (TEXT) - Ward identifier
+### Analysis Results:
+- {ward_col} (TEXT) - Ward identifier"""
+
+                # Add composite score info if column exists
+                if 'composite_score' in df.columns:
+                    column_info += f"""
 - composite_score (FLOAT) - Range: {df['composite_score'].min():.3f} to {df['composite_score'].max():.3f}
-- composite_rank (INTEGER) - Range: 1 to {len(df)}
-- composite_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'
+- composite_rank (INTEGER) - Range: 1 to {len(df)}"""
+
+                if 'composite_category' in df.columns:
+                    column_info += f"""
+- composite_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'"""
+
+                # Add PCA score info if column exists
+                if 'pca_score' in df.columns:
+                    column_info += f"""
 - pca_score (FLOAT) - Range: {df['pca_score'].min():.3f} to {df['pca_score'].max():.3f}
-- pca_rank (INTEGER) - Range: 1 to {len(df)}
-- vulnerability_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'
+- pca_rank (INTEGER) - Range: 1 to {len(df)}"""
+
+                # Add vulnerability category if exists
+                if 'vulnerability_category' in df.columns:
+                    column_info += f"""
+- vulnerability_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'"""
+
+                column_info += f"""
 
 ### Key Risk Factors Used in Analysis:
 """
@@ -1482,7 +1588,13 @@ Before responding, verify:
             
             # Build dynamic SQL example for "Why is X ward ranked high?"
             # Include analysis columns plus any numeric variables that were used
-            detail_columns = [ward_col, 'composite_score', 'composite_rank', 'pca_score', 'pca_rank']
+            detail_columns = [ward_col]  # Start with ward column which always exists
+
+            # Add analysis columns that actually exist
+            for col in ['composite_score', 'composite_rank', 'pca_score', 'pca_rank']:
+                if col in df.columns:
+                    detail_columns.append(col)
+
             if variables_used and df is not None:
                 # Add up to 5 numeric variables that were actually used in the analysis
                 for var in variables_used[:5]:
@@ -1496,14 +1608,33 @@ You now have access to the UNIFIED DATASET with all computed results.
 {column_info}
 
 IMPORTANT: Users want to see RESULTS, not column names:
-- ❌ WRONG: "Let me check the data structure" → SELECT * FROM df LIMIT 1
-- ✅ RIGHT: "Here are the top 10 highest risk wards" → SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10
+- ❌ WRONG: "Let me check the data structure" → SELECT * FROM df LIMIT 1"""
+
+            # Build example queries based on available columns
+            if 'composite_score' in df.columns:
+                stage_guidance += f"""
+- ✅ RIGHT: "Here are the top 10 highest risk wards" → SELECT {ward_col}, composite_score FROM df ORDER BY composite_score DESC LIMIT 10
 
 Example queries for common questions (using actual column names from schema above):
-- "Show top vulnerable wards" → SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10
-- "Why is X ward ranked high?" → SELECT {detail_columns_str} FROM df WHERE {ward_col} = 'X'
-- "High risk areas" → SELECT {ward_col}, composite_score, vulnerability_category FROM df WHERE vulnerability_category = 'High Risk'
-- "Compare methods" → SELECT {ward_col}, composite_rank, pca_rank, ABS(composite_rank - pca_rank) as rank_diff FROM df ORDER BY rank_diff DESC LIMIT 20
+- "Show top vulnerable wards" → SELECT {detail_columns_str} FROM df ORDER BY {'composite_score' if 'composite_score' in df.columns else ward_col} DESC LIMIT 10"""
+            else:
+                stage_guidance += f"""
+- ✅ RIGHT: "Show ward data" → SELECT {detail_columns_str} FROM df LIMIT 10
+
+Example queries for common questions:"""
+
+            stage_guidance += f"""
+- "Why is X ward ranked high?" → SELECT {detail_columns_str} FROM df WHERE {ward_col} = 'X'"""
+
+            if 'vulnerability_category' in df.columns:
+                stage_guidance += f"""
+- "High risk areas" → SELECT {ward_col}, vulnerability_category FROM df WHERE vulnerability_category = 'High Risk'"""
+
+            if 'composite_rank' in df.columns and 'pca_rank' in df.columns:
+                stage_guidance += f"""
+- "Compare methods" → SELECT {ward_col}, composite_rank, pca_rank, ABS(composite_rank - pca_rank) as rank_diff FROM df ORDER BY rank_diff DESC LIMIT 20"""
+
+            stage_guidance += f"""
 - "Summary statistics" → Use execute_data_query: "provide summary statistics of analysis results"
 
 FOCUS ON INSIGHTS: When showing rankings, include only the most relevant columns for the user's question.
@@ -1585,6 +1716,13 @@ No data is currently loaded. Guide the user to upload their CSV data and shapefi
 
 CRITICAL: Understand user INTENT before selecting tools:
 
+**INTENT: Run Malaria Risk Analysis**
+For any request to "analyze malaria risk", "run risk analysis", "assess vulnerability":
+- ALWAYS use run_malaria_risk_analysis (NOT run_composite_analysis or run_pca_analysis)
+- This tool runs BOTH composite scoring AND PCA methods automatically
+- Creates comprehensive results with unified dataset
+- Only available tool for full malaria risk assessment
+
 **INTENT: Get Specific Data (rankings, filtering, top/bottom)**
 Use execute_sql_query with FOCUSED queries (NEVER use SELECT * - always specify columns):
 - "Show top 10 highest risk wards" → query="SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10"
@@ -1629,10 +1767,10 @@ PARAMETER EXTRACTION for run_itn_planning:
 - Always extract numbers from the user's message and pass them as parameters
 
 If analysis_complete = False but user asks about ITN:
-- First run_complete_analysis, THEN automatically proceed to run_itn_planning
+- First run_malaria_risk_analysis, THEN automatically proceed to run_itn_planning
 - Don't ask for confirmation if user already expressed intent
 
-NEVER run_complete_analysis if analysis is already complete!
+NEVER run_malaria_risk_analysis if analysis is already complete!
 
 REMEMBER: 
 1. For RANKING/FILTERING questions → Jump straight to the data query
@@ -2046,6 +2184,8 @@ Your expertise adds value through interpretation, not just data retrieval."""
         workflow_transitioned = False
         if session_id:  # Check for ANY session, not just ones with flag
             try:
+                # Define upload_folder before using it
+                upload_folder = 'instance/uploads'
                 # Check the agent state file for workflow transition
                 state_file = os.path.join(upload_folder, session_id, '.agent_state.json')
                 if os.path.exists(state_file):
@@ -2359,9 +2499,9 @@ Just tell me what you're interested in."""
     def _execute_automatic_analysis(self, session_id: str) -> Dict[str, Any]:
         """Execute automatic analysis after permission."""
         try:
-            # Use the RunCompleteAnalysis tool to get the comprehensive summary
-            from app.tools.complete_analysis_tools import RunCompleteAnalysis
-            tool = RunCompleteAnalysis()
+            # Use the RunMalariaRiskAnalysis tool to get the comprehensive summary
+            from app.tools.complete_analysis_tools import RunMalariaRiskAnalysis
+            tool = RunMalariaRiskAnalysis()
             tool_result = tool.execute(session_id=session_id)
             
             if tool_result.success:
