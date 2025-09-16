@@ -25,6 +25,15 @@ from .export_routes import export_bp
 from .session_routes import session_bp
 from .arena_routes import arena_bp
 
+# Survey routes for cognitive assessment
+try:
+    from app.survey import survey_bp
+    SURVEY_AVAILABLE = True
+except ImportError as e:
+    survey_bp = None
+    SURVEY_AVAILABLE = False
+    print(f"Survey module not available: {e}")
+
 # TPR routes removed - replaced with new data analysis pipeline
 
 # Data Analysis V3 - New implementation
@@ -94,11 +103,18 @@ def register_all_blueprints(app):
     
     # Register Arena routes (model comparison interface)
     app.register_blueprint(arena_bp)
-    
+
+    # Register Survey routes (cognitive assessment)
+    if SURVEY_AVAILABLE and survey_bp:
+        app.register_blueprint(survey_bp)
+
     logger = logging.getLogger(__name__)
     logger.info("✅ Export routes registered")
     logger.info("✅ Session routes registered")
     logger.info("✅ Arena routes registered")
+
+    if SURVEY_AVAILABLE:
+        logger.info("✅ Survey routes registered")
     
     # Register Data Analysis V3 routes
     if DATA_ANALYSIS_V3_AVAILABLE and data_analysis_v3_bp:

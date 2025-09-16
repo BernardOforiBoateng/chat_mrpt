@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatMRPT Survey - Cognitive Assessment</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/survey.css') }}">
+</head>
+<body>
+    <div class="survey-container">
+        <!-- Header -->
+        <header class="survey-header">
+            <div class="header-content">
+                <h1>ChatMRPT Cognitive Assessment</h1>
+                <button class="btn-back" onclick="window.close()">← Return to ChatMRPT</button>
+            </div>
+            <div class="progress-container">
+                <div class="progress-bar" id="progressBar"></div>
+                <span class="progress-text" id="progressText">0 / 0</span>
+            </div>
+        </header>
+
+        <!-- Main Survey Content -->
+        <main class="survey-main">
+            <!-- Welcome Screen -->
+            <div id="welcomeScreen" class="survey-section active">
+                <div class="welcome-content">
+                    <h2>Welcome to the Survey</h2>
+                    <p>This survey will help us understand your experience with ChatMRPT and improve the tool based on your feedback.</p>
+
+                    <div class="info-box">
+                        <h3>What to expect:</h3>
+                        <ul>
+                            <li>Questions about your recent ChatMRPT interaction</li>
+                            <li>Your understanding and preferences</li>
+                            <li>Suggestions for improvement</li>
+                        </ul>
+                        <p class="time-estimate">⏱️ Estimated time: 5-10 minutes</p>
+                    </div>
+
+                    <div class="context-info" id="contextInfo">
+                        <!-- Context will be populated here -->
+                    </div>
+
+                    <button class="btn-primary" onclick="startSurvey()">Start Survey</button>
+                </div>
+            </div>
+
+            <!-- Question Container -->
+            <div id="questionContainer" class="survey-section">
+                <div class="question-number" id="questionNumber"></div>
+                <div class="question-content" id="questionContent">
+                    <!-- Questions will be dynamically loaded here -->
+                </div>
+                <div class="question-timer">
+                    <span id="timeSpent"></span>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <div id="navigation" class="survey-navigation" style="display: none;">
+                <button class="btn-secondary" id="btnPrevious" onclick="previousQuestion()">← Previous</button>
+                <button class="btn-secondary" id="btnSaveDraft" onclick="saveDraft()">Save Draft</button>
+                <button class="btn-primary" id="btnNext" onclick="nextQuestion()">Next →</button>
+                <button class="btn-success" id="btnSubmit" onclick="submitSurvey()" style="display: none;">Complete Survey</button>
+            </div>
+
+            <!-- Completion Screen -->
+            <div id="completionScreen" class="survey-section">
+                <div class="completion-content">
+                    <div class="success-icon">✅</div>
+                    <h2>Thank You!</h2>
+                    <p>Your responses have been successfully recorded.</p>
+
+                    <div class="completion-stats" id="completionStats">
+                        <!-- Stats will be shown here -->
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn-primary" onclick="window.close()">Return to ChatMRPT</button>
+                        <button class="btn-secondary" onclick="downloadResponses()">Download Responses</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading Screen -->
+            <div id="loadingScreen" class="survey-section">
+                <div class="loading-spinner"></div>
+                <p>Loading questions...</p>
+            </div>
+
+            <!-- Error Screen -->
+            <div id="errorScreen" class="survey-section">
+                <div class="error-content">
+                    <div class="error-icon">⚠️</div>
+                    <h2>Something went wrong</h2>
+                    <p id="errorMessage"></p>
+                    <button class="btn-primary" onclick="location.reload()">Try Again</button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="survey-footer">
+            <p>Your responses are automatically saved • <a href="#" onclick="showPrivacy()">Privacy</a></p>
+        </footer>
+    </div>
+
+    <!-- Question Templates (hidden) -->
+    <div id="templates" style="display: none;">
+        <!-- Text Input Template -->
+        <div id="template-text">
+            <div class="question-text"></div>
+            <input type="text" class="input-text" placeholder="Type your answer here...">
+        </div>
+
+        <!-- Textarea Template -->
+        <div id="template-textarea">
+            <div class="question-text"></div>
+            <textarea class="input-textarea" rows="5" placeholder="Type your answer here..."></textarea>
+        </div>
+
+        <!-- Radio Template -->
+        <div id="template-radio">
+            <div class="question-text"></div>
+            <div class="radio-options"></div>
+        </div>
+
+        <!-- Scale Template -->
+        <div id="template-scale">
+            <div class="question-text"></div>
+            <div class="scale-container">
+                <div class="scale-labels"></div>
+                <div class="scale-options"></div>
+            </div>
+        </div>
+
+        <!-- Rating Matrix Template -->
+        <div id="template-rating_matrix">
+            <div class="question-text"></div>
+            <div class="matrix-container">
+                <table class="rating-matrix">
+                    <thead></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pass server data to JavaScript -->
+    <script>
+        window.surveyConfig = {
+            chatmrptSession: {{ chatmrpt_session | tojson }},
+            context: {{ context | tojson }},
+            trigger: {{ trigger | tojson }}
+        };
+    </script>
+
+    <script src="{{ url_for('static', filename='js/survey.js') }}"></script>
+</body>
+</html>
