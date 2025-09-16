@@ -487,6 +487,17 @@ class UnifiedDatasetBuilder:
         
         df_fixed = df.copy()
         
+        # Check if ward names already contain disambiguation pattern (WardCode)
+        # This prevents double disambiguation when loading TPR output
+        import re
+        pattern = r'\s*\([A-Z0-9]+\)\s*$'  # Pattern for " (WardCode)" at end of name
+        already_disambiguated = df_fixed[ward_name_col].str.contains(pattern, regex=True, na=False).any()
+        
+        if already_disambiguated:
+            print(f"ℹ️ Ward names already contain disambiguation (WardCode) - skipping duplicate fix")
+            print(f"   Total wards: {len(df_fixed)}")
+            return df_fixed
+        
         # Find duplicates in ward names
         duplicate_mask = df_fixed[ward_name_col].duplicated(keep=False)
         duplicate_count = duplicate_mask.sum()

@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Any, Tuple
 import warnings
 import os
 import json
+from .pca_statistical_tests import PCAStatisticalTests
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,44 @@ class PCAAnalysisPipeline:
                     'data': None
                 }
             
+            # Step 3.5: Check PCA suitability with statistical tests
+            print("\n" + "🔬"*30)
+            print("STEP 3.5: CHECKING PCA SUITABILITY WITH STATISTICAL TESTS")
+            print("🔬"*30)
+            
+            suitability_result = self._check_pca_suitability()
+            
+            # Store test results for later retrieval
+            self.pca_test_results = {
+                'kmo_value': suitability_result.get('kmo_value', 0),
+                'bartlett_p_value': suitability_result.get('bartlett_p_value', 1),
+                'suitable': suitability_result['suitable'],
+                'kmo_interpretation': suitability_result.get('kmo_interpretation', '')
+            }
+            
+            if not suitability_result['suitable']:
+                logger.warning(f"⚠️ PCA SUITABILITY: {suitability_result['summary']}")
+                print("\n⚠️ PCA NOT SUITABLE - RETURNING EARLY")
+                print(f"Reason: {suitability_result['summary']}")
+                print(f"KMO Value: {suitability_result['kmo_value']:.3f}")
+                print(f"Bartlett's p-value: {suitability_result['bartlett_p_value']:.4e}")
+                print("\n📌 RECOMMENDATION: Using composite analysis only\n")
+                
+                return {
+                    'status': 'pca_not_suitable',
+                    'message': suitability_result['summary'],
+                    'data': {
+                        'method': 'composite_only',
+                        'reason': suitability_result['messages'],
+                        'kmo_value': suitability_result['kmo_value'],
+                        'bartlett_p_value': suitability_result['bartlett_p_value'],
+                        'recommendation': 'Running composite analysis only due to data characteristics'
+                    }
+                }
+            
+            print("\n✅ PCA SUITABILITY TESTS PASSED - CONTINUING WITH PCA")
+            print("🔬"*30 + "\n")
+            
             # Step 4: Run PCA analysis
             if not self._run_pca_analysis():
                 return {
@@ -174,7 +213,11 @@ class PCAAnalysisPipeline:
                     'n_components': self.pca_model.n_components_,
                     'variables_used': list(self.cleaned_data.columns[:-1]),  # Exclude WardName
                     'ward_count': len(self.pca_rankings),
-                    'summary': summary
+                    'summary': summary,
+                    # Include PCA test results for user-facing summary
+                    'kmo_value': self.pca_test_results.get('kmo_value', None),
+                    'bartlett_p_value': self.pca_test_results.get('bartlett_p_value', None),
+                    'kmo_interpretation': self.pca_test_results.get('kmo_interpretation', '')
                 }
             }
             
@@ -382,6 +425,77 @@ class PCAAnalysisPipeline:
         except Exception as e:
             logger.error(f"Error in standardization: {e}")
             return False
+    
+    def _check_pca_suitability(self) -> Dict:
+        """
+        Check if the data is suitable for PCA using statistical tests.
+        
+        Returns:
+            Dict with suitability results and test statistics
+        """
+        try:
+            logger.info("🔍 PCA SUITABILITY: Running statistical tests")
+            print("\n📊 PREPARING DATA FOR STATISTICAL TESTS")
+            
+            # Get numeric data for testing (exclude WardName)
+            numeric_cols = self.standardized_data.select_dtypes(include=[np.number]).columns.tolist()
+            test_data = self.standardized_data[numeric_cols]
+            
+            print(f"   Numeric columns found: {len(numeric_cols)}")
+            print(f"   Columns: {', '.join(numeric_cols[:5])}{'...' if len(numeric_cols) > 5 else ''}")
+            
+            # Check minimum requirements
+            n_samples, n_variables = test_data.shape
+            print(f"   Data dimensions: {n_samples} samples × {n_variables} variables")
+            
+            if n_samples < n_variables:
+                logger.warning(f"⚠️ Insufficient samples: {n_samples} samples < {n_variables} variables")
+                print(f"\n❌ INSUFFICIENT DATA: {n_samples} samples < {n_variables} variables")
+                print("   Need more samples than variables for reliable PCA")
+                return {
+                    'suitable': False,
+                    'summary': f'Insufficient data for PCA: {n_samples} samples for {n_variables} variables',
+                    'messages': ['Need more samples than variables for reliable PCA'],
+                    'kmo_value': 0,
+                    'bartlett_p_value': 1.0
+                }
+            
+            if n_variables < 3:
+                logger.warning(f"⚠️ Too few variables: {n_variables} variables")
+                return {
+                    'suitable': False,
+                    'summary': f'Too few variables for PCA: {n_variables} variables (minimum 3 required)',
+                    'messages': ['Need at least 3 variables for meaningful PCA'],
+                    'kmo_value': 0,
+                    'bartlett_p_value': 1.0
+                }
+            
+            # Run statistical tests
+            suitability_result = PCAStatisticalTests.check_pca_suitability(
+                test_data, 
+                kmo_threshold=0.5
+            )
+            
+            # Log results
+            logger.info(f"📊 KMO Test: {suitability_result['kmo_value']:.3f} ({suitability_result['kmo_interpretation']})")
+            logger.info(f"📊 Bartlett's Test: p-value = {suitability_result['bartlett_p_value']:.4e}")
+            
+            if suitability_result['suitable']:
+                logger.info("✅ PCA SUITABILITY: Data passed all statistical tests")
+            else:
+                logger.warning(f"⚠️ PCA SUITABILITY: {'; '.join(suitability_result['messages'])}")
+            
+            return suitability_result
+            
+        except Exception as e:
+            logger.error(f"Error checking PCA suitability: {e}")
+            return {
+                'suitable': False,
+                'summary': f'Error checking PCA suitability: {str(e)}',
+                'messages': [str(e)],
+                'kmo_value': 0,
+                'bartlett_p_value': 1.0
+            }
     
     def _run_pca_analysis(self) -> bool:
         """Run the actual PCA analysis."""

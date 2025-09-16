@@ -217,7 +217,7 @@ def normalize_ward_name(ward_name: str) -> str:
     return normalized
 
 def fuzzy_match_ward_names(analysis_wards: List[str], population_wards: List[str], 
-                          threshold: int = 80) -> Dict[str, Tuple[str, int]]:
+                          threshold: int = 70) -> Dict[str, Tuple[str, int]]:
     """
     Perform fuzzy matching between analysis ward names and population ward names.
     
@@ -317,6 +317,8 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
         required_cols = ['WardName', score_col, rank_col, category_col]
         if 'urbanPercentage' in data_handler.unified_dataset.columns:
             required_cols.append('urbanPercentage')
+        elif 'urban_percentage' in data_handler.unified_dataset.columns:
+            required_cols.append('urban_percentage')
         
         rankings = data_handler.unified_dataset[required_cols].copy()
         rankings = rankings.rename(columns={
@@ -346,8 +348,8 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
         ranking_ward_names = rankings['WardName'].unique().tolist()
         pop_ward_names = pop_data['WardName'].unique().tolist()
         
-        # Perform fuzzy matching
-        matches = fuzzy_match_ward_names(ranking_ward_names, pop_ward_names, threshold=75)
+        # Perform fuzzy matching with lower threshold for better matching
+        matches = fuzzy_match_ward_names(ranking_ward_names, pop_ward_names, threshold=70)
         
         # Create a mapping dataframe
         match_df = pd.DataFrame([
@@ -355,8 +357,12 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
             for analysis_ward, (pop_ward, score) in matches.items()
         ])
         
-        # Log matching results
+        # Log matching results with more detail
         logger.info(f"Fuzzy matching results: {len(matches)} out of {len(ranking_ward_names)} wards matched")
+        unmatched_wards = [w for w in ranking_ward_names if w not in matches]
+        if unmatched_wards:
+            logger.warning(f"Unmatched wards ({len(unmatched_wards)}): {unmatched_wards[:10]}")
+            
         if len(match_df) > 0:
             avg_score = match_df['MatchScore'].mean()
             logger.info(f"Average match score: {avg_score:.1f}")
@@ -364,7 +370,14 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
             # Show some examples of matches
             examples = match_df.nlargest(5, 'MatchScore').head(3)
             for _, row in examples.iterrows():
-                logger.info(f"  '{row['WardName']}' -> '{row['PopWardName']}' (score: {row['MatchScore']})")
+                logger.info(f"  ✓ '{row['WardName']}' -> '{row['PopWardName']}' (score: {row['MatchScore']})")
+            
+            # Show worst matches
+            poor_matches = match_df[match_df['MatchScore'] < 80]
+            if len(poor_matches) > 0:
+                logger.warning(f"Poor matches ({len(poor_matches)} with score < 80):")
+                for _, row in poor_matches.head(3).iterrows():
+                    logger.warning(f"  ? '{row['WardName']}' -> '{row['PopWardName']}' (score: {row['MatchScore']})")
         
         # Merge the matching results back to rankings
         rankings = rankings.merge(match_df, on='WardName', how='left')
@@ -385,6 +398,27 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
         matched_count = rankings['Population'].notna().sum()
         logger.info(f"Matched population data for {matched_count} out of {len(rankings)} wards")
         
+        # Generate matching report
+        matching_report = {
+            'total_ranking_wards': len(ranking_ward_names),
+            'total_population_wards': len(pop_ward_names),
+            'matched_wards': len(matches),
+            'unmatched_wards': len(ranking_ward_names) - len(matches),
+            'match_percentage': (len(matches) / len(ranking_ward_names) * 100) if len(ranking_ward_names) > 0 else 0,
+            'average_match_score': match_df['MatchScore'].mean() if len(match_df) > 0 else 0,
+            'unmatched_ward_names': [w for w in ranking_ward_names if w not in matches][:20],  # First 20
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Save matching report
+        try:
+            report_path = f"instance/uploads/{session_id}/ward_matching_report.json"
+            with open(report_path, 'w') as f:
+                json.dump(matching_report, f, indent=2, default=str)
+            logger.info(f"Saved ward matching report to {report_path}")
+        except Exception as e:
+            logger.warning(f"Could not save matching report: {e}")
+        
         # If no matches, try to understand why
         if matched_count == 0:
             logger.warning(f"No matches found. Checking for common ward names...")
@@ -393,11 +427,24 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
             common_wards = rankings_wards.intersection(pop_wards)
             logger.warning(f"Common ward names: {len(common_wards)} - {list(common_wards)[:5]}")
         
-        # Remove wards without population data
-        rankings = rankings[rankings['Population'].notna()]
+        # Don't remove wards without population data - mark them instead
+        # Calculate a default population based on average if missing
+        avg_population = rankings['Population'].dropna().mean() if rankings['Population'].notna().any() else 10000
         
-        if len(rankings) == 0:
-            return {'status': 'error', 'message': 'No ward names matched between ranking data and population data. Please check ward name consistency.'}
+        # Log wards without population data
+        no_pop_wards = rankings[rankings['Population'].isna()]
+        if len(no_pop_wards) > 0:
+            logger.warning(f"Found {len(no_pop_wards)} wards without population data")
+            logger.info(f"Using estimated population of {avg_population:.0f} for wards without data")
+            # Fill missing population with average
+            rankings['Population'] = rankings['Population'].fillna(avg_population)
+            rankings['has_population_data'] = rankings['Population'].notna()
+        
+        # Don't fail if no population matches - continue with estimates
+        if rankings['Population'].isna().all():
+            logger.warning("No population data matched - using default estimates")
+            rankings['Population'] = avg_population
+            rankings['has_population_data'] = False
     else:
         # Get list of available states
         loader = get_population_loader()
@@ -409,9 +456,14 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
             return {'status': 'error', 'message': f'Population data not available for {state}. No population data files found in the system.'}
     
     # FULL COVERAGE STRATEGY: Give 100% coverage to highest risk wards until nets run out
-    # Handle both 'UrbanPercent' and 'urbanPercentage' column names
-    urban_col = 'UrbanPercent' if 'UrbanPercent' in rankings.columns else 'urbanPercentage'
-    if urban_col not in rankings.columns:
+    # Handle 'UrbanPercent', 'urbanPercentage', and 'urban_percentage' column names
+    if 'UrbanPercent' in rankings.columns:
+        urban_col = 'UrbanPercent'
+    elif 'urbanPercentage' in rankings.columns:
+        urban_col = 'urbanPercentage'
+    elif 'urban_percentage' in rankings.columns:
+        urban_col = 'urban_percentage'
+    else:
         logger.warning(f"No urban percentage column found. Available columns: {rankings.columns.tolist()}")
         # Use a default value if urban percentage is not available
         rankings['urban_pct'] = 50.0  # Default to 50% urban
@@ -528,9 +580,12 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
             'urban_threshold': urban_threshold,
             'avg_household_size': avg_household_size,
             'total_nets': total_nets,
+            'total_allocated': int(total_allocated),
+            'coverage_percentage': stats['coverage_percent'],
             'timestamp': datetime.now().isoformat(),
             'prioritized': prioritized.to_dict('records'),
             'reprioritized': reprioritized.to_dict('records') if not reprioritized.empty else [],
+            'distribution': prioritized.to_dict('records'),  # Add distribution for backward compatibility
             'map_path': map_path
         }
         
@@ -539,6 +594,28 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
         with open(results_path, 'w') as f:
             json.dump(results_to_save, f, indent=2, default=str)
         logger.info(f"Saved ITN distribution results to {results_path}")
+        
+        # Store ITN parameters in Redis for multi-worker access
+        try:
+            from ..core.redis_state_manager import get_redis_state_manager
+            redis_manager = get_redis_state_manager()
+            itn_params = {
+                'total_nets': total_nets,
+                'avg_household_size': avg_household_size,
+                'urban_threshold': urban_threshold,
+                'method': method,
+                'timestamp': datetime.now().isoformat()
+            }
+            redis_manager.set_custom_data(session_id, 'itn_parameters', itn_params)
+            logger.info(f"Stored ITN parameters in Redis for session {session_id}")
+        except Exception as redis_err:
+            logger.warning(f"Could not store ITN parameters in Redis: {redis_err}")
+            # Fall back to file-based storage
+            params_path = f"instance/uploads/{session_id}/itn_parameters.json"
+            with open(params_path, 'w') as f:
+                json.dump(itn_params, f, indent=2)
+            logger.info(f"Stored ITN parameters in file: {params_path}")
+            
     except Exception as e:
         logger.warning(f"Failed to save ITN results for export: {e}")
         # Don't fail the main function if saving fails
@@ -730,18 +807,51 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         logger.error("No valid geometries found in shapefile data")
         return None
     
-    # Create separate traces for covered and uncovered areas for better visual distinction
+    # Create separate traces for different data categories
     covered_mask = shp_data_valid['nets_allocated'] > 0
     uncovered_mask = shp_data_valid['nets_allocated'] == 0
     
-    # Add uncovered areas first (so they appear behind covered areas)
-    if uncovered_mask.any():
-        uncovered_data = shp_data_valid[uncovered_mask]
+    # Check for wards without population data (if has_population_data column exists)
+    no_data_mask = pd.Series(False, index=shp_data_valid.index)
+    if 'has_population_data' in shp_data_valid.columns:
+        no_data_mask = ~shp_data_valid['has_population_data']
+    
+    # Add wards without population data first (with distinct styling)
+    if no_data_mask.any():
+        no_data_wards = shp_data_valid[no_data_mask]
+        fig.add_trace(go.Choroplethmapbox(
+            geojson=no_data_wards.geometry.__geo_interface__,
+            locations=no_data_wards.index,
+            z=[0] * len(no_data_wards),
+            colorscale=[[0, '#ffeeee'], [1, '#ffeeee']],  # Light red tint
+            text=no_data_wards['WardName'],
+            hovertemplate='<b>%{text}</b><br>' +
+                          '─────────────────<br>' +
+                          '<b>Status:</b> ⚠️ No population data<br>' +
+                          '<b>Estimated Pop:</b> %{customdata[0]:,.0f}<br>' +
+                          '<b>Note:</b> Using estimated values<br>' +
+                          '<extra></extra>',
+            customdata=np.column_stack((
+                no_data_wards['Population'].fillna(0),
+                no_data_wards.get('urban_pct_display', 0).fillna(0)
+            )),
+            marker_opacity=0.6,  # Increased opacity for visibility
+            marker_line_width=1.5,  # Thicker borders
+            marker_line_color='#cc6666',  # Darker red border
+            marker_line_dash='dash',  # Dashed border for no-data wards
+            showscale=False,
+            name='No Population Data'
+        ))
+    
+    # Add uncovered areas (with data but no allocation)
+    uncovered_with_data = uncovered_mask & ~no_data_mask
+    if uncovered_with_data.any():
+        uncovered_data = shp_data_valid[uncovered_with_data]
         fig.add_trace(go.Choroplethmapbox(
             geojson=uncovered_data.geometry.__geo_interface__,
             locations=uncovered_data.index,
             z=[0] * len(uncovered_data),  # All zeros for consistent gray color
-            colorscale=[[0, '#f0f0f0'], [1, '#f0f0f0']],  # Light gray
+            colorscale=[[0, '#d0d0d0'], [1, '#d0d0d0']],  # More visible gray
             text=uncovered_data['WardName'],
             hovertemplate='<b>%{text}</b><br>' +
                           '─────────────────<br>' +
@@ -755,9 +865,9 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
                 uncovered_data['allocation_phase'],
                 uncovered_data['urban_pct_display'].fillna(0)
             )),
-            marker_opacity=0.3,  # Much lower opacity for uncovered areas
-            marker_line_width=0.5,
-            marker_line_color='#cccccc',
+            marker_opacity=0.7,  # Increased opacity for visibility
+            marker_line_width=1.5,  # Thicker borders for visibility
+            marker_line_color='#666666',  # Darker border color
             showscale=False,
             name='No Allocation'
         ))
@@ -912,45 +1022,68 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         </div>
     """
     
-    # Add update function
+    # Add update function with proper parameters and dynamic loading
     update_script = f"""
         <script>
+            // Store original ITN parameters
+            window.itnParams = {{
+                total_nets: {total_nets},
+                avg_household_size: {avg_household_size},
+                method: '{method}',
+                session_id: '{session_id}'
+            }};
+            
             function updateThreshold() {{
                 var newThreshold = document.getElementById('thresholdInput').value;
                 var button = event.target;
                 button.disabled = true;
                 button.textContent = 'Updating...';
                 
-                // Call backend API to update distribution
+                // Call backend API to update distribution with stored parameters
                 fetch('/api/itn/update-distribution', {{
                     method: 'POST',
                     headers: {{
                         'Content-Type': 'application/json',
                     }},
+                    credentials: 'same-origin',  // Include session cookies
                     body: JSON.stringify({{
                         urban_threshold: parseFloat(newThreshold),
-                        total_nets: {total_nets},
-                        avg_household_size: {avg_household_size},
-                        method: '{method}'
+                        total_nets: window.itnParams.total_nets,
+                        avg_household_size: window.itnParams.avg_household_size,
+                        method: window.itnParams.method,
+                        session_id: window.itnParams.session_id
                     }})
                 }})
                 .then(response => response.json())
                 .then(data => {{
-                    if (data.status === 'success') {{
-                        // Reload page with new map
-                        window.location.reload();
+                    if (data.status === 'success' && data.map_path) {{
+                        // For iframe context, update parent iframe src
+                        if (window.parent !== window) {{
+                            // We're in an iframe - notify parent to update
+                            window.parent.postMessage({{
+                                type: 'updateITNMap',
+                                mapPath: data.map_path
+                            }}, '*');
+                        }} else {{
+                            // Direct access - redirect to new map
+                            window.location.href = data.map_path;
+                        }}
                     }} else {{
-                        alert('Error: ' + data.message);
+                        alert('Error: ' + (data.message || 'Failed to update distribution'));
                         button.disabled = false;
                         button.textContent = 'Update';
                     }}
                 }})
                 .catch(error => {{
+                    console.error('Update error:', error);
                     alert('Error updating distribution: ' + error);
                     button.disabled = false;
                     button.textContent = 'Update';
                 }});
             }}
+            
+            // Log that ITN map is ready
+            console.log('ITN map loaded with parameters:', window.itnParams);
         </script>
     """
     

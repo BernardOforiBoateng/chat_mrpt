@@ -18,7 +18,7 @@ from .base import BaseTool, ToolCategory, ToolExecutionResult, DataAnalysisTool
 logger = logging.getLogger(__name__)
 
 
-class RunCompleteAnalysisInput(BaseModel):
+class RunMalariaRiskAnalysisInput(BaseModel):
     """Input for complete analysis workflow with custom variable selection support"""
     session_id: str = Field(..., description="Session identifier for data access")
     composite_variables: Optional[List[str]] = Field(
@@ -33,7 +33,7 @@ class RunCompleteAnalysisInput(BaseModel):
     validate_variables: bool = Field(True, description="Whether to validate custom variables against available data")
 
 
-class RunCompleteAnalysis(DataAnalysisTool):
+class RunMalariaRiskAnalysis(DataAnalysisTool):
     """
     Run complete dual-method malaria risk analysis (Composite + PCA) without settlement integration logic.
     
@@ -48,8 +48,8 @@ class RunCompleteAnalysis(DataAnalysisTool):
     Any existing settlement columns in the original data are preserved.
     """
     
-    name: str = "run_complete_analysis"
-    description: str = "Run complete dual-method malaria risk analysis (Composite Score + PCA) with support for custom variable selection. Allows different variables for each method or auto-selection based on region."
+    name: str = "run_malaria_risk_analysis"
+    description: str = "Run malaria risk analysis using dual-method approach (Composite Score + PCA) with support for custom variable selection. This is the primary tool for comprehensive malaria vulnerability assessment."
     composite_variables: Optional[List[str]] = Field(
         None, 
         description="Custom variables for composite analysis. If None, uses region-aware auto-selection"
@@ -96,8 +96,34 @@ class RunCompleteAnalysis(DataAnalysisTool):
             )
         
         try:
+            # Get variables first before logging
             composite_variables = kwargs.get('composite_variables') or getattr(self, 'composite_variables', None)
             pca_variables = kwargs.get('pca_variables') or getattr(self, 'pca_variables', None)
+            
+            # 🔍 DEBUG: Complete Analysis Execution
+            logger.info("=" * 60)
+            logger.info("🔍 DEBUG COMPLETE ANALYSIS: Starting execution")
+            logger.info(f"🔍 Session ID: {session_id}")
+            logger.info(f"🔍 Composite variables: {composite_variables}")
+            logger.info(f"🔍 PCA variables: {pca_variables}")
+            logger.info(f"🔍 Create unified dataset: {kwargs.get('create_unified_dataset', True)}")
+            
+            # Check what files exist before analysis
+            session_dir = f'instance/uploads/{session_id}'
+            if os.path.exists(session_dir):
+                files = os.listdir(session_dir)
+                logger.info(f"🔍 Files in session BEFORE analysis: {files[:10]}")
+                
+                # Check for key files
+                for key_file in ['raw_data.csv', 'raw_shapefile.zip', 'unified_dataset.csv', 'tpr_results.csv']:
+                    file_path = os.path.join(session_dir, key_file)
+                    if os.path.exists(file_path):
+                        size = os.path.getsize(file_path)
+                        logger.info(f"🔍   ✅ {key_file} exists ({size:,} bytes)")
+                    else:
+                        logger.info(f"🔍   ❌ {key_file} NOT found")
+            logger.info("=" * 60)
+            # Variables already defined above for debug logging
             create_unified_dataset = kwargs.get('create_unified_dataset', getattr(self, 'create_unified_dataset', True))
             validate_variables = kwargs.get('validate_variables', getattr(self, 'validate_variables', True))
             
@@ -149,7 +175,23 @@ class RunCompleteAnalysis(DataAnalysisTool):
             # Run PCA analysis second
             logger.info("🔬 Starting PCA analysis...")  
             pca_result = self._run_pca_analysis(session_id, final_pca_vars)
-            if pca_result['success']:
+            
+            # Handle PCA skipped due to statistical tests
+            if pca_result.get('pca_skipped'):
+                logger.info(f"⚠️ PCA skipped: {pca_result['message']}")
+                print("\n" + "="*60)
+                print("📊 PCA ANALYSIS SKIPPED DUE TO STATISTICAL TESTS")
+                print("="*60)
+                print(f"Reason: {pca_result['message']}")
+                print(f"KMO Value: {pca_result.get('data', {}).get('kmo_value', 'N/A')}")
+                print(f"Bartlett's p-value: {pca_result.get('data', {}).get('bartlett_p_value', 'N/A')}")
+                print("Recommendation: Continuing with composite analysis only")
+                print("="*60 + "\n")
+                
+                # Mark as special case - not a failure but PCA was not suitable
+                pca_result['success'] = False
+                pca_result['skipped_reason'] = pca_result.get('data', {})
+            elif pca_result['success']:
                 logger.info("✅ PCA analysis completed successfully")
             else:
                 logger.error(f"❌ PCA analysis failed: {pca_result['message']}")
@@ -193,34 +235,46 @@ class RunCompleteAnalysis(DataAnalysisTool):
             # Check for PCA recovery in unified dataset if initial PCA failed
             pca_recovered = False
             if not pca_result['success']:
-                logger.warning(f"⚠️ Initial PCA analysis failed: {pca_result['message']}")
-                logger.info("🔍 Checking if PCA was recovered during unified dataset creation...")
-                
-                # Check if PCA rankings file exists (indicates successful PCA recovery)
-                pca_rankings_path = f"instance/uploads/{session_id}/analysis_vulnerability_rankings_pca.csv"
-                if os.path.exists(pca_rankings_path):
-                    logger.info("✅ PCA analysis recovered successfully in unified dataset phase")
-                    pca_recovered = True
+                # Check if PCA was skipped due to statistical tests
+                if pca_result.get('pca_skipped'):
+                    logger.info(f"ℹ️ PCA was skipped due to statistical tests: {pca_result['message']}")
+                    # This is not an error - continue with composite-only results
                     pca_result = {
-                        'success': True,
-                        'message': 'PCA analysis completed via unified dataset recovery',
-                        'data': {'recovered_from_unified_dataset': True}
+                        'success': False,
+                        'pca_skipped': True,
+                        'message': pca_result['message'],
+                        'data': pca_result.get('data', {}),
+                        'skipped_reason': pca_result.get('skipped_reason', {})
                     }
                 else:
-                    # 🎯 LOG PCA ANALYSIS FAILURE - DEMO ERROR TRACKING
-                    if interaction_logger:
-                        interaction_logger.log_error(
-                            session_id=session_id,
-                            error_type='PCAAnalysisFailure',
-                            error_message=pca_result['message'],
-                            stack_trace=pca_result.get('error_details', 'No stack trace available')
-                        )
+                    logger.warning(f"⚠️ Initial PCA analysis failed: {pca_result['message']}")
+                    logger.info("🔍 Checking if PCA was recovered during unified dataset creation...")
                     
-                    return ToolExecutionResult(
-                        success=False,
-                        message=f"PCA analysis failed: {pca_result['message']}",
-                        error_details=pca_result.get('error_details')
-                    )
+                    # Check if PCA rankings file exists (indicates successful PCA recovery)
+                    pca_rankings_path = f"instance/uploads/{session_id}/analysis_vulnerability_rankings_pca.csv"
+                    if os.path.exists(pca_rankings_path):
+                        logger.info("✅ PCA analysis recovered successfully in unified dataset phase")
+                        pca_recovered = True
+                        pca_result = {
+                            'success': True,
+                            'message': 'PCA analysis completed via unified dataset recovery',
+                            'data': {'recovered_from_unified_dataset': True}
+                        }
+                    else:
+                        # 🎯 LOG PCA ANALYSIS FAILURE - DEMO ERROR TRACKING
+                        if interaction_logger:
+                            interaction_logger.log_error(
+                                session_id=session_id,
+                                error_type='PCAAnalysisFailure',
+                                error_message=pca_result['message'],
+                                stack_trace=pca_result.get('error_details', 'No stack trace available')
+                            )
+                        
+                        return ToolExecutionResult(
+                            success=False,
+                            message=f"PCA analysis failed: {pca_result['message']}",
+                            error_details=pca_result.get('error_details')
+                        )
             
             # Create/update unified dataset without settlement integration
             if create_unified_dataset:
@@ -243,12 +297,20 @@ class RunCompleteAnalysis(DataAnalysisTool):
                     unified_result = {'success': False, 'message': f'Error: {str(e)}'}
                     # Continue anyway - analyses succeeded
             
-            # Generate comparison summary
-            logger.info("📋 Generating dual-method comparison summary...")
-            comparison_summary = self._generate_comparison_summary(
-                composite_result['data'], 
-                pca_result['data']
-            )
+            # Generate comparison summary (only if PCA was actually run)
+            if pca_result.get('pca_skipped'):
+                logger.info("📋 Skipping comparison summary - PCA was not suitable")
+                comparison_summary = {
+                    'summary': 'PCA analysis was not performed due to statistical test results',
+                    'pca_skipped': True,
+                    'reason': pca_result.get('message', 'Data not suitable for PCA')
+                }
+            else:
+                logger.info("📋 Generating dual-method comparison summary...")
+                comparison_summary = self._generate_comparison_summary(
+                    composite_result['data'], 
+                    pca_result['data']
+                )
             
             # Note: Visualization auto-generation removed - users can request visualizations separately
             
@@ -317,6 +379,20 @@ class RunCompleteAnalysis(DataAnalysisTool):
                 logger.error(f"Failed to notify state handler: {e}")
                 # Continue - not critical for analysis success
             
+            # CRITICAL: Mark analysis complete in Redis for multi-worker consistency
+            # This is the authoritative source of truth across ALL workers
+            try:
+                from ..core.redis_state_manager import get_redis_state_manager
+                redis_manager = get_redis_state_manager()
+                redis_success = redis_manager.mark_analysis_complete(session_id)
+                if redis_success:
+                    logger.info(f"🎯 Redis: Analysis marked complete for session {session_id}")
+                else:
+                    logger.warning(f"⚠️ Redis: Failed to mark analysis complete for {session_id}")
+            except Exception as e:
+                logger.error(f"Redis state manager error: {e}")
+                # Continue - fallback to other methods
+            
             # Set the general analysis_complete flag that ITN tool checks
             try:
                 from flask import session
@@ -324,6 +400,26 @@ class RunCompleteAnalysis(DataAnalysisTool):
                 logger.info(f"✅ Set session['analysis_complete'] = True for ITN planning")
             except Exception as e:
                 logger.warning(f"Failed to set analysis_complete flag: {e}")
+            
+            # Create analysis completion marker file for cross-worker reliability
+            # NOTE: This is a FALLBACK when Redis is unavailable
+            try:
+                # os is already imported at the top of the file
+                from pathlib import Path
+                from flask import session
+                
+                session_folder = Path("instance/uploads") / session_id
+                if session_folder.exists():
+                    marker_file = session_folder / ".analysis_complete"
+                    marker_file.touch()
+                    logger.info(f"✅ Created .analysis_complete marker file for session {session_id} (fallback)")
+                    
+                    # Update workflow stage to indicate analysis is now complete
+                    session['workflow_stage'] = 'analysis_complete'
+                    session.modified = True
+                    logger.info(f"✅ Updated workflow_stage to 'analysis_complete' for session {session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to create analysis marker file or update session: {e}")
             
             return ToolExecutionResult(
                 success=True,
@@ -512,6 +608,45 @@ class RunCompleteAnalysis(DataAnalysisTool):
                 session_id=session_id,
                 selected_variables=custom_variables
             )
+            
+            # Check if PCA was not suitable
+            if result.get('status') == 'pca_not_suitable':
+                logger.info(f"PCA not suitable: {result.get('message')}")
+                
+                print("\n" + "⚠️"*20)
+                print("PCA ANALYSIS NOT SUITABLE - STATISTICAL TESTS FAILED")
+                print("⚠️"*20)
+                print(f"\nDetailed Results:")
+                print(f"  - KMO Value: {result.get('data', {}).get('kmo_value', 0):.3f}")
+                print(f"  - KMO Threshold: 0.5")
+                print(f"  - Bartlett's p-value: {result.get('data', {}).get('bartlett_p_value', 1.0):.4e}")
+                print(f"  - Required p-value: < 0.05")
+                print(f"\nReason: {result.get('message')}")
+                print(f"Action: Skipping PCA, will use composite analysis only")
+                print("⚠️"*20 + "\n")
+                
+                # Log the PCA suitability check result
+                if hasattr(current_app, 'services') and current_app.services.interaction_logger:
+                    interaction_logger = current_app.services.interaction_logger
+                    interaction_logger.log_analysis_event(
+                        session_id=session_id,
+                        event_type='pca_not_suitable',
+                        details={
+                            'reason': result.get('message'),
+                            'kmo_value': result.get('data', {}).get('kmo_value'),
+                            'bartlett_p_value': result.get('data', {}).get('bartlett_p_value'),
+                            'recommendation': result.get('data', {}).get('recommendation')
+                        },
+                        success=False
+                    )
+                
+                return {
+                    'success': False,
+                    'pca_skipped': True,
+                    'message': result.get('message'),
+                    'data': result.get('data', {}),
+                    'recommendation': 'Using composite analysis only due to statistical test results'
+                }
             
             # Add custom variable information to result
             result_data = result.get('data', {})
@@ -818,6 +953,88 @@ class RunCompleteAnalysis(DataAnalysisTool):
             # Get number of variables used (already extracted earlier)
             num_variables = len(composite_vars) if composite_vars else "several"
             
+            # Extract PCA test results if available
+            pca_test_summary = ""
+            if pca_result.get('pca_skipped'):
+                # PCA was skipped due to statistical tests
+                # Get values from the data field where they're stored
+                kmo_value = pca_result.get('data', {}).get('kmo_value', 0)
+                bartlett_p = pca_result.get('data', {}).get('bartlett_p_value', 1)
+                # Interpret KMO value
+                kmo_interpret = "Your data variables show weak relationships"
+                if kmo_value < 0.3:
+                    kmo_interpret = "Your data variables are mostly independent"
+                elif kmo_value < 0.5:
+                    kmo_interpret = "Your data variables show limited relationships"
+                
+                # Interpret Bartlett's test
+                bartlett_interpret = "No significant patterns found between variables"
+                if bartlett_p < 0.05:
+                    bartlett_interpret = "Some patterns exist but not strong enough"
+                
+                pca_test_summary = f"""
+
+**Behind the Scenes - Statistical Testing:**
+I ran two tests to check if your data is suitable for advanced pattern analysis (PCA):
+
+• **KMO Test Result**: {kmo_value:.3f} (needed 0.5 or higher)
+  → {kmo_interpret}
+  
+• **Bartlett's Test**: {"Failed" if bartlett_p >= 0.05 else "Passed"} (p-value = {bartlett_p:.3f})
+  → {bartlett_interpret}
+
+• **My Decision**: Used the Composite Score method only, which is more reliable for this type of data
+"""
+            elif pca_data:
+                # PCA was performed - get test results from the analysis
+                # Check if we have test results stored
+                kmo_value = pca_data.get('kmo_value', None)
+                bartlett_p = pca_data.get('bartlett_p_value', None)
+                
+                if kmo_value is not None and bartlett_p is not None:
+                    # Interpret KMO value in user-friendly terms
+                    if kmo_value >= 0.9:
+                        kmo_interpret = "Your data variables have excellent relationships"
+                    elif kmo_value >= 0.8:
+                        kmo_interpret = "Your data variables have strong relationships"
+                    elif kmo_value >= 0.7:
+                        kmo_interpret = "Your data variables have good relationships"
+                    elif kmo_value >= 0.6:
+                        kmo_interpret = "Your data variables have moderate relationships"
+                    elif kmo_value >= 0.5:
+                        kmo_interpret = "Your data variables have adequate relationships"
+                    else:
+                        kmo_interpret = "Your data variables have weak relationships"
+                    
+                    # Format p-value in a readable way
+                    if bartlett_p < 0.001:
+                        bartlett_display = "< 0.001"
+                    else:
+                        bartlett_display = f"{bartlett_p:.3f}"
+                    
+                    pca_test_summary = f"""
+
+**Behind the Scenes - Statistical Testing:**
+I ran two tests to check if your data is suitable for advanced pattern analysis (PCA):
+
+• **KMO Test Result**: {kmo_value:.3f} (needed 0.5 or higher) ✓
+  → {kmo_interpret}
+  
+• **Bartlett's Test**: Passed (p-value {bartlett_display}) ✓
+  → Significant patterns found between variables
+
+• **My Decision**: Used both methods (Composite Score and PCA) for comprehensive analysis
+  → This gives you two different perspectives on malaria risk in your wards
+"""
+                else:
+                    # Default message if test results not stored
+                    pca_test_summary = """
+
+**Behind the Scenes - Statistical Testing:**
+• **Data Suitability**: Passed all required tests ✓
+• **My Decision**: Used both methods (Composite Score and PCA) for comprehensive analysis
+"""
+            
             # Build conversational response
             response = f"""Analysis complete! I've ranked all {ward_count} wards by malaria risk.
 
@@ -825,10 +1042,12 @@ class RunCompleteAnalysis(DataAnalysisTool):
 1. **Cleaned your data** - Fixed ward name mismatches and filled missing values using neighboring areas
 2. **Selected {num_variables} risk factors** - Based on {geopolitical_zone}'s malaria patterns
 3. **Normalized everything** - Put all variables on the same 0-1 scale for fair comparison
-4. **Calculated risk scores using two methods:**
+4. **Ran statistical tests** - Checked if your data is suitable for advanced pattern analysis
+5. **Calculated risk scores using {"both" if not pca_result.get("pca_skipped") else "the"} method{"s" if not pca_result.get("pca_skipped") else ""}:**
    • **Composite Score**: Simple average of all risk factors (transparent and easy to understand)
-   • **PCA Score**: Statistical method that finds hidden patterns in your data
-5. **Ranked all wards** - From highest to lowest risk for intervention planning
+   {f"• **PCA Score**: Statistical method that finds hidden patterns in your data" if not pca_result.get("pca_skipped") else ""}
+6. **Ranked all wards** - From highest to lowest risk for intervention planning
+{pca_test_summary}
 
 What would you like to do next?
 • **Plan ITN/bed net distribution** - Allocate nets optimally based on these rankings
@@ -1128,11 +1347,39 @@ What would you like to do next?
     def _mark_analysis_complete(self, session_id: str):
         """Mark comprehensive analysis as complete for workflow guidance"""
         try:
-            from flask import session
-            session['comprehensive_analysis_complete'] = True
+            # Update Flask session
+            try:
+                from flask import session
+                session['comprehensive_analysis_complete'] = True
+            except Exception as e:
+                logger.warning(f"Flask session update failed (expected in worker context): {e}")
+            
+            # CRITICAL: Update workflow state JSON file
+            try:
+                from app.core.workflow_state_manager import WorkflowStateManager
+                workflow_manager = WorkflowStateManager(session_id)
+                success = workflow_manager.update_state(
+                    {'analysis_complete': True},
+                    transition_reason='Risk analysis completed successfully'
+                )
+                if success:
+                    logger.info(f"✅ Updated workflow state - analysis_complete = True for session {session_id}")
+                else:
+                    logger.error(f"❌ Failed to update workflow state for session {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to update workflow state: {e}")
+            
+            # Also update agent state if available
+            try:
+                from app.core.analysis_state_handler import get_analysis_state_handler
+                state_handler = get_analysis_state_handler()
+                state_handler.on_analysis_complete(session_id, {'analysis_type': 'comprehensive'})
+            except Exception as e:
+                logger.warning(f"Failed to update agent state: {e}")
+            
             logger.info(f"✅ Marked comprehensive analysis complete for session {session_id}")
         except Exception as e:
-            logger.warning(f"Failed to mark analysis complete: {e}")
+            logger.error(f"Failed to mark analysis complete: {e}")
     
     def _mark_partial_analysis_complete(self, session_id: str, analysis_type: str):
         """Mark partial analysis as complete for workflow guidance"""
@@ -1148,144 +1395,10 @@ What would you like to do next?
             logger.warning(f"Failed to mark {analysis_type} analysis complete: {e}")
 
 
-class RunCompositeAnalysisInput(BaseModel):
-    """Input for composite analysis only"""
-    session_id: str = Field(..., description="Session identifier for data access")
-
-
-class RunCompositeAnalysis(DataAnalysisTool):
-    """Run composite score analysis only"""
-    
-    name: str = "run_composite_analysis"
-    description: str = "Run composite score malaria risk analysis with equal weights for all variables"
-    variables: Optional[List[str]] = Field(None, description="Custom variables for composite analysis")
-    
-    def execute(self, session_id: str, **kwargs) -> ToolExecutionResult:
-        """Execute composite score analysis"""
-        kwargs['session_id'] = session_id
-        return self._execute(**kwargs)
-    
-    def _execute(self, **kwargs) -> ToolExecutionResult:
-        """Execute composite score analysis"""
-        try:
-            session_id = kwargs.get('session_id')
-            variables = kwargs.get('variables') or getattr(self, 'variables', None)
-            
-            from ..analysis.engine import AnalysisEngine
-            from ..models.data_handler import DataHandler
-            
-            # Convert session_id to session_folder path
-            session_folder = f"instance/uploads/{session_id}"
-            
-            # Initialize data handler for the session
-            data_handler = DataHandler(session_folder)
-            analysis_engine = AnalysisEngine(data_handler)
-            
-            # Pass custom variables if provided (all variables weighted equally)
-            if variables:
-                result = analysis_engine.run_composite_analysis(session_id, variables=variables)
-            else:
-                result = analysis_engine.run_composite_analysis(session_id)
-            
-            if result.get('status') == 'success':
-                # Mark partial analysis complete for workflow guidance
-                try:
-                    from flask import session
-                    session['composite_analysis_complete'] = True
-                    session['analysis_complete'] = True  # Also set general flag for ITN
-                except:
-                    pass  # Session not available in test context
-                
-                return ToolExecutionResult(
-                    success=True,
-                    message="Composite score analysis completed successfully",
-                    data=result.get('data', {}),
-                    metadata={'analysis_type': 'composite_score'}
-                )
-            else:
-                return ToolExecutionResult(
-                    success=False,
-                    message=f"Composite analysis failed: {result.get('message')}",
-                    error_details=result.get('error_details')
-                )
-                
-        except Exception as e:
-            logger.error(f"Composite analysis failed: {e}")
-            return ToolExecutionResult(
-                success=False,
-                message=f"Composite analysis failed: {str(e)}",
-                error_details=str(e)
-            )
-
-
-class RunPCAAnalysisInput(BaseModel):
-    """Input for PCA analysis only"""
-    session_id: str = Field(..., description="Session identifier for data access")
-
-
-class RunPCAAnalysis(DataAnalysisTool):
-    """Run PCA analysis only"""
-    
-    name: str = "run_pca_analysis"
-    description: str = "Run Principal Component Analysis (PCA) for malaria risk assessment"
-    variables: Optional[List[str]] = Field(None, description="Custom variables for PCA analysis")
-    
-    def execute(self, session_id: str, **kwargs) -> ToolExecutionResult:
-        """Execute PCA analysis"""
-        kwargs['session_id'] = session_id
-        return self._execute(**kwargs)
-    
-    def _execute(self, **kwargs) -> ToolExecutionResult:
-        """Execute PCA analysis"""
-        try:
-            session_id = kwargs.get('session_id')
-            variables = kwargs.get('variables') or getattr(self, 'variables', None)
-            
-            from ..analysis.engine import AnalysisEngine
-            from ..models.data_handler import DataHandler
-            
-            # Convert session_id to session_folder path
-            session_folder = f"instance/uploads/{session_id}"
-            
-            # Initialize data handler for the session
-            data_handler = DataHandler(session_folder)
-            analysis_engine = AnalysisEngine(data_handler)
-            
-            # Pass custom variables if provided
-            if variables:
-                result = analysis_engine.run_pca_analysis(session_id, variables=variables)
-            else:
-                result = analysis_engine.run_pca_analysis(session_id)
-            
-            if result.get('status') == 'success':
-                # Mark partial analysis complete for workflow guidance
-                try:
-                    from flask import session
-                    session['pca_analysis_complete'] = True
-                    session['analysis_complete'] = True  # Also set general flag for ITN
-                except:
-                    pass  # Session not available in test context
-                
-                return ToolExecutionResult(
-                    success=True,
-                    message="PCA analysis completed successfully",
-                    data=result.get('data', {}),
-                    metadata={'analysis_type': 'pca'}
-                )
-            else:
-                return ToolExecutionResult(
-                    success=False,
-                    message=f"PCA analysis failed: {result.get('message')}",
-                    error_details=result.get('error_details')
-                )
-                
-        except Exception as e:
-            logger.error(f"PCA analysis failed: {e}")
-            return ToolExecutionResult(
-                success=False,
-                message=f"PCA analysis failed: {str(e)}",
-                error_details=str(e)
-            )
+# DISABLED: Single-method tools removed to prevent confusion
+# Users should use RunMalariaRiskAnalysis for all risk analysis needs
+# The single-method tools (RunCompositeAnalysis and RunPCAAnalysis) have been removed
+# to ensure the LLM always selects the correct dual-method analysis tool.
 
 
 class GenerateComprehensiveAnalysisSummaryInput(BaseModel):

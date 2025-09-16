@@ -6,6 +6,8 @@ Activates after analysis is complete and uses composite or PCA rankings for prio
 """
 
 import logging
+import os
+import json
 from typing import Optional, List, Dict, Any
 from pydantic import Field, validator
 
@@ -123,15 +125,94 @@ class PlanITNDistribution(BaseTool):
             stats = result['stats']
             message = self._format_distribution_summary(stats, result)
             
+            # Add warning if ward matching issues were detected
+            try:
+                report_path = f"instance/uploads/{session_id}/ward_matching_report.json"
+                if os.path.exists(report_path):
+                    import json
+                    with open(report_path, 'r') as f:
+                        matching_report = json.load(f)
+                    
+                    if matching_report.get('match_percentage', 100) < 90:
+                        unmatched_count = matching_report.get('unmatched_wards', 0)
+                        message += f"\n\n⚠️ **Ward Matching Notice**: {unmatched_count} wards could not be matched with population data. "
+                        message += "These wards are shown on the map with estimated values. "
+                        message += "For more accurate results, please ensure ward names are consistent across your datasets."
+            except Exception as e:
+                logger.debug(f"Could not read matching report: {e}")
+            
+            # Visualization will be rendered by frontend using web_path
+            map_path = result.get('map_path')
+            
+            # Generate export documents
+            download_links = []
+            try:
+                logger.info(f"Generating ITN distribution export documents for session {session_id}")
+                from .export_tools import ExportITNResults
+                
+                # Create export tool instance
+                export_tool = ExportITNResults(
+                    include_dashboard=True,
+                    include_csv=True,
+                    include_maps=False  # We already have the map
+                )
+                
+                # Execute export
+                export_result = export_tool.execute(session_id)
+                
+                if export_result.success:
+                    # Extract the exported files from the result
+                    export_data = export_result.data
+                    
+                    # Add download links for exported files
+                    if 'csv_path' in export_data and export_data['csv_path']:
+                        csv_filename = export_data['csv_path'].name
+                        download_links.append({
+                            'url': f'/export/download/{session_id}/{csv_filename}',
+                            'filename': csv_filename,
+                            'description': '📊 ITN Distribution Results (CSV)',
+                            'type': 'csv'
+                        })
+                    
+                    if 'dashboard_path' in export_data and export_data['dashboard_path']:
+                        dashboard_filename = export_data['dashboard_path'].name
+                        download_links.append({
+                            'url': f'/export/download/{session_id}/{dashboard_filename}',
+                            'filename': dashboard_filename,
+                            'description': '📈 Interactive Dashboard (HTML)',
+                            'type': 'html'
+                        })
+                    
+                    if download_links:
+                        logger.info(f"✅ Generated {len(download_links)} export documents for ITN distribution")
+                else:
+                    logger.warning(f"Export generation failed: {export_result.message}")
+            except Exception as e:
+                logger.error(f"Error generating export documents: {e}")
+                # Continue without exports - don't fail the main operation
+            
             # Prepare result data
             result_data = {
                 'stats': stats,
-                'map_path': result.get('map_path'),
+                'map_path': map_path,
                 'method_used': self.method,
                 'urban_threshold': urban_threshold,
                 'household_size': avg_household_size,
                 'top_priority_wards': self._get_top_priority_wards(result['prioritized'])
             }
+            
+            # CRITICAL: Mark ITN planning complete in Redis for multi-worker consistency
+            try:
+                from ..core.redis_state_manager import get_redis_state_manager
+                redis_manager = get_redis_state_manager()
+                redis_success = redis_manager.mark_itn_planning_complete(session_id)
+                if redis_success:
+                    logger.info(f"🎯 Redis: ITN planning marked complete for session {session_id}")
+                else:
+                    logger.warning(f"⚠️ Redis: Failed to mark ITN planning complete for {session_id}")
+            except Exception as e:
+                logger.error(f"Redis state manager error: {e}")
+                # Continue - fallback to session flags
             
             # CRITICAL: Ensure analysis_complete flag is set for report generation
             try:
@@ -146,7 +227,7 @@ class PlanITNDistribution(BaseTool):
             return self._create_success_result(
                 message=message,
                 data=result_data,
-                web_path=result.get('map_path')
+                web_path=map_path
             )
             
         except Exception as e:
@@ -170,42 +251,35 @@ class PlanITNDistribution(BaseTool):
         except Exception as e:
             logger.warning(f"Could not get session ID: {e}")
         
-        # Method 1: Check Flask session flag (might not work with multi-worker)
-        try:
-            from flask import session
-            if session.get('analysis_complete', False):
-                logger.info("✅ Analysis complete flag found in Flask session")
-                return True
-            else:
-                logger.debug("Flask session flag not set")
-        except Exception as e:
-            logger.debug(f"Could not check session flag: {e}")
-        
-        # Method 2: Check unified data state (file-based, works across workers)
-        try:
-            from ..core.unified_data_state import get_data_state
-            if session_id:
-                data_state = get_data_state(session_id)
-                
-                # Check if analysis is marked complete in data state
-                if data_state.analysis_complete:
-                    logger.info("✅ Analysis complete in unified data state")
+        # Method 0: Check Redis FIRST (MOST RELIABLE for multi-worker)
+        # This is the authoritative source across ALL workers
+        if session_id:
+            try:
+                from ..core.redis_state_manager import get_redis_state_manager
+                redis_manager = get_redis_state_manager()
+                if redis_manager.is_analysis_complete(session_id):
+                    logger.info("✅ Redis confirms: Analysis is complete")
                     return True
-                
-                # Check if current data has analysis columns
-                if data_state.current_data is not None:
-                    df = data_state.current_data
-                    analysis_columns = ['composite_score', 'composite_rank', 'pca_score', 'pca_rank']
-                    has_columns = any(col in df.columns for col in analysis_columns)
-                    if has_columns:
-                        logger.info(f"✅ Analysis columns found: {[col for col in analysis_columns if col in df.columns]}")
-                        return True
-                    else:
-                        logger.debug(f"No analysis columns in dataset. Columns: {list(df.columns)[:10]}...")
-        except Exception as e:
-            logger.warning(f"Could not check unified data state: {e}")
+                else:
+                    logger.info("❌ Redis: Analysis not marked complete")
+            except Exception as e:
+                logger.warning(f"Redis check failed (will try fallbacks): {e}")
         
-        # Method 3: Direct file check (most reliable for multi-worker)
+        # Method 1: Check for analysis completion marker file (MOST RELIABLE)
+        if session_id:
+            try:
+                import os
+                from pathlib import Path
+                
+                session_folder = Path("instance/uploads") / session_id
+                marker_file = session_folder / ".analysis_complete"
+                if marker_file.exists():
+                    logger.info("✅ Found .analysis_complete marker file")
+                    return True
+            except Exception as e:
+                logger.warning(f"Could not check marker file: {e}")
+        
+        # Method 2: Direct file check (reliable for multi-worker)
         if session_id:
             try:
                 import os
@@ -220,7 +294,10 @@ class PlanITNDistribution(BaseTool):
                         "unified_dataset.csv",
                         "analysis_results_composite.csv",
                         "analysis_results_pca.csv",
-                        "composite_analysis_results.csv"
+                        "composite_analysis_results.csv",
+                        "analysis_composite_scores.csv",
+                        "analysis_vulnerability_rankings.csv",
+                        "composite_scores.csv"
                     ]
                     
                     for filename in analysis_files:
@@ -244,7 +321,42 @@ class PlanITNDistribution(BaseTool):
             except Exception as e:
                 logger.warning(f"Could not check files directly: {e}")
         
-        # Method 4: Check data handler attributes (legacy)
+        # Method 3: Check unified data state (file-based, works across workers)
+        try:
+            from ..core.unified_data_state import get_data_state
+            if session_id:
+                data_state = get_data_state(session_id)
+                
+                # Check if analysis is marked complete in data state
+                if data_state.analysis_complete:
+                    logger.info("✅ Analysis complete in unified data state")
+                    return True
+                
+                # Check if current data has analysis columns
+                if data_state.current_data is not None:
+                    df = data_state.current_data
+                    analysis_columns = ['composite_score', 'composite_rank', 'pca_score', 'pca_rank']
+                    has_columns = any(col in df.columns for col in analysis_columns)
+                    if has_columns:
+                        logger.info(f"✅ Analysis columns found: {[col for col in analysis_columns if col in df.columns]}")
+                        return True
+                    else:
+                        logger.debug(f"No analysis columns in dataset. Columns: {list(df.columns)[:10]}...")
+        except Exception as e:
+            logger.warning(f"Could not check unified data state: {e}")
+        
+        # Method 4: Check Flask session flag (might not work with multi-worker)
+        try:
+            from flask import session
+            if session.get('analysis_complete', False):
+                logger.info("✅ Analysis complete flag found in Flask session")
+                return True
+            else:
+                logger.debug("Flask session flag not set")
+        except Exception as e:
+            logger.debug(f"Could not check session flag: {e}")
+        
+        # Method 5: Check data handler attributes (legacy)
         has_composite = hasattr(data_handler, 'vulnerability_rankings') and data_handler.vulnerability_rankings is not None
         has_pca = hasattr(data_handler, 'vulnerability_rankings_pca') and data_handler.vulnerability_rankings_pca is not None
         has_unified = hasattr(data_handler, 'unified_dataset') and data_handler.unified_dataset is not None
@@ -293,11 +405,12 @@ Please provide these values and I'll calculate the optimal distribution plan bas
         
         # Add top priority wards if available
         if prioritized is not None and len(prioritized) > 0:
-            top_5 = prioritized.nlargest(5, 'nets_allocated')[['WardName', 'nets_allocated', 'Population']]
-            summary += "\n\n**Top 5 Priority Wards:**"
-            for idx, ward in top_5.iterrows():
+            # Show the actual highest risk wards (lowest rank numbers) that received allocations
+            top_5 = prioritized.nsmallest(5, 'overall_rank')[['WardName', 'nets_allocated', 'Population', 'overall_rank']]
+            summary += "\n\n**Top 5 Highest Risk Wards (Prioritized for Distribution):**"
+            for i, (_, ward) in enumerate(top_5.iterrows(), 1):
                 coverage = (ward['nets_allocated'] * 1.8 / ward['Population'] * 100) if ward['Population'] > 0 else 0
-                summary += f"\n{idx+1}. **{ward['WardName']}** - {ward['nets_allocated']} nets ({coverage:.1f}% coverage)"
+                summary += f"\n{i}. **{ward['WardName']}** (Risk Rank #{ward['overall_rank']}) - {ward['nets_allocated']} nets ({coverage:.1f}% coverage)"
         
         summary += "\n\n📊 View the interactive distribution map below to see the allocation across all wards."
         

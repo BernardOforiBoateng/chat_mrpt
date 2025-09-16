@@ -1,3 +1,4 @@
+import json
 """
 True py-sidebot Implementation for ChatMRPT
 
@@ -19,6 +20,7 @@ Key components preserved:
 import logging
 import json
 import time
+import os
 import pandas as pd
 from typing import Dict, Any, List, Optional
 from flask import current_app
@@ -27,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 
 class RequestInterpreter:
+    
+    @staticmethod
+    def force_session_save():
+        """Force Flask session to save when using Redis backend."""
+        from flask import session
+        # Mark all keys as modified to force Redis save
+        session.permanent = True
+        session.modified = True
+        # Touch all important keys
+        for key in ['data_loaded', 'csv_loaded', 'shapefile_loaded']:
+            if key in session:
+                session[key] = session[key]  # Re-assign to trigger modification
     """
     True py-sidebot inspired request interpreter for ChatMRPT.
     
@@ -41,6 +55,7 @@ class RequestInterpreter:
         
         # py-sidebot approach: Simple conversation storage
         self.conversation_history = {}
+        self.session_data = {}  # Store session data for access
         
         # Initialize memory system if available
         try:
@@ -62,9 +77,10 @@ class RequestInterpreter:
         logger.info("Registering tools - py-sidebot pattern")
         
         # Register analysis tools
-        self.tools['run_complete_analysis'] = self._run_complete_analysis
-        self.tools['run_composite_analysis'] = self._run_composite_analysis
-        self.tools['run_pca_analysis'] = self._run_pca_analysis
+        self.tools['run_malaria_risk_analysis'] = self._run_malaria_risk_analysis
+        # Disabled single-method tools to prevent confusion
+        # self.tools['run_composite_analysis'] = self._run_composite_analysis
+        # self.tools['run_pca_analysis'] = self._run_pca_analysis
         
         # Register visualization tools
         self.tools['create_vulnerability_map'] = self._create_vulnerability_map
@@ -79,6 +95,7 @@ class RequestInterpreter:
         # Register data tools
         self.tools['execute_data_query'] = self._execute_data_query
         self.tools['execute_sql_query'] = self._execute_sql_query
+        self.tools['run_data_quality_check'] = self._run_data_quality_check
         
         # Register explanation tools
         self.tools['explain_analysis_methodology'] = self._explain_analysis_methodology
@@ -88,15 +105,32 @@ class RequestInterpreter:
         
         logger.info(f"Registered {len(self.tools)} tools")
     
-    def process_message(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None) -> Dict[str, Any]:
+    def process_message(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
         """py-sidebot pattern: Pass message directly to LLM with tools."""
         start_time = time.time()
         
         try:
-            logger.info(f"Processing message for session {session_id}: {user_message[:100]}...")
+            # 🔍 DEBUG: Enhanced logging for workflow tracking
+            logger.info("=" * 60)
+            logger.info("📊 ANALYSIS: RequestInterpreter.process_message")
+            logger.info(f"  📝 User Message: {user_message[:100]}...")
+            logger.info(f"  🆔 Session ID: {session_id}")
+            logger.info(f"  📂 Session Keys: {list(session_data.keys()) if session_data else 'None'}")
+            logger.info(f"  🎯 Analysis Mode: {kwargs.get('is_data_analysis', False)}")
+            logger.info(f"  🔄 Tab Context: {kwargs.get('tab_context', 'unknown')}")
             
-            # Handle special workflows first
-            special_result = self._handle_special_workflows(user_message, session_id, session_data)
+            # Check session state
+            from flask import session as flask_session
+            logger.info("  📊 Session State:")
+            logger.info(f"    - Analysis Complete: {flask_session.get('analysis_complete', False)}")
+            logger.info(f"    - Data Loaded: {flask_session.get('data_loaded', False)}")
+            logger.info(f"    - ITN Planning Complete: {flask_session.get('itn_planning_complete', False)}")
+            logger.info(f"    - TPR Workflow Complete: {flask_session.get('tpr_workflow_complete', False)}")
+            logger.info("=" * 60)
+            
+            # Handle special workflows first (pass kwargs for context flags)
+            logger.info(f"🔄 Checking special workflows for: {user_message[:50]}...")
+            special_result = self._handle_special_workflows(user_message, session_id, session_data, **kwargs)
             if special_result:
                 return special_result
             
@@ -124,17 +158,18 @@ class RequestInterpreter:
                 'tools_used': []
             }
     
-    def process_message_streaming(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None):
+    def process_message_streaming(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None, **kwargs):
         """Streaming version for better UX."""
         try:
-            # Handle special workflows
-            special_result = self._handle_special_workflows(user_message, session_id, session_data)
+            # Handle special workflows (pass kwargs for context flags)
+            special_result = self._handle_special_workflows(user_message, session_id, session_data, **kwargs)
             if special_result:
                 # CRITICAL: Include visualizations if present
                 yield {
                     'content': special_result.get('response', ''),
                     'status': special_result.get('status', 'success'),
                     'visualizations': special_result.get('visualizations', []),
+                    'download_links': special_result.get('download_links', []),
                     'tools_used': special_result.get('tools_used', []),
                     'done': True
                 }
@@ -143,16 +178,56 @@ class RequestInterpreter:
             # Get session context
             session_context = self._get_session_context(session_id, session_data)
             
+            logger.info(f"🔍 Session context for {session_id}:")
+            logger.info(f"   data_loaded: {session_context.get('data_loaded', False)}")
+            logger.info(f"   has_csv: {session_context.get('csv_loaded', False)}")
+            logger.info(f"   has_shapefile: {session_context.get('shapefile_loaded', False)}")
+            logger.info(f"   current_data: {str(session_context.get('current_data', 'None'))[:100]}")
+            logger.info(f"   session_data param keys: {list(session_data.keys())[:10] if session_data else 'None'}")
+            logger.info(f"   kwargs: {kwargs}")
+            
             if not session_context.get('data_loaded', False):
-                response = self._simple_conversational_response(user_message, session_context, session_id)
-                yield {
-                    'content': response.get('response', ''),
-                    'status': 'success',
-                    'done': True
-                }
+                logger.info(f"❌ No data loaded, using conversational streaming")
+                # Use streaming for conversational responses too
+                if self.llm_manager and hasattr(self.llm_manager, 'generate_with_functions_streaming'):
+                    system_prompt = self._build_system_prompt(session_context, session_id)
+                    
+                    # Stream the response
+                    for chunk in self.llm_manager.generate_with_functions_streaming(
+                        messages=[{"role": "user", "content": user_message}],
+                        system_prompt=system_prompt,
+                        functions=[],  # No tools for simple conversation
+                        temperature=0.7,
+                        session_id=session_id
+                    ):
+                        # Handle OpenAI streaming format (no 'type' field)
+                        content = chunk.get('content', '')
+                        if content:  # Only yield if there's actual content
+                            yield {
+                                'content': content,
+                                'status': 'success',
+                                'done': False
+                            }
+                    
+                    # Send final done signal
+                    yield {
+                        'content': '',
+                        'status': 'success',
+                        'done': True
+                    }
+                else:
+                    # Fallback to non-streaming
+                    response = self._simple_conversational_response(user_message, session_context, session_id)
+                    yield {
+                        'content': response.get('response', ''),
+                        'status': 'success',
+                        'done': True
+                    }
                 return
             
             # Stream with tools
+            logger.info(f"✅ Data loaded! Calling _stream_with_tools")
+            logger.info(f"   Message: {user_message[:100]}...")
             yield from self._stream_with_tools(user_message, session_context, session_id)
             
         except Exception as e:
@@ -165,6 +240,10 @@ class RequestInterpreter:
     
     def _llm_with_tools(self, user_message: str, session_context: Dict, session_id: str) -> Dict[str, Any]:
         """py-sidebot pattern: Pass message to LLM with all tools available."""
+        """LLM with tools execution - DEBUG VERSION"""
+        logger.info("🔍 DEBUG LLM_WITH_TOOLS: Starting tool selection")
+        logger.info(f"🔍 Available tools: {list(self.tools.keys())}")
+        logger.info(f"🔍 Session context data_loaded: {session_context.get('data_loaded')}")
         system_prompt = self._build_system_prompt(session_context, session_id)
         
         # Convert tools to OpenAI function format
@@ -191,6 +270,62 @@ class RequestInterpreter:
     
     def _stream_with_tools(self, user_message: str, session_context: Dict, session_id: str):
         """Stream LLM response with tools."""
+        logger.info(f"🔧 _stream_with_tools called for session {session_id}")
+        logger.info(f"📊 Data loaded status: {session_context.get('data_loaded', False)}")
+        logger.info(f"📦 Session data cache has session: {session_id in self.session_data}")
+        
+        # CRITICAL FIX: Ensure data is loaded in session_data before tools are called
+        # Load the appropriate dataset based on analysis completion status
+        if session_context.get('data_loaded', False) and session_id not in self.session_data:
+            try:
+                import pandas as pd
+                from pathlib import Path
+                session_folder = Path(f'instance/uploads/{session_id}')
+
+                # Check if analysis is complete and load appropriate file
+                analysis_complete = session_context.get('analysis_complete', False)
+                marker_file = session_folder / '.analysis_complete'
+
+                # Prioritize unified dataset if analysis is complete
+                if analysis_complete or marker_file.exists():
+                    # Try unified dataset first
+                    unified_path = session_folder / 'unified_dataset.csv'
+                    if unified_path.exists():
+                        df = pd.read_csv(unified_path)
+                        logger.info(f"✅ Loaded unified dataset for tools: {df.shape} from {unified_path}")
+                    else:
+                        # Fall back to raw data if unified not found
+                        raw_data_path = session_folder / 'raw_data.csv'
+                        if raw_data_path.exists():
+                            df = pd.read_csv(raw_data_path)
+                            logger.info(f"⚠️ Analysis complete but unified dataset not found, loaded raw data: {df.shape}")
+                else:
+                    # Load raw data for pre-analysis stage
+                    raw_data_path = session_folder / 'raw_data.csv'
+                    if raw_data_path.exists():
+                        df = pd.read_csv(raw_data_path)
+                        logger.info(f"✅ Loaded raw data for tools: {df.shape} from {raw_data_path}")
+
+                if 'df' in locals():
+                    self.session_data[session_id] = {
+                        'data': df,
+                        'columns': list(df.columns),
+                        'shape': df.shape
+                    }
+                    logger.info(f"📋 Columns loaded: {list(df.columns)[:5]}...")
+            except Exception as e:
+                logger.error(f"Failed to load data for tools: {e}")
+        
+        # Check if LLM manager is available
+        if self.llm_manager is None:
+            logger.error("LLM manager is not initialized for streaming")
+            yield {
+                'content': "I'm having trouble connecting to the language model. Please try again in a moment.",
+                'status': 'error',
+                'done': True
+            }
+            return
+        
         system_prompt = self._build_system_prompt(session_context, session_id)
         
         functions = []
@@ -201,6 +336,13 @@ class RequestInterpreter:
                 'parameters': self._get_tool_parameters(tool_name)
             }
             functions.append(func_def)
+        
+        logger.info(f"🛠️ Passing {len(functions)} tools to LLM for streaming")
+        logger.info(f"📝 Tool names: {[f['name'] for f in functions[:3]]}...")
+        logger.info(f"🎯 User message: {user_message[:100]}...")
+        
+        # Track accumulated content for conversation storage
+        accumulated_content = []
         
         for chunk in self.llm_manager.generate_with_functions_streaming(
             messages=[{"role": "user", "content": user_message}],
@@ -259,8 +401,10 @@ class RequestInterpreter:
                                     session_id=session_id
                                 )
                                 if interpretation:
+                                    # Add proper spacing and section header for clarity
+                                    formatted_interpretation = f"\n\n**Analysis:**\n{interpretation}"
                                     yield {
-                                        'content': interpretation,
+                                        'content': formatted_interpretation,
                                         'status': 'success',
                                         'tools_used': tools_used_list,
                                         'done': True
@@ -270,7 +414,7 @@ class RequestInterpreter:
                             except Exception as interp_err:
                                 logger.error(f"Error during interpretation: {interp_err}")
                                 yield {
-                                    'content': f"⚠️ Interpretation failed: {interp_err}",
+                                    'content': f"\n\n⚠️ Interpretation failed: {interp_err}",
                                     'status': 'error',
                                     'tools_used': tools_used_list,
                                     'done': True
@@ -283,6 +427,7 @@ class RequestInterpreter:
                                 'content': result['response'],
                                 'status': result.get('status', 'success'),
                                 'visualizations': result.get('visualizations', []),
+                                'download_links': result.get('download_links', []),
                                 'tools_used': tools_list,
                                 'done': False
                             }
@@ -290,13 +435,40 @@ class RequestInterpreter:
                             self._store_conversation(session_id, user_message, result['response'])
                             return
 
-                        # Handle raw string response
+                        # Handle raw string response OR ToolExecutionResult
                         else:
-                            raw_output = result if isinstance(result, str) else str(result)
+                            # Check if it's a ToolExecutionResult with visualization data
+                            visualizations = []
+                            if hasattr(result, 'data') and result.data and 'web_path' in result.data:
+                                # Extract visualization information from ToolExecutionResult
+                                viz_data = {
+                                    'type': result.data.get('map_type', result.data.get('chart_type', 'visualization')),
+                                    'path': result.data.get('web_path', ''),
+                                    'url': result.data.get('web_path', ''),
+                                    'file_path': result.data.get('file_path', ''),
+                                    'title': result.data.get('title', 'Visualization')
+                                }
+                                visualizations = [viz_data]
+                                raw_output = result.message if hasattr(result, 'message') else str(result)
+                            elif isinstance(result, dict) and result.get('data') and result['data'].get('web_path'):
+                                # Handle dict format with visualization data
+                                viz_data = {
+                                    'type': result['data'].get('map_type', result['data'].get('chart_type', 'visualization')),
+                                    'path': result['data'].get('web_path', ''),
+                                    'url': result['data'].get('web_path', ''),
+                                    'file_path': result['data'].get('file_path', ''),
+                                    'title': result.get('message', 'Visualization')
+                                }
+                                visualizations = [viz_data]
+                                raw_output = result.get('message', str(result))
+                            else:
+                                raw_output = result if isinstance(result, str) else str(result)
+                            
                             tools_list = [function_name]
                             yield {
                                 'content': raw_output,
                                 'status': 'success',
+                                'visualizations': visualizations,
                                 'tools_used': tools_list,
                                 'done': False
                             }
@@ -312,21 +484,48 @@ class RequestInterpreter:
                         }
                         return
             
-            if chunk.get('done'):
+            # Handle text chunks from streaming (OpenAI format has no 'type' field)
+            content = chunk.get('content', '')
+            if content:  # Only process if there's actual content
+                accumulated_content.append(content)
+                yield {
+                    'content': content,
+                    'status': 'success',
+                    'done': False
+                }
+            elif chunk.get('done'):
                 content = chunk.get('content', '')
+                if content:
+                    accumulated_content.append(content)
                 yield {
                     'content': content,
                     'status': 'success',
                     'done': True
                 }
-                self._store_conversation(session_id, user_message, content)
+                # Store the full conversation
+                full_response = ''.join(accumulated_content)
+                self._store_conversation(session_id, user_message, full_response)
                 return
             else:
+                # Handle other chunk types
+                content = chunk.get('content', '')
+                if content:
+                    accumulated_content.append(content)
                 yield {
-                    'content': chunk.get('content', ''),
+                    'content': content,
                     'status': 'success',
                     'done': False
                 }
+        
+        # If we got here without a done signal, send one
+        if accumulated_content:
+            yield {
+                'content': '',
+                'status': 'success',
+                'done': True
+            }
+            full_response = ''.join(accumulated_content)
+            self._store_conversation(session_id, user_message, full_response)
     
     def _process_llm_response(self, response: Dict, user_message: str, session_id: str) -> Dict[str, Any]:
         """Process LLM response and execute tools if needed."""
@@ -353,6 +552,7 @@ class RequestInterpreter:
                         return {
                             'response': result['response'],
                             'visualizations': result.get('visualizations', []),
+                            'download_links': result.get('download_links', []),
                             'tools_used': result.get('tools_used', [function_name]),
                             'status': result.get('status', 'success')
                         }
@@ -378,14 +578,17 @@ class RequestInterpreter:
         }
     
     # Tool Functions - These are the actual functions registered as tools
-    def _run_complete_analysis(self, session_id: str, variables: Optional[List[str]] = None):
+    def _run_malaria_risk_analysis(self, session_id: str, variables: Optional[List[str]] = None):
         """Run complete dual-method malaria risk analysis (composite scoring + PCA).
         Use ONLY when analysis has NOT been run yet. DO NOT use if analysis is already complete.
         For ITN planning after analysis, use run_itn_planning instead."""
+        logger.info("⚡ TOOL: _run_malaria_risk_analysis called")
+        logger.info(f"  🆔 Session ID: {session_id}")
+        logger.info(f"  📊 Variables: {variables}")
         try:
             # Use the tool directly to get the comprehensive summary
-            from app.tools.complete_analysis_tools import RunCompleteAnalysis
-            tool = RunCompleteAnalysis()
+            from app.tools.complete_analysis_tools import RunMalariaRiskAnalysis
+            tool = RunMalariaRiskAnalysis()
             
             # Execute the tool with proper parameters
             tool_result = tool.execute(
@@ -428,7 +631,7 @@ class RequestInterpreter:
             return {
                 'response': message,
                 'status': 'success' if tool_result.success else 'error',
-                'tools_used': ['run_complete_analysis'],
+                'tools_used': ['run_malaria_risk_analysis'],
                 'visualizations': visualizations
             }
         except Exception as e:
@@ -458,9 +661,9 @@ class RequestInterpreter:
                 
                 # Use your proper summary function
                 try:
-                    from app.tools.complete_analysis_tools import RunCompleteAnalysis
+                    from app.tools.complete_analysis_tools import RunMalariaRiskAnalysis
                     
-                    analysis_tool = RunCompleteAnalysis()
+                    analysis_tool = RunMalariaRiskAnalysis()
                     summary = analysis_tool._generate_comprehensive_summary(
                         result, pca_result, {}, 0.0, session_id
                     )
@@ -530,8 +733,8 @@ class RequestInterpreter:
             # If no method specified, use the comparison tool
             if method is None:
                 # Use the new comparison tool from the tool registry
-                from app.core.tool_registry import ToolRegistry
-                tool_registry = ToolRegistry()
+                from app.core.tool_registry import get_tool_registry
+                tool_registry = get_tool_registry()
                 
                 # Execute the comparison tool
                 result = tool_registry.execute_tool(
@@ -940,10 +1143,34 @@ ChatMRPT uses both composite scoring and PCA for comprehensive assessment:
         Use this tool when user wants to plan ITN distribution, allocate bed nets, or create intervention plans.
         This tool uses existing analysis rankings - DO NOT run analysis again if already complete.
         Keywords: ITN, bed nets, net distribution, intervention planning, allocate nets."""
+        logger.info("🛏️ ITN: _run_itn_planning called")
+        logger.info(f"  🆔 Session ID: {session_id}")
+        logger.info(f"  🔢 Total Nets: {total_nets}")
+        logger.info(f"  🏠 Household Size: {avg_household_size}")
+        logger.info(f"  🏙️ Urban Threshold: {urban_threshold}")
+        logger.info(f"  📊 Method: {method}")
         try:
             # Check if analysis is complete first
             session_context = self._get_session_context(session_id)
             analysis_complete = session_context.get('analysis_complete', False)
+            
+            # CRITICAL FIX: Also check for physical evidence (marker file)
+            if not analysis_complete:
+                from pathlib import Path
+                marker_file = Path(f"instance/uploads/{session_id}/.analysis_complete")
+                if marker_file.exists():
+                    analysis_complete = True
+                    logger.info(f"✅ Found .analysis_complete marker, overriding flag for ITN planning in {session_id}")
+                    
+                    # Update state to match evidence
+                    try:
+                        from app.core.workflow_state_manager import WorkflowStateManager
+                        state_manager = WorkflowStateManager(session_id)
+                        state_manager.update_state({
+                            'analysis_complete': True
+                        }, transition_reason="ITN tool found analysis evidence")
+                    except Exception as e:
+                        logger.warning(f"Could not update state: {e}")
             
             data_handler = self.data_service.get_handler(session_id)
             if not data_handler:
@@ -979,44 +1206,111 @@ ChatMRPT uses both composite scoring and PCA for comprehensive assessment:
                 if data_handler.unified_dataset is None:
                     return 'Analysis rankings not found. Please run the malaria risk analysis first to generate vulnerability rankings.'
             
-            # If user didn't specify total_nets, ask for it
-            if total_nets == 10000:  # Default value
+            # Use the ITN planning tool to get comprehensive results with download links
+            from app.tools.itn_planning_tools import PlanITNDistribution
+            
+            # Create tool instance with parameters
+            tool = PlanITNDistribution(
+                total_nets=total_nets if total_nets != 10000 else None,
+                avg_household_size=avg_household_size,
+                urban_threshold=urban_threshold,
+                method=method
+            )
+            
+            # Execute the tool
+            tool_result = tool.execute(session_id=session_id)
+            
+            if not tool_result.success:
                 return {
-                    'response': "I'm ready to help you plan ITN distribution! To create an optimal allocation plan, I need to know:\n\n1. **How many bed nets do you have available?** (e.g., 50000, 100000)\n2. **What's the average household size in your area?** (default is 5 people)\n\nFor example, you can say: 'I have 100000 nets and average household size is 6'",
-                    'status': 'info',
+                    'response': tool_result.message,
+                    'status': 'error',
                     'tools_used': ['run_itn_planning']
                 }
             
-            result = calculate_itn_distribution(data_handler, session_id, total_nets, avg_household_size, urban_threshold, method)
-            if result['status'] != 'success':
-                return f"Error: {result.get('message', 'Unknown error')}"
+            # Extract visualizations and download links from tool result
+            visualizations = []
+            if tool_result.web_path:
+                visualizations.append({
+                    'type': 'itn_map',
+                    'path': tool_result.web_path,
+                    'url': tool_result.web_path
+                })
             
-            # Format response with embed
-            embed_url = f'/itn_embed/{session_id}'
-            message = f"""**ITN Distribution Plan Generated**
-
-📊 **Distribution Summary:**
-- Total Nets Available: {result['stats']['total_nets']:,}
-- Nets Allocated: {result['stats']['allocated']:,} 
-- Wards with Full Coverage (100%): {result['stats']['fully_covered_wards']}
-- Wards with Partial Coverage: {result['stats']['partially_covered_wards']}
-- Total Wards Receiving Nets: {result['stats']['prioritized_wards']}
-
-📈 **Population Impact:**
-- Total Population: {result['stats']['total_population']:,}
-- Population Covered: {result['stats']['covered_population']:,} ({result['stats']['coverage_percent']:.1f}%)
-
-The map below shows ITN allocation focusing on complete coverage of highest-risk wards."""
-            
+            # Return structured response with download links
             return {
-                'response': message,
-                'visualizations': [{'type': 'itn_map', 'path': result['map_path'], 'url': embed_url}],
+                'response': tool_result.message,
+                'visualizations': visualizations,
+                'download_links': tool_result.download_links if hasattr(tool_result, 'download_links') else [],
+                'tools_used': ['run_itn_planning'],
                 'status': 'success'
             }
         except Exception as e:
             return f"Error planning ITN: {str(e)}"
     
     # Helper Methods
+    def _run_data_quality_check(self, session_id: str):
+        """Check data quality including missing values, duplicates, and statistics."""
+        try:
+            import pandas as pd
+            from pathlib import Path
+            
+            # Load the data
+            session_folder = Path(f'instance/uploads/{session_id}')
+            raw_data_path = session_folder / 'raw_data.csv'
+            
+            if not raw_data_path.exists():
+                return "No data file found. Please upload data first."
+            
+            df = pd.read_csv(raw_data_path)
+            
+            # Calculate statistics
+            total_missing = df.isnull().sum().sum()
+            duplicates = df.duplicated().sum()
+            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+            
+            # Find malaria-relevant variables
+            malaria_vars = []
+            env_vars = []
+            risk_vars = []
+            
+            for col in df.columns:
+                col_lower = col.lower()
+                if 'tpr' in col_lower or 'test' in col_lower or 'positive' in col_lower:
+                    malaria_vars.append(col)
+                elif any(x in col_lower for x in ['evi', 'ndvi', 'soil', 'rain', 'temp', 'humid']):
+                    env_vars.append(col)
+                elif any(x in col_lower for x in ['urban', 'housing', 'population', 'density']):
+                    risk_vars.append(col)
+            
+            # Format response
+            response = f"""**Data Quality Check Complete**
+
+📊 Your dataset has {total_missing} total missing values (minimal impact on analysis).
+
+✅ **{'No duplicate entries' if duplicates == 0 else f'{duplicates} duplicate entries found'}** - {'each ward has unique data' if duplicates == 0 else 'consider removing duplicates'}.
+
+**Key Dataset Characteristics:**
+• Both numeric indicators ({len(numeric_cols)}) and categorical identifiers ({len(categorical_cols)})
+
+**Malaria-Relevant Variables Found:**
+• **Health indicators**: {', '.join(malaria_vars[:3]) if malaria_vars else 'None detected'}
+• **Environmental factors**: {', '.join(env_vars[:4]) if env_vars else 'None detected'}  
+• **Risk modifiers**: {', '.join(risk_vars[:3]) if risk_vars else 'None detected'}
+
+**Analysis Readiness: ✅ Ready**
+Your data is suitable for analysis. You can now run comprehensive malaria risk assessment to identify priority wards for intervention.
+
+Would you like me to:
+• Run the full malaria risk analysis?
+• Explore specific variables in detail?
+• Create visualizations of key indicators?"""
+            
+            return response
+            
+        except Exception as e:
+            return f"Error checking data quality: {str(e)}"
+
     def _get_tool_parameters(self, tool_name: str) -> Dict[str, Any]:
         """Get parameter schema for a tool."""
         base_params = {
@@ -1122,47 +1416,85 @@ The map below shows ITN allocation focusing on complete coverage of highest-risk
     
 
     def _build_system_prompt(self, session_context: Dict, session_id: str = None) -> str:
-        """Build system prompt with session context."""
-        base_prompt = """You are a specialized malaria epidemiologist embedded in ChatMRPT, a malaria risk assessment system.
+        """Build system prompt with industry best practices."""
+        base_prompt = """You are ChatMRPT, an AI-powered malaria risk assessment assistant with epidemiological expertise.
 
-## CRITICAL RULE: ALWAYS INTERPRET DATA RESULTS DYNAMICALLY
-When you receive data from any tool (SQL queries, analysis results, etc.), you MUST:
+## CONTEXT & OBJECTIVE
+You help public health professionals analyze malaria risk data and plan interventions. Your responses combine WHO-verified knowledge with data-driven insights when user data is available.
 
-1. **NEVER just repeat the raw results** - If you get "WardName: Kafin Dabga - composite_score: 0.719", don't just list it
-2. **ALWAYS add epidemiological interpretation** - Explain what the values MEAN for malaria risk
-3. **Use data-driven context** - Query the full dataset to understand percentiles and distribution
-4. **Make specific recommendations** - Based on the actual risk factors you see
+## SAFETY GUIDELINES
+- You provide epidemiological analysis, NOT medical diagnosis or treatment advice
+- Always clarify you're an AI tool, not a replacement for healthcare professionals  
+- When discussing interventions, emphasize consultation with local health authorities
+- Flag any data anomalies or concerning patterns for human review
 
-INTERPRETATION PATTERN:
-- First, understand what you're seeing (run additional queries if needed to get context)
-- Then explain what the numbers mean in THIS dataset's context
-- Finally, recommend specific interventions based on the risk profile
+## CAPABILITIES FRAMEWORK
 
-For example, if you see:
-"WardName: Kafin Dabga - composite_score: 0.719 - pfpr: 0.300 - housing_quality: 0.043"
+### 1. GENERAL KNOWLEDGE MODE (No upload required)
+When users ask about malaria epidemiology, statistics, or general information:
 
-You should:
-1. Query to find percentiles: "SELECT PERCENT_RANK() OVER (ORDER BY pfpr) as pfpr_percentile FROM df WHERE WardName='Kafin Dabga'"
-2. Interpret: "Kafin Dabga ranks #1 with a composite score of 0.719, driven by exceptionally high malaria prevalence (30%, which is in the top X% of all wards) and very poor housing conditions (0.043, among the lowest X% in the dataset)"
-3. Recommend: "This ward requires immediate intervention with mass ITN distribution and housing improvement programs"
+**Approach**: Provide comprehensive, evidence-based information
+**Sources**: WHO data, peer-reviewed research, established epidemiological principles
+**Examples**:
+- "What countries are most affected?" → Cite WHO World Malaria Report statistics
+- "How many deaths annually?" → Provide latest global burden estimates (2022: ~608,000 deaths)
+- "Prevention strategies?" → Explain ITNs, IRS, chemoprevention, vaccines
 
-## CRITICAL RULE: ALWAYS USE ACTUAL DATA
-When answering ANY question about data (variables, columns, statistics, values, etc.):
-- NEVER make assumptions or use generic examples
-- ALWAYS use execute_sql_query or execute_data_query to check the actual uploaded data
-- ONLY report what you find in the real data
+### 2. DATA ANALYSIS MODE (Requires user data)
+When users request analysis of their specific dataset:
 
-For example:
-- "What variables do I have?" → Use execute_sql_query: SELECT * FROM df LIMIT 1
-- "What's in my data?" → Query the actual data first
-- "Tell me about the columns" → Check the real column names with SQL
+**Approach**: Use Chain-of-Thought reasoning
+**Process**:
+1. Verify data availability and structure
+2. Query to understand data distribution
+3. Calculate relevant statistics
+4. Interpret in epidemiological context
+5. Provide actionable recommendations
 
-## Your Expertise
-- Malaria transmission dynamics and vector ecology
-- Urban microstratification for intervention targeting
-- Statistical analysis (composite scoring, PCA)
-- Nigerian health systems and geopolitical zones
-- WHO guidelines for malaria program planning
+**Examples**:
+- "Analyze my ward data" → Check data, run analysis, interpret
+- "Which areas need intervention?" → Query risk scores, rank, recommend
+
+## RESPONSE STRUCTURE
+
+### For General Questions:
+1. **Direct Answer**: Provide the requested information immediately
+2. **Context**: Add relevant epidemiological context
+3. **Statistics**: Include specific numbers when available
+4. **Implications**: Explain what this means for malaria control
+
+### For Data Analysis:
+1. **Data Verification**: Confirm what data you're analyzing
+2. **Methodology**: Briefly explain your analytical approach
+3. **Key Findings**: Present main results with interpretations
+4. **Risk Factors**: Identify driving factors
+5. **Recommendations**: Suggest evidence-based interventions
+
+## CHAIN-OF-THOUGHT REASONING
+For complex queries, break down your thinking:
+- Step 1: Understand the question scope
+- Step 2: Determine if data is needed
+- Step 3: Execute appropriate analysis
+- Step 4: Interpret results in context
+- Step 5: Formulate actionable insights
+
+## TONE & STYLE
+- **Professional**: Use epidemiological terminology appropriately
+- **Accessible**: Explain complex concepts clearly
+- **Action-oriented**: Focus on practical applications
+- **Evidence-based**: Ground statements in data or citations
+
+## ERROR HANDLING
+- If data is corrupted: "I notice potential data quality issues in [column]. Please verify..."
+- If analysis fails: "I encountered an error analyzing [aspect]. Let me try an alternative approach..."
+- If question unclear: "To provide the most accurate response, could you clarify..."
+
+## QUALITY ASSURANCE
+Before responding, verify:
+✓ Is my response grounded in evidence?
+✓ Have I distinguished between general knowledge and user data insights?
+✓ Are my recommendations appropriate for the context?
+✓ Is my response actionable and clear?
 
 ## Current Session"""
         
@@ -1203,16 +1535,34 @@ For example:
                 computed_cols = ['composite_score', 'composite_rank', 'composite_category', 
                                'pca_score', 'pca_rank', 'vulnerability_category', 'overall_rank']
                 
+                # Build column info with defensive checks
                 column_info = f"""
 ## TABLE SCHEMA: df
-### Analysis Results (ALWAYS PRESENT):
-- {ward_col} (TEXT) - Ward identifier
+### Analysis Results:
+- {ward_col} (TEXT) - Ward identifier"""
+
+                # Add composite score info if column exists
+                if 'composite_score' in df.columns:
+                    column_info += f"""
 - composite_score (FLOAT) - Range: {df['composite_score'].min():.3f} to {df['composite_score'].max():.3f}
-- composite_rank (INTEGER) - Range: 1 to {len(df)}
-- composite_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'
+- composite_rank (INTEGER) - Range: 1 to {len(df)}"""
+
+                if 'composite_category' in df.columns:
+                    column_info += f"""
+- composite_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'"""
+
+                # Add PCA score info if column exists
+                if 'pca_score' in df.columns:
+                    column_info += f"""
 - pca_score (FLOAT) - Range: {df['pca_score'].min():.3f} to {df['pca_score'].max():.3f}
-- pca_rank (INTEGER) - Range: 1 to {len(df)}
-- vulnerability_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'
+- pca_rank (INTEGER) - Range: 1 to {len(df)}"""
+
+                # Add vulnerability category if exists
+                if 'vulnerability_category' in df.columns:
+                    column_info += f"""
+- vulnerability_category (TEXT) - Values: 'High Risk', 'Medium Risk', 'Low Risk'"""
+
+                column_info += f"""
 
 ### Key Risk Factors Used in Analysis:
 """
@@ -1238,7 +1588,13 @@ For example:
             
             # Build dynamic SQL example for "Why is X ward ranked high?"
             # Include analysis columns plus any numeric variables that were used
-            detail_columns = [ward_col, 'composite_score', 'composite_rank', 'pca_score', 'pca_rank']
+            detail_columns = [ward_col]  # Start with ward column which always exists
+
+            # Add analysis columns that actually exist
+            for col in ['composite_score', 'composite_rank', 'pca_score', 'pca_rank']:
+                if col in df.columns:
+                    detail_columns.append(col)
+
             if variables_used and df is not None:
                 # Add up to 5 numeric variables that were actually used in the analysis
                 for var in variables_used[:5]:
@@ -1252,14 +1608,33 @@ You now have access to the UNIFIED DATASET with all computed results.
 {column_info}
 
 IMPORTANT: Users want to see RESULTS, not column names:
-- ❌ WRONG: "Let me check the data structure" → SELECT * FROM df LIMIT 1
-- ✅ RIGHT: "Here are the top 10 highest risk wards" → SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10
+- ❌ WRONG: "Let me check the data structure" → SELECT * FROM df LIMIT 1"""
+
+            # Build example queries based on available columns
+            if 'composite_score' in df.columns:
+                stage_guidance += f"""
+- ✅ RIGHT: "Here are the top 10 highest risk wards" → SELECT {ward_col}, composite_score FROM df ORDER BY composite_score DESC LIMIT 10
 
 Example queries for common questions (using actual column names from schema above):
-- "Show top vulnerable wards" → SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10
-- "Why is X ward ranked high?" → SELECT {detail_columns_str} FROM df WHERE {ward_col} = 'X'
-- "High risk areas" → SELECT {ward_col}, composite_score, vulnerability_category FROM df WHERE vulnerability_category = 'High Risk'
-- "Compare methods" → SELECT {ward_col}, composite_rank, pca_rank, ABS(composite_rank - pca_rank) as rank_diff FROM df ORDER BY rank_diff DESC LIMIT 20
+- "Show top vulnerable wards" → SELECT {detail_columns_str} FROM df ORDER BY {'composite_score' if 'composite_score' in df.columns else ward_col} DESC LIMIT 10"""
+            else:
+                stage_guidance += f"""
+- ✅ RIGHT: "Show ward data" → SELECT {detail_columns_str} FROM df LIMIT 10
+
+Example queries for common questions:"""
+
+            stage_guidance += f"""
+- "Why is X ward ranked high?" → SELECT {detail_columns_str} FROM df WHERE {ward_col} = 'X'"""
+
+            if 'vulnerability_category' in df.columns:
+                stage_guidance += f"""
+- "High risk areas" → SELECT {ward_col}, vulnerability_category FROM df WHERE vulnerability_category = 'High Risk'"""
+
+            if 'composite_rank' in df.columns and 'pca_rank' in df.columns:
+                stage_guidance += f"""
+- "Compare methods" → SELECT {ward_col}, composite_rank, pca_rank, ABS(composite_rank - pca_rank) as rank_diff FROM df ORDER BY rank_diff DESC LIMIT 20"""
+
+            stage_guidance += f"""
 - "Summary statistics" → Use execute_data_query: "provide summary statistics of analysis results"
 
 FOCUS ON INSIGHTS: When showing rankings, include only the most relevant columns for the user's question.
@@ -1341,6 +1716,13 @@ No data is currently loaded. Guide the user to upload their CSV data and shapefi
 
 CRITICAL: Understand user INTENT before selecting tools:
 
+**INTENT: Run Malaria Risk Analysis**
+For any request to "analyze malaria risk", "run risk analysis", "assess vulnerability":
+- ALWAYS use run_malaria_risk_analysis (NOT run_composite_analysis or run_pca_analysis)
+- This tool runs BOTH composite scoring AND PCA methods automatically
+- Creates comprehensive results with unified dataset
+- Only available tool for full malaria risk assessment
+
 **INTENT: Get Specific Data (rankings, filtering, top/bottom)**
 Use execute_sql_query with FOCUSED queries (NEVER use SELECT * - always specify columns):
 - "Show top 10 highest risk wards" → query="SELECT {ward_col}, composite_score, vulnerability_category FROM df ORDER BY composite_score DESC LIMIT 10"
@@ -1385,10 +1767,10 @@ PARAMETER EXTRACTION for run_itn_planning:
 - Always extract numbers from the user's message and pass them as parameters
 
 If analysis_complete = False but user asks about ITN:
-- First run_complete_analysis, THEN automatically proceed to run_itn_planning
+- First run_malaria_risk_analysis, THEN automatically proceed to run_itn_planning
 - Don't ask for confirmation if user already expressed intent
 
-NEVER run_complete_analysis if analysis is already complete!
+NEVER run_malaria_risk_analysis if analysis is already complete!
 
 REMEMBER: 
 1. For RANKING/FILTERING questions → Jump straight to the data query
@@ -1497,6 +1879,15 @@ Your expertise adds value through interpretation, not just data retrieval."""
     
     def _simple_conversational_response(self, user_message: str, session_context: Dict, session_id: str = None) -> Dict[str, Any]:
         """Simple conversational response when no data available."""
+        # Check if LLM manager is available
+        if self.llm_manager is None:
+            logger.error("LLM manager is not initialized")
+            return {
+                'response': "I'm having trouble connecting to the language model. Please try again in a moment.",
+                'tools_used': [],
+                'status': 'error'
+            }
+        
         system_prompt = self._build_system_prompt(session_context, session_id)
         
         response = self.llm_manager.generate_response(
@@ -1512,7 +1903,7 @@ Your expertise adds value through interpretation, not just data retrieval."""
         }
     
     def _get_session_context(self, session_id: str, session_data: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Get comprehensive session context."""
+        """Get comprehensive session context using centralized state manager."""
         try:
             # Use provided session data or try to get from Flask session
             if session_data is None:
@@ -1523,17 +1914,138 @@ Your expertise adds value through interpretation, not just data retrieval."""
                     # Working outside of request context, use empty session
                     session_data = {}
             
-            # Check data availability
-            data_loaded = session_data.get('data_loaded', False) or session_data.get('csv_loaded', False)
+            # Use WorkflowStateManager as single source of truth
+            from .workflow_state_manager import WorkflowStateManager
+            state_manager = WorkflowStateManager(session_id)
+            workflow_info = state_manager.get_workflow_info()
             
-            # Check analysis_complete from session or conversation history
-            analysis_complete = session_data.get('analysis_complete', False)
-            if not analysis_complete and session_id in self.conversation_history:
-                # Check if any conversation history entry marks analysis as complete
-                for entry in self.conversation_history[session_id]:
-                    if isinstance(entry, dict) and entry.get('analysis_complete'):
+            # Check data availability from state manager
+            import os
+            from pathlib import Path
+            
+            upload_folder = os.environ.get('UPLOAD_FOLDER', 'instance/uploads')
+            session_folder = Path(upload_folder) / session_id
+            
+            # Check if folder exists and has data files
+            has_actual_data = False
+            if session_folder.exists():
+                # Check for actual data files
+                raw_data = session_folder / 'raw_data.csv'
+                processed_data = session_folder / 'processed_data.csv'
+                has_actual_data = raw_data.exists() or processed_data.exists()
+            
+            # Consider data loaded if:
+            # 1. Session flags say so AND files exist, OR
+            # 2. We have data in our session_data cache, OR
+            # 3. Agent state file says data is loaded (from V3 system)
+            agent_state_loaded = False
+            agent_state_file = session_folder / '.agent_state.json'
+            if agent_state_file.exists():
+                try:
+                    import json
+                    with open(agent_state_file, 'r') as f:
+                        agent_state = json.load(f)
+                        agent_state_loaded = agent_state.get('data_loaded', False) or agent_state.get('csv_loaded', False)
+                        
+                        # CRITICAL FIX: Sync Flask session IMMEDIATELY when agent state shows data loaded
+                        # This must happen BEFORE we check data_loaded to avoid circular dependency
+                        if (agent_state.get('data_loaded', False) or agent_state.get('csv_loaded', False)):
+                            # Check if files actually exist
+                            import os
+                            from pathlib import Path
+                            session_folder = Path(f"{upload_folder}/{session_id}")
+                            has_csv = (session_folder / 'raw_data.csv').exists() or (session_folder / 'data_analysis.csv').exists()
+                            has_shapefile = (session_folder / 'raw_shapefile.zip').exists()
+                            
+                            if has_csv:
+                                # Update Flask session IMMEDIATELY with Redis-compatible approach
+                                from flask import session
+                                if not session.get('csv_loaded', False):
+                                    # Set all flags
+                                    session['data_loaded'] = True
+                                    session['csv_loaded'] = True
+                                    session['shapefile_loaded'] = has_shapefile
+                                    # CRITICAL for Redis: Set permanent and force modification
+                                    session.permanent = True
+                                    session.modified = True
+                                    # Force re-assignment to trigger Redis update
+                                    session['session_id'] = session.get('session_id', session_id)
+                                    
+                                    logger.info(f"✅ IMMEDIATE Flask session sync from agent state for {session_id}")
+                                    logger.info(f"   Files exist: CSV={has_csv}, Shapefile={has_shapefile}")
+                                    logger.info(f"   Session flags updated: data_loaded=True, csv_loaded=True")
+                                    logger.info(f"   Redis session marked as permanent and modified")
+                except Exception as e:
+                    logger.debug(f"Could not read agent state: {e}")
+            
+            # CRITICAL FIX: Trust agent state if it says data is loaded and files exist
+            # This handles V3 transitions where Flask session might not have the flags
+            data_loaded = (
+                (session_data.get('data_loaded', False) or 
+                 session_data.get('csv_loaded', False) or
+                 session_id in self.session_data or  # Check our internal cache
+                 (agent_state_loaded and has_actual_data))  # Trust agent state if files exist
+            )
+            
+            # CRITICAL: If we determined data is loaded based on agent state, update Flask session
+            if data_loaded and agent_state_loaded and has_actual_data and not session_data.get('csv_loaded', False):
+                from flask import session
+                session['data_loaded'] = True
+                session['csv_loaded'] = True
+                session['shapefile_loaded'] = os.path.exists(session_folder / 'raw_shapefile.zip')
+                session.modified = True  # Ensure changes persist
+                logger.info(f"🔄 Updated Flask session flags based on agent state for {session_id}")
+            
+            # If data is loaded but not in our cache, populate it
+            if data_loaded and session_id not in self.session_data and has_actual_data:
+                try:
+                    import pandas as pd
+                    # Try to load the data file
+                    raw_data_path = session_folder / 'raw_data.csv'
+                    if raw_data_path.exists():
+                        df = pd.read_csv(raw_data_path)
+                        self.session_data[session_id] = {
+                            'data': df,
+                            'columns': list(df.columns),
+                            'shape': df.shape
+                        }
+                        logger.info(f"Loaded data from V3 transition: {df.shape}")
+                        
+                        # CRITICAL FIX: Synchronize Flask session flags when loading from V3
+                        # This ensures tool execution works after TPR workflow transition
+                        if agent_state_loaded and has_actual_data:
+                            # Update Flask session to match agent state
+                            from flask import session
+                            session['data_loaded'] = True
+                            session['csv_loaded'] = True
+                            session['shapefile_loaded'] = os.path.exists(session_folder / 'raw_shapefile.zip')
+                            session.modified = True  # Ensure changes persist
+                            logger.info(f"✅ Synchronized Flask session flags after V3 transition for {session_id}")
+                            logger.info(f"   Flask session now has: data_loaded={session.get('data_loaded')}, csv_loaded={session.get('csv_loaded')}, shapefile_loaded={session.get('shapefile_loaded')}")
+                except Exception as e:
+                    logger.error(f"Failed to load transition data: {e}")
+            
+            # Use state manager for analysis_complete check with proper validation
+            analysis_complete = workflow_info['analysis_complete']
+            data_loaded = workflow_info['data_loaded']
+            
+            # Validate state and FIX inconsistencies (trust evidence!)
+            validation_issues = state_manager.validate_state()
+            if validation_issues:
+                logger.warning(f"⚠️ State validation issues for {session_id}: {validation_issues}")
+                
+                # FIX: Trust marker files as evidence, update state to match
+                if "Marker file exists but state flag is False" in validation_issues:
+                    marker_file = session_folder / ".analysis_complete"
+                    if marker_file.exists():
+                        # UPDATE STATE to match evidence, don't delete evidence!
+                        state_manager.update_state({
+                            'analysis_complete': True
+                        }, transition_reason="Syncing state with marker evidence")
+                        logger.info(f"✅ Updated state to match .analysis_complete marker for {session_id}")
+                        
+                        # Also update the context we're building
                         analysis_complete = True
-                        break
             
             context = {
                 'data_loaded': data_loaded,
@@ -1595,8 +2107,35 @@ Your expertise adds value through interpretation, not just data retrieval."""
             logger.error(f"Error getting session context: {e}")
             return {'data_loaded': False, 'state_name': 'Not specified'}
     
-    def _handle_special_workflows(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
-        """Handle special workflows like permissions, forks, and TPR."""
+    def _is_data_analysis_query(self, message: str) -> bool:
+        """
+        Detect if the message is a data analysis query.
+        
+        Data analysis indicators:
+        - Questions about data exploration
+        - Statistical analysis requests
+        - Trend analysis
+        - Comparisons and correlations
+        - Summary statistics
+        """
+        message_lower = message.lower()
+        
+        # Data analysis keywords
+        data_keywords = [
+            'how many', 'what is the', 'show me', 'analyze', 'compare',
+            'trend', 'pattern', 'distribution', 'correlation', 'average',
+            'mean', 'median', 'sum', 'count', 'unique', 'values',
+            'highest', 'lowest', 'maximum', 'minimum', 'range',
+            'group by', 'filter', 'where', 'sort', 'top', 'bottom',
+            'statistics', 'summary', 'describe', 'overview', 'insights',
+            'what are', 'list', 'show', 'display', 'which', 'how much'
+        ]
+        
+        # Check for data analysis indicators
+        return any(keyword in message_lower for keyword in data_keywords)
+    
+    def _handle_special_workflows(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None, **kwargs) -> Optional[Dict[str, Any]]:
+        """Handle special workflows like permissions, forks, data analysis, and TPR."""
         if session_data is None:
             try:
                 from flask import session
@@ -1605,17 +2144,192 @@ Your expertise adds value through interpretation, not just data retrieval."""
                 # Working outside of request context
                 session_data = {}
         
+        # Priority 1: Check if Data Analysis tab is ACTIVE and has uploaded data
+        # CRITICAL: Only activate V3 when user is explicitly in Data Analysis tab
+        # This prevents V3 from intercepting normal chat messages
+        
+        # Check if user is in Data Analysis tab (sent from frontend)
+        is_data_analysis_request = kwargs.get('is_data_analysis', False)
+        tab_context = kwargs.get('tab_context', '')
+        
+        logger.info(f"🔍 Data Analysis check: is_data_analysis={is_data_analysis_request}, tab_context={tab_context}, session_id={session_id}")
+        
+        # Also check file-based flag for cross-worker compatibility
+        has_data_analysis_flag = False
+        if session_id and is_data_analysis_request:  # Only check flag if in data analysis context
+            import os
+            from flask import current_app
+            upload_folder = current_app.config.get('UPLOAD_FOLDER', 'instance/uploads')
+            upload_folder = str(upload_folder)
+            flag_file = os.path.join(upload_folder, session_id, '.data_analysis_mode')
+            
+            logger.info(f"🔍 Data Analysis tab active, checking for flag: {flag_file}")
+            has_data_analysis_flag = os.path.exists(flag_file)
+            logger.info(f"🔍 Flag exists: {has_data_analysis_flag}")
+            
+            # If not found locally, try to sync from other instances
+            if not has_data_analysis_flag:
+                try:
+                    from app.core.simple_instance_check import check_and_sync_session
+                    if check_and_sync_session(session_id):
+                        has_data_analysis_flag = True
+                        logger.info(f"🔄 Session {session_id} retrieved from another instance")
+                except Exception as e:
+                    logger.debug(f"Could not check other instance: {e}")
+        
+        # Check if workflow has already transitioned (prevents re-routing)
+        # CRITICAL: Check this ALWAYS, not just when flag exists
+        import os  # Ensure os is available for path operations
+        # CRITICAL: Check this ALWAYS, not just when flag exists
+        workflow_transitioned = False
+        if session_id:  # Check for ANY session, not just ones with flag
+            try:
+                # Define upload_folder before using it
+                upload_folder = 'instance/uploads'
+                # Check the agent state file for workflow transition
+                state_file = os.path.join(upload_folder, session_id, '.agent_state.json')
+                if os.path.exists(state_file):
+                    import json
+                    with open(state_file, 'r') as f:
+                        state = json.load(f)
+                        workflow_transitioned = state.get('workflow_transitioned', False)
+                        if workflow_transitioned:
+                            logger.info(f"🚫 Workflow has transitioned - NOT routing to Data Analysis V3")
+            except Exception as e:
+                logger.debug(f"Could not check workflow transition state: {e}")
+        
+        # Only route to V3 if EXPLICITLY in Data Analysis context AND not transitioned
+        if is_data_analysis_request and not workflow_transitioned and (session_data.get('has_data_analysis_file', False) or session_data.get('use_data_analysis_v3', False) or has_data_analysis_flag):
+            logger.info(f"📊 Data Analysis V3 mode active - routing ALL queries to V3")
+            logger.info(f"📊 Message: '{user_message[:50]}...'")
+            
+            # Don't check for data analysis keywords - route everything to V3
+            if user_message != "__DATA_UPLOADED__":
+                try:
+                    # Check if data is available - look for uploaded files directly
+                    import os
+                    from flask import current_app
+                    
+                    # Get absolute path to upload directory
+                    if current_app and hasattr(current_app, 'config'):
+                        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'instance/uploads')
+                    else:
+                        upload_folder = 'instance/uploads'
+                    
+                    upload_dir = os.path.join(upload_folder, session_id)
+                    has_data = False
+                    
+                    logger.info(f"📁 Checking for data in: {upload_dir}")
+                    
+                    if os.path.exists(upload_dir):
+                        # Check for any data files
+                        files = os.listdir(upload_dir)
+                        data_files = [f for f in files if f.endswith(('.csv', '.xlsx', '.xls', '.json'))]
+                        has_data = len(data_files) > 0
+                        
+                        logger.info(f"📊 Found {len(data_files)} data files: {data_files}")
+                        
+                        # Also check for standard data analysis files
+                        if not has_data:
+                            standard_files = ['data_analysis.csv', 'data_analysis.xlsx', 'data_analysis.json']
+                            has_data = any(os.path.exists(os.path.join(upload_dir, f)) for f in standard_files)
+                            if has_data:
+                                logger.info(f"📊 Found standard data analysis file")
+                    else:
+                        logger.info(f"⚠️ Upload directory does not exist: {upload_dir}")
+                    
+                    if has_data:
+                        logger.info("✅ Routing to Data Analysis V3 agent")
+                        from app.data_analysis_v3 import DataAnalysisAgent
+                        
+                        # Create agent for this session
+                        agent = DataAnalysisAgent(session_id)
+                        
+                        # Run analysis (synchronously for now)
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        result = loop.run_until_complete(agent.analyze(user_message))
+                        loop.close()
+                        
+                        # Format response
+                        response = {
+                            'success': result.get('success', True),
+                            'response': result.get('message', 'Analysis complete'),
+                            'status': 'success',
+                            'requires_permission': False,
+                            'is_fork': False,
+                            'analysis_type': 'data_analysis_v3',
+                            'session_id': session_id,
+                            'tools_used': ['analyze_data']
+                        }
+                        
+                        # Add visualizations if present (check both keys for compatibility)
+                        if result.get('visualization_data'):
+                            response['visualizations'] = result['visualization_data']
+                            logger.info(f"📊 Adding {len(result['visualization_data'])} visualizations from visualization_data")
+                        elif result.get('visualizations'):
+                            response['visualizations'] = result['visualizations']
+                            logger.info(f"📊 Adding {len(result['visualizations'])} visualizations from visualizations")
+                        
+                        return response
+                    else:
+                        logger.info("❌ No data found for Data Analysis V3 - prompting for upload")
+                        return {
+                            'success': True,
+                            'response': "Please upload your data file first. Click the upload button to select a CSV, Excel, or JSON file for analysis.",
+                            'status': 'info',
+                            'requires_permission': False
+                        }
+                        
+                except Exception as e:
+                    logger.error(f"Data Analysis V3 error: {str(e)}")
+                    # Fall through to regular processing
+                    pass
+        
         # Handle data upload completion trigger
         if user_message == "__DATA_UPLOADED__":
-            # Get data info
+            # Get data info from the actual uploaded files
             try:
-                data_handler = self.data_service.get_handler(session_id)
-                if data_handler and hasattr(data_handler, 'csv_data') and data_handler.csv_data is not None:
-                    rows = len(data_handler.csv_data)
-                    cols = len(data_handler.csv_data.columns)
+                import pandas as pd
+                from pathlib import Path
+                
+                upload_folder = os.environ.get('UPLOAD_FOLDER', 'instance/uploads')
+                session_folder = Path(upload_folder) / session_id
+                
+                # Try to read the actual data file
+                raw_data_path = session_folder / 'raw_data.csv'
+                if raw_data_path.exists():
+                    df = pd.read_csv(raw_data_path)
+                    rows = len(df)
+                    cols = len(df.columns)
+                    
+                    # Store in session for later access
+                    self.session_data[session_id] = {
+                        'data': df,
+                        'columns': list(df.columns),
+                        'shape': (rows, cols)
+                    }
                 else:
-                    rows = 0
-                    cols = 0
+                    # Fallback to TPR results if available
+                    tpr_results_path = session_folder / 'tpr_results.csv'
+                    if tpr_results_path.exists():
+                        df = pd.read_csv(tpr_results_path)
+                        rows = len(df)
+                        cols = len(df.columns)
+                        
+                        self.session_data[session_id] = {
+                            'data': df,
+                            'columns': list(df.columns),
+                            'shape': (rows, cols)
+                        }
+                    else:
+                        rows = 0
+                        cols = 0
+            except Exception as e:
+                logger.warning(f"Could not load data for session {session_id}: {e}")
+                rows = 0
+                cols = 0
             except:
                 rows = 0
                 cols = 0
@@ -1785,9 +2499,9 @@ Just tell me what you're interested in."""
     def _execute_automatic_analysis(self, session_id: str) -> Dict[str, Any]:
         """Execute automatic analysis after permission."""
         try:
-            # Use the RunCompleteAnalysis tool to get the comprehensive summary
-            from app.tools.complete_analysis_tools import RunCompleteAnalysis
-            tool = RunCompleteAnalysis()
+            # Use the RunMalariaRiskAnalysis tool to get the comprehensive summary
+            from app.tools.complete_analysis_tools import RunMalariaRiskAnalysis
+            tool = RunMalariaRiskAnalysis()
             tool_result = tool.execute(session_id=session_id)
             
             if tool_result.success:

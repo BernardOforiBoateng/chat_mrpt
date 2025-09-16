@@ -18,6 +18,7 @@ from .state import DataAnalysisState
 from ..tools.python_tool import analyze_data, get_data_summary
 from ..prompts.system_prompt import MAIN_SYSTEM_PROMPT, get_error_handling_prompt
 from ..formatters.response_formatter import format_analysis_response
+from .encoding_handler import EncodingHandler
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +139,9 @@ class DataAnalysisAgent:
                     import os
                     if data_path and os.path.exists(data_path):
                         if data_path.endswith('.csv'):
-                            df_full = pd.read_csv(data_path)  # Read FULL data
+                            df_full = EncodingHandler.read_csv_with_encoding(data_path)
                         else:
-                            df_full = pd.read_excel(data_path)  # Read FULL data
+                            df_full = EncodingHandler.read_excel_with_encoding(data_path)
                         
                         cols = list(df_full.columns)
                         actual_rows = len(df_full)
@@ -272,9 +273,9 @@ class DataAnalysisAgent:
             data_file = max(data_files, key=os.path.getctime)
             
             if data_file.endswith('.csv'):
-                df = pd.read_csv(data_file)
+                df = EncodingHandler.read_csv_with_encoding(data_file)
             else:
-                df = pd.read_excel(data_file)
+                df = EncodingHandler.read_excel_with_encoding(data_file)
             
             # Store the data for later use
             self.uploaded_data = df
@@ -395,11 +396,234 @@ Just let me know what you'd like to do next."""
         
         return has_confirmation
     
+    def _is_general_conversation(self, query: str) -> bool:
+        """Check if query is general conversation that doesn't need data."""
+        general_phrases = [
+            'who are you', 'what are you', 'tell me about yourself',
+            'hello', 'hi', 'hey', 'good morning', 'good afternoon',
+            'thank you', 'thanks', 'bye', 'goodbye', 'help',
+            'what can you do', 'how do you work', 'introduce yourself'
+        ]
+        query_lower = query.lower().strip()
+        return any(phrase in query_lower for phrase in general_phrases)
+    
+    def _is_knowledge_question(self, query: str) -> bool:
+        """Check if query is about malaria knowledge (no data needed)."""
+        knowledge_phrases = [
+            'what is malaria', 'malaria prevention', 'malaria symptoms',
+            'malaria statistics', 'malaria deaths', 'mosquito',
+            'plasmodium', 'endemic', 'epidemiology', 'transmission'
+        ]
+        query_lower = query.lower().strip()
+        return any(phrase in query_lower for phrase in knowledge_phrases)
+    
+    def _handle_general_conversation(self, query: str) -> Dict[str, Any]:
+        """Handle general conversation without requiring data."""
+        query_lower = query.lower().strip()
+        
+        # Specific responses for common queries
+        if 'who are you' in query_lower or 'what are you' in query_lower:
+            response = "I'm ChatMRPT's Data Analysis assistant. I specialize in analyzing malaria-related health data, calculating TPR (Test Positivity Rates), and providing insights for intervention planning. I can help you explore patterns in your data and generate actionable recommendations."
+        elif 'hello' in query_lower or 'hi' in query_lower:
+            response = "Hello! I'm here to help you analyze malaria data. You can upload a CSV or Excel file to get started, or ask me general questions about malaria epidemiology."
+        elif 'help' in query_lower or 'what can you do' in query_lower:
+            response = """I can help you with:
+
+📊 **Data Analysis**
+• Calculate TPR (Test Positivity Rate) by age groups and facilities
+• Explore patterns and trends in your health data
+• Generate visualizations and insights
+• Identify high-risk areas and populations
+
+🧬 **Malaria Knowledge**
+• Answer questions about malaria epidemiology
+• Provide WHO statistics and guidelines
+• Explain prevention and control strategies
+
+To start analyzing data, just upload your CSV or Excel file!"""
+        elif 'thank' in query_lower:
+            response = "You're welcome! Let me know if you need help with data analysis or have questions about malaria."
+        elif 'bye' in query_lower or 'goodbye' in query_lower:
+            response = "Goodbye! Feel free to return anytime you need help with malaria data analysis."
+        else:
+            # Default friendly response
+            response = "I'm ChatMRPT's Data Analysis assistant. I can help you analyze malaria-related health data or answer questions about malaria epidemiology. Would you like to upload some data to analyze, or do you have a general question?"
+        
+        return {
+            "success": True,
+            "message": response,
+            "session_id": self.session_id
+        }
+    
+    def _handle_knowledge_question(self, query: str) -> Dict[str, Any]:
+        """Handle malaria knowledge questions without requiring data."""
+        query_lower = query.lower().strip()
+        
+        if 'what is malaria' in query_lower:
+            response = """Malaria is a life-threatening disease caused by Plasmodium parasites transmitted through the bites of infected female Anopheles mosquitoes. 
+
+Key facts:
+• It's preventable and treatable
+• In 2022, there were ~249 million cases worldwide
+• ~608,000 malaria deaths globally
+• Africa carries 94% of the malaria burden
+• Children under 5 are most vulnerable
+
+Main symptoms include fever, headache, and chills, typically appearing 10-15 days after infection."""
+        elif 'prevention' in query_lower:
+            response = """Key malaria prevention strategies include:
+
+🧴 **Vector Control**
+• ITNs (Insecticide-Treated Nets) - most cost-effective
+• IRS (Indoor Residual Spraying)
+• Larval source management
+
+💊 **Chemoprevention**
+• SMC (Seasonal Malaria Chemoprevention) for children
+• IPTp (Intermittent Preventive Treatment) in pregnancy
+
+💉 **Vaccines**
+• RTS,S/AS01 vaccine for children in high-burden areas
+• R21/Matrix-M recently approved
+
+Combining multiple strategies provides the best protection."""
+        elif 'symptoms' in query_lower:
+            response = """Common malaria symptoms include:
+
+**Early symptoms (10-15 days after infection):**
+• Fever and chills
+• Headache
+• Muscle aches
+• Fatigue
+• Nausea and vomiting
+
+**Severe malaria signs:**
+• Impaired consciousness
+• Respiratory distress
+• Multiple convulsions
+• Prostration
+• Abnormal bleeding
+
+Severe malaria is a medical emergency requiring immediate treatment."""
+        else:
+            # General malaria information
+            response = "I can provide information about malaria epidemiology, prevention strategies, symptoms, and global statistics. Please ask a specific question, or upload your data if you'd like to perform analysis."
+        
+        return {
+            "success": True,
+            "message": response,
+            "session_id": self.session_id
+        }
+    
     async def analyze(self, user_query: str) -> Dict[str, Any]:
         """
         Main entry point for analysis requests.
         Based on AgenticDataAnalysis user_sent_message method.
         """
+        # Check if this is a general conversation that doesn't need data
+        if self._is_general_conversation(user_query):
+            logger.info(f"Handling general conversation: {user_query[:50]}...")
+            return self._handle_general_conversation(user_query)
+        
+        # Check if this is a malaria knowledge question
+        if self._is_knowledge_question(user_query):
+            logger.info(f"Handling knowledge question: {user_query[:50]}...")
+            return self._handle_knowledge_question(user_query)
+        
+        # CRITICAL: Check if TPR workflow is active FIRST
+        from app.data_analysis_v3.core.state_manager import DataAnalysisStateManager as StateManager
+        from app.data_analysis_v3.core.tpr_workflow_handler import TPRWorkflowHandler
+        from app.data_analysis_v3.core.tpr_data_analyzer import TPRDataAnalyzer
+        import pandas as pd
+        import os
+        
+        state_manager = StateManager(self.session_id)
+        
+        # Check if we're in an active TPR workflow
+        if state_manager.is_tpr_workflow_active():
+            logger.info(f"TPR workflow active for session {self.session_id}, routing to handler")
+            tpr_analyzer = TPRDataAnalyzer()
+            tpr_handler = TPRWorkflowHandler(self.session_id, state_manager, tpr_analyzer)
+            
+            # CRITICAL: Restore the current workflow stage from state manager
+            current_stage = state_manager.get_workflow_stage()
+            tpr_handler.current_stage = current_stage
+            logger.info(f"Restored TPR workflow stage: {current_stage}")
+            
+            # Also restore TPR selections
+            state = state_manager.get_state()
+            if 'tpr_selections' in state:
+                tpr_handler.tpr_selections = state['tpr_selections']
+                logger.info(f"Restored TPR selections: {tpr_handler.tpr_selections}")
+            
+            # Load data if not already loaded
+            if not hasattr(tpr_handler, 'uploaded_data') or tpr_handler.uploaded_data is None:
+                data_dir = f"instance/uploads/{self.session_id}"
+                data_file = None
+                for file in os.listdir(data_dir):
+                    if file.endswith(('.csv', '.xlsx')):
+                        data_file = os.path.join(data_dir, file)
+                        break
+                if data_file:
+                    data = EncodingHandler.read_csv_with_encoding(data_file) if data_file.endswith('.csv') else EncodingHandler.read_excel_with_encoding(data_file)
+                    tpr_handler.set_data(data)
+            
+            # Handle the workflow message
+            logger.info(f"🔴 DEBUG: About to call handle_workflow with query='{user_query}', stage={current_stage}")
+            result = tpr_handler.handle_workflow(user_query)
+            logger.info(f"🔴 DEBUG: handle_workflow returned: success={result.get('success') if result else None}, has_message={bool(result.get('message')) if result else False}")
+            if result:
+                # Log first 200 chars of message to see what's being returned
+                msg_preview = result.get('message', '')[:200] if result.get('message') else 'No message'
+                logger.info(f"🔴 DEBUG: Returning result with message preview: {msg_preview}")
+                
+                # CRITICAL: If we're waiting for user input (age selection), don't continue!
+                if result.get('stage') == 'age_selection' or result.get('require_input'):
+                    logger.info("🔴 DEBUG: TPR waiting for age selection - returning without further processing")
+                    return result
+                    
+                return result
+        
+        # Check if user selected option 2 (TPR workflow)
+        if user_query.strip() == "2":
+            logger.info("User selected option 2 - starting TPR calculation workflow")
+            # Start the TPR workflow properly - calculate TPR first, THEN proceed to risk
+            # Already imported above
+            tpr_analyzer = TPRDataAnalyzer()  # No session_id parameter
+            tpr_handler = TPRWorkflowHandler(self.session_id, state_manager, tpr_analyzer)
+            
+            # Load the uploaded data for TPR workflow
+            data_dir = f"instance/uploads/{self.session_id}"
+            data_file = None
+            for file in os.listdir(data_dir):
+                if file.endswith(('.csv', '.xlsx')):
+                    data_file = os.path.join(data_dir, file)
+                    break
+            
+            if data_file:
+                try:
+                    data = EncodingHandler.read_csv_with_encoding(data_file) if data_file.endswith('.csv') else EncodingHandler.read_excel_with_encoding(data_file)
+                    tpr_handler.set_data(data)
+                    logger.info(f"Loaded data for TPR: {len(data)} rows")
+                    
+                    # Start the TPR workflow
+                    result = tpr_handler.start_workflow()
+                    return result
+                except Exception as e:
+                    logger.error(f"Failed to load data for TPR: {e}")
+                    return {
+                        "success": False,
+                        "message": "Failed to load data for TPR analysis. Please try again.",
+                        "session_id": self.session_id
+                    }
+            else:
+                # More helpful message when no data is found
+                return {
+                    "success": True,
+                    "message": "I'm ready to help you analyze malaria data! Please upload a CSV or Excel file with your health data, and I can help you:\n\n• Calculate TPR (Test Positivity Rate)\n• Explore patterns and trends\n• Generate visualizations\n• Provide actionable insights\n\nClick the upload button above to get started.",
+                    "session_id": self.session_id
+                }
+        
         # Check for TPR transition confirmation first
         transition_response = self._check_tpr_transition(user_query)
         if transition_response:

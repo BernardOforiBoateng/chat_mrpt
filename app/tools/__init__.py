@@ -170,9 +170,7 @@ from .settlement_intervention_tools import (
 
 # Complete Analysis Tools - Coordinated Dual-Method Workflow
 from .complete_analysis_tools import (
-    RunCompleteAnalysis,
-    RunCompositeAnalysis,
-    RunPCAAnalysis,
+    RunMalariaRiskAnalysis,
     GenerateComprehensiveAnalysisSummary
 )
 
@@ -326,9 +324,7 @@ def _build_minimal_registry():
     
     # Include essential tools for basic functionality AND analysis tools
     essential_tools = [
-        'run_complete_analysis',
-        'run_composite_analysis', 
-        'run_pca_analysis',
+        'run_malaria_risk_analysis',
         'createvulnerabilitymap',
         'createpcamap',
         'createboxplot',

@@ -10,6 +10,7 @@ import logging
 import os
 import zipfile
 import shutil
+import re
 import geopandas as gpd
 import pandas as pd
 from typing import Dict, List, Optional, Tuple, Any
@@ -139,34 +140,131 @@ class ShapefileFetcher:
         return None
     
     def _create_shapefile_from_areas(self, areas: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Create a shapefile from the list of areas"""
+        """Create a shapefile from the list of areas using Nigeria master shapefile"""
         try:
+            # First try to load from Nigeria master shapefile
+            master_shapefile_path = 'www/complete_names_wards/wards.shp'
+            
+            if os.path.exists(master_shapefile_path):
+                logger.info(f"Loading Nigeria master shapefile from {master_shapefile_path}")
+                
+                # Load master shapefile
+                master_gdf = gpd.read_file(master_shapefile_path)
+                
+                # Extract unique states from areas
+                states_needed = list(set(area['state'] for area in areas))
+                
+                # Clean state names for matching
+                clean_states = []
+                for state in states_needed:
+                    # Remove prefixes like 'ad ', 'kw ', 'os '
+                    clean_state = re.sub(r'^[a-z]{2}\s+', '', state, flags=re.IGNORECASE)
+                    clean_state = clean_state.replace(' State', '').strip()
+                    clean_states.append(clean_state)
+                
+                # Filter master shapefile to needed states
+                filtered_gdf = master_gdf[master_gdf['StateName'].isin(clean_states)]
+                
+                if filtered_gdf.empty:
+                    # Try case-insensitive match
+                    filtered_gdf = master_gdf[master_gdf['StateName'].str.lower().isin([s.lower() for s in clean_states])]
+                
+                if not filtered_gdf.empty:
+                    logger.info(f"Found {len(filtered_gdf)} wards from master shapefile for states: {clean_states}")
+                    
+                    # Normalize ward names for matching
+                    def normalize_ward_name(name):
+                        if pd.isna(name):
+                            return ''
+                        name = str(name).strip()
+                        name = re.sub(r'^[a-z]{2}\s+', '', name, flags=re.IGNORECASE)
+                        name = re.sub(r'\s+Ward$', '', name, flags=re.IGNORECASE)
+                        return name.lower()
+                    
+                    # Create lookup for areas
+                    area_lookup = {}
+                    for area in areas:
+                        ward_norm = normalize_ward_name(area.get('ward', ''))
+                        lga_norm = area.get('lga', '').lower()
+                        state_norm = area.get('state', '').lower()
+                        key = f"{state_norm}_{lga_norm}_{ward_norm}"
+                        area_lookup[key] = area
+                    
+                    # Match shapefile wards with areas
+                    matched_rows = []
+                    for idx, row in filtered_gdf.iterrows():
+                        ward_norm = normalize_ward_name(row.get('WardName', ''))
+                        lga_norm = str(row.get('LGAName', '')).lower()
+                        state_norm = str(row.get('StateName', '')).lower()
+                        key = f"{state_norm}_{lga_norm}_{ward_norm}"
+                        
+                        if key in area_lookup:
+                            # Add area data to shapefile row
+                            new_row = row.copy()
+                            for k, v in area_lookup[key].items():
+                                new_row[k] = v
+                            matched_rows.append(new_row)
+                    
+                    if matched_rows:
+                        result_gdf = gpd.GeoDataFrame(matched_rows, crs=filtered_gdf.crs)
+                        
+                        # Save as shapefile
+                        temp_dir = os.path.join(self.cache_dir, 'temp_shapefile')
+                        os.makedirs(temp_dir, exist_ok=True)
+                        
+                        shapefile_path = os.path.join(temp_dir, 'ward_boundaries')
+                        result_gdf.to_file(shapefile_path)
+                        
+                        # Create ZIP file
+                        zip_path = os.path.join(self.cache_dir, 'extracted_boundaries.zip')
+                        with zipfile.ZipFile(zip_path, 'w') as zipf:
+                            for root, dirs, files in os.walk(temp_dir):
+                                for file in files:
+                                    file_path = os.path.join(root, file)
+                                    arcname = os.path.relpath(file_path, temp_dir)
+                                    zipf.write(file_path, arcname)
+                        
+                        # Clean up temp directory
+                        shutil.rmtree(temp_dir)
+                        
+                        logger.info(f"Created shapefile from master: {zip_path}")
+                        
+                        return {
+                            'status': 'success',
+                            'source': 'nigeria_master',
+                            'path': zip_path,
+                            'states': states_needed,
+                            'format': 'shapefile_zip',
+                            'matched_wards': len(matched_rows),
+                            'total_requested': len(areas)
+                        }
+            
+            # Fallback to placeholder generation if master shapefile not available
+            logger.warning("Master shapefile not found, creating placeholder geometries")
+            
             # Create a temporary directory for the shapefile
             temp_dir = os.path.join(self.cache_dir, 'temp_shapefile')
             os.makedirs(temp_dir, exist_ok=True)
             
-            # Create point geometries for each ward (as placeholders)
-            # In a real implementation, we would fetch actual boundaries
             from shapely.geometry import Point, Polygon
             import random
             
             geometries = []
             for area in areas:
                 # Generate placeholder coordinates based on state
-                # These are approximate center points for each state
                 state_centers = {
                     'Adamawa': (12.5, 9.3),
                     'Kwara': (4.5, 8.5),
-                    'Osun': (4.5, 7.5)
+                    'Osun': (4.5, 7.5),
+                    'Kano': (8.5, 12.0)
                 }
                 
-                if area['state'] in state_centers:
-                    lon, lat = state_centers[area['state']]
-                    # Add some random offset for different wards
+                state_key = area['state'].replace(' State', '').strip()
+                if state_key in state_centers:
+                    lon, lat = state_centers[state_key]
                     lon += random.uniform(-0.5, 0.5)
                     lat += random.uniform(-0.5, 0.5)
                     
-                    # Create a small polygon around the point (0.01 degree square)
                     polygon = Polygon([
                         (lon - 0.005, lat - 0.005),
                         (lon + 0.005, lat - 0.005),
@@ -197,7 +295,7 @@ class ShapefileFetcher:
             # Clean up temp directory
             shutil.rmtree(temp_dir)
             
-            logger.info(f"Generated shapefile: {zip_path}")
+            logger.info(f"Generated placeholder shapefile: {zip_path}")
             
             return {
                 'status': 'success',
@@ -205,7 +303,7 @@ class ShapefileFetcher:
                 'path': zip_path,
                 'states': list(set(area['state'] for area in areas)),
                 'format': 'shapefile_zip',
-                'message': 'Generated placeholder boundaries - replace with actual boundaries for production'
+                'message': 'Using placeholder boundaries - master shapefile not found'
             }
             
         except Exception as e:

@@ -14,7 +14,7 @@ import uuid
 import logging
 import time
 import traceback
-from flask import Blueprint, render_template, session, request, current_app, jsonify
+from flask import Blueprint, render_template, session, request, current_app, jsonify, send_from_directory
 from datetime import datetime
 
 from ...core.decorators import handle_errors, log_execution_time, validate_session
@@ -185,18 +185,40 @@ def index():
     # Request interpreter handles tool registration directly
     logger.info(f"Session {session['session_id']} initialized with py-sidebot pattern")
     
-    # Check for UI preference
-    use_tailwind = request.args.get('use_tailwind', 'false').lower() == 'true'
+    # Serve the React app
+    logger.info(f"Serving React app for session {session['session_id']}")
     
-    # Select template based on preference
-    if use_tailwind:
-        template_name = 'index_tailwind.html'
-    else:
-        template_name = 'index.html'
-    
-    logger.info(f"Rendering {template_name} for session {session['session_id']}")
-    
-    return render_template(template_name)
+    # Send the React index.html from the static/react directory
+    return send_from_directory(os.path.join(current_app.static_folder, 'react'), 'index.html')
+
+
+# Serve React app assets (JS, CSS, etc.)
+@core_bp.route('/assets/<path:filename>')
+def serve_react_assets(filename):
+    """Serve React build assets."""
+    return send_from_directory(os.path.join(current_app.static_folder, 'react', 'assets'), filename)
+
+
+# Stable version routes (backup of current working state)
+@core_bp.route('/stable')
+@core_bp.route('/stable/')
+def stable_index():
+    """Serve the stable version of the React app."""
+    logger.info(f"Serving stable React app for session {session.get('session_id', 'unknown')}")
+    return send_from_directory(os.path.join(current_app.static_folder, 'react-stable'), 'index.html')
+
+
+@core_bp.route('/stable/assets/<path:filename>')
+def serve_stable_assets(filename):
+    """Serve stable React build assets."""
+    return send_from_directory(os.path.join(current_app.static_folder, 'react-stable', 'assets'), filename)
+
+
+# Serve vite.svg favicon
+@core_bp.route('/vite.svg')
+def serve_vite_svg():
+    """Serve Vite logo."""
+    return send_from_directory(os.path.join(current_app.static_folder, 'react'), 'vite.svg')
 
 
 @core_bp.route('/session_info')

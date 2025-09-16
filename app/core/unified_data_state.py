@@ -61,6 +61,12 @@ class UnifiedDataState:
             self._data_loaded = True
             logger.info(f"Raw data available for session {self.session_id}")
         
+        # Check for analysis completion marker (most reliable)
+        marker_file = self.session_folder / ".analysis_complete"
+        if marker_file.exists():
+            self._analysis_complete = True
+            logger.info(f"Analysis complete marker found for session {self.session_id}")
+        
         # Check for unified dataset (indicates analysis complete)
         unified_files = [
             self.session_folder / "unified_dataset.geoparquet",
@@ -71,6 +77,19 @@ class UnifiedDataState:
         if any(f.exists() for f in unified_files):
             self._analysis_complete = True
             logger.info(f"Analysis complete for session {self.session_id} - unified dataset available")
+        
+        # Also check for analysis result files
+        analysis_result_files = [
+            self.session_folder / "analysis_composite_scores.csv",
+            self.session_folder / "analysis_vulnerability_rankings.csv",
+            self.session_folder / "composite_scores.csv",
+            self.session_folder / "analysis_results_composite.csv",
+            self.session_folder / "analysis_results_pca.csv"
+        ]
+        
+        if any(f.exists() for f in analysis_result_files):
+            self._analysis_complete = True
+            logger.info(f"Analysis complete for session {self.session_id} - analysis result files found")
     
     @property
     def current_data(self) -> Optional[pd.DataFrame]:
@@ -116,16 +135,28 @@ class UnifiedDataState:
             # Try processed data first
             processed_csv = self.session_folder / "processed_data.csv"
             if processed_csv.exists():
-                self._raw_data = pd.read_csv(processed_csv)
-                logger.info(f"Loaded processed data: {self._raw_data.shape}")
-                return
+                try:
+                    self._raw_data = pd.read_csv(processed_csv)
+                    logger.info(f"Loaded processed data: {self._raw_data.shape}")
+                    return
+                except UnicodeDecodeError:
+                    # Might be Excel file with .csv extension
+                    self._raw_data = pd.read_excel(processed_csv)
+                    logger.info(f"Loaded processed data as Excel: {self._raw_data.shape}")
+                    return
             
             # Fall back to raw data
             raw_csv = self.session_folder / "raw_data.csv"
             if raw_csv.exists():
-                self._raw_data = pd.read_csv(raw_csv)
-                logger.info(f"Loaded raw data: {self._raw_data.shape}")
-                return
+                try:
+                    self._raw_data = pd.read_csv(raw_csv)
+                    logger.info(f"Loaded raw data: {self._raw_data.shape}")
+                    return
+                except UnicodeDecodeError:
+                    # Might be Excel file with .csv extension (TPR files)
+                    self._raw_data = pd.read_excel(raw_csv)
+                    logger.info(f"Loaded raw data as Excel: {self._raw_data.shape}")
+                    return
                 
         except Exception as e:
             logger.error(f"Error loading raw data: {e}")

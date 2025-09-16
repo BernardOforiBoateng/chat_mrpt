@@ -26,18 +26,23 @@ class LLMManager:
     
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o", interaction_logger=None):
         """Initialize pure LLM manager."""
+        import os
+        # Use OpenAI for proper function calling support
         self.api_key = api_key or self._get_api_key_from_config()
         self.model = model
         self.interaction_logger = interaction_logger
         self.client = None
         
-        if self.api_key:
-            try:
+        try:
+            if self.api_key:
                 self.client = openai.OpenAI(api_key=self.api_key)
-                logger.info(f"🧠 Pure LLM Manager initialized with {self.model}")
-            except Exception as e:
-                logger.error(f"Error initializing OpenAI client: {str(e)}")
+                logger.info(f"🧠 Pure LLM Manager initialized with {self.model} (OpenAI)")
+            else:
+                logger.warning("No OpenAI API key found - will try to get from config later")
                 self.client = None
+        except Exception as e:
+            logger.error(f"Error initializing OpenAI client: {str(e)}")
+            self.client = None
     
     def _get_api_key_from_config(self) -> Optional[str]:
         """Get API key from Flask config."""
@@ -482,26 +487,22 @@ STYLE: Clear, professional, friendly. Provide direct explanations for "what is" 
                 stream=True
             )
             
-            # FIXED: Sentence-based chunking instead of word-by-word
+            # Simple streaming - just pass through what OpenAI sends
             collected_content = ""
-            sentence_buffer = ""
             tool_calls_accumulator = {}
             
             for chunk in response:
-                # Collect content
+                # Stream content directly as it arrives from OpenAI
                 if chunk.choices[0].delta.content:
-                    collected_content += chunk.choices[0].delta.content
-                    sentence_buffer += chunk.choices[0].delta.content
+                    chunk_content = chunk.choices[0].delta.content
+                    collected_content += chunk_content
                     
-                    # FIXED: Send complete sentences/paragraphs, not individual words
-                    # Check for sentence endings or double newlines (paragraph breaks)
-                    if any(ending in sentence_buffer for ending in ['. ', '.\n', '!\n', '?\n', '\n\n']):
-                        yield {
-                            'content': sentence_buffer,
-                            'function_call': None,
-                            'done': False
-                        }
-                        sentence_buffer = ""
+                    # Simply yield each chunk immediately
+                    yield {
+                        'content': chunk_content,
+                        'function_call': None,
+                        'done': False
+                    }
                 
                 # Properly accumulate tool calls
                 if chunk.choices[0].delta.tool_calls:
@@ -530,13 +531,7 @@ STYLE: Clear, professional, friendly. Provide direct explanations for "what is" 
                             if hasattr(tool_call_chunk.function, 'arguments') and tool_call_chunk.function.arguments:
                                 tool_calls_accumulator[idx]['function']['arguments'] += tool_call_chunk.function.arguments
             
-            # Send any remaining content
-            if sentence_buffer.strip():
-                yield {
-                    'content': sentence_buffer,
-                    'function_call': None,
-                    'done': False
-                }
+            # No need to check for remaining content - we stream everything immediately
             
             # Handle tool calls if present
             if tool_calls_accumulator:

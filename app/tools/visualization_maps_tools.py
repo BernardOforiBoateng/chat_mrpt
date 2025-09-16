@@ -17,6 +17,7 @@ app/services/agents/visualizations/pca_visualizations.py
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional, List
 from pydantic import Field, validator
 import pandas as pd
@@ -79,6 +80,25 @@ class CreateVulnerabilityMap(BaseTool):
     def execute(self, session_id: str) -> ToolExecutionResult:
         """Create vulnerability classification map using existing agent function"""
         try:
+            # 🔍 DEBUG: Vulnerability Map Creation
+            logger.info("=" * 60)
+            logger.info("🔍 DEBUG VULNERABILITY MAP: Starting")
+            logger.info(f"🔍 Session ID: {session_id}")
+            logger.info(f"🔍 Risk categories: {self.risk_categories}")
+            logger.info(f"🔍 Classification method: {self.classification_method}")
+            
+            # Check for unified dataset
+            unified_path = f'instance/uploads/{session_id}/unified_dataset.csv'
+            raw_path = f'instance/uploads/{session_id}/raw_data.csv'
+            
+            logger.info(f"🔍 Checking for unified dataset at: {unified_path}")
+            if os.path.exists(unified_path):
+                logger.info(f"🔍 ✅ Unified dataset EXISTS")
+            else:
+                logger.error(f"🔍 ❌ Unified dataset NOT FOUND")
+                if os.path.exists(raw_path):
+                    logger.info(f"🔍 💡 raw_data.csv EXISTS - could use as fallback")
+            logger.info("=" * 60)
             # Check if session has data
             if not validate_session_data_exists(session_id):
                 return self._create_error_result(
@@ -137,6 +157,8 @@ class CreateVulnerabilityMap(BaseTool):
             }
             
             message = f"Created vulnerability classification map with {self.risk_categories} risk categories for {len(gdf)} wards"
+            
+            # Visualization will be rendered by frontend using web_path
             
             return self._create_success_result(
                 message=message,
@@ -258,6 +280,8 @@ class CreatePCAMap(BaseTool):
             }
             
             message = f"Created PCA score map for {len(gdf)} wards. Score range: {pca_stats['min']:.3f} to {pca_stats['max']:.3f}"
+            
+            # Visualization will be rendered by frontend using web_path
             
             return self._create_success_result(
                 message=message,
@@ -488,6 +512,8 @@ class CreateVulnerabilityMapComparison(BaseTool):
             
             message = f"Created side-by-side vulnerability map comparison for {len(gdf)} wards showing both composite and PCA methods"
             
+            # Visualization will be rendered by frontend using web_path
+            
             return self._create_success_result(
                 message=message,
                 data=result_data
@@ -604,6 +630,8 @@ class CreateUrbanExtentMap(BaseTool):
             if urban_stats:
                 message += f". {urban_stats['wards_above_threshold']} wards above threshold"
             
+            # Visualization will be rendered by frontend using web_path
+            
             return self._create_success_result(
                 message=message,
                 data=result_data
@@ -681,6 +709,8 @@ class CreateDecisionTree(BaseTool):
             }
             
             message = f"Created decision tree visualization for {self.target_variable}"
+            
+            # Visualization will be rendered by frontend using web_path
             
             return self._create_success_result(
                 message=message,
@@ -776,6 +806,8 @@ class CreateCompositeScoreMaps(BaseTool):
             
             message = f"Created composite score maps page {self.page} showing {len(result_data['models_shown'])} models"
             
+            # Visualization will be rendered by frontend using web_path
+            
             return self._create_success_result(
                 message=message,
                 data=result_data
@@ -869,6 +901,8 @@ class CreateBoxPlot(BaseTool):
             }
             
             message = f"Created box plot page {self.page} showing top {self.top_n_wards} wards"
+            
+            # Visualization will be rendered by frontend using web_path
             
             return self._create_success_result(
                 message=message,
