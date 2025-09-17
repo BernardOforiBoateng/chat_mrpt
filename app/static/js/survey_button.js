@@ -8,6 +8,7 @@
 
     class SurveyButton {
         constructor() {
+            console.log('🔵 SurveyButton: Constructor called');
             this.pendingSurveys = 0;
             this.chatmrptSessionId = this.getSessionId();
             this.checkInterval = null;
@@ -16,15 +17,19 @@
         }
 
         init() {
+            console.log('🔵 SurveyButton: Init called, readyState:', document.readyState);
             // Wait for page to fully load
             if (document.readyState === 'loading') {
+                console.log('🔵 SurveyButton: Waiting for DOMContentLoaded');
                 document.addEventListener('DOMContentLoaded', () => this.setup());
             } else {
+                console.log('🔵 SurveyButton: Page already loaded, calling setup');
                 this.setup();
             }
         }
 
         setup() {
+            console.log('🔵 SurveyButton: Setup called');
             // Create and inject survey button
             this.createSurveyButton();
 
@@ -49,68 +54,183 @@
         }
 
         createSurveyButton() {
-            // Create button container
+            console.log('🔵 SurveyButton: CreateSurveyButton called');
+            // Wait a bit for React to render, then try multiple times to find the nav bar
+            let attempts = 0;
+            const maxAttempts = 10;
+
+            const tryCreateButton = () => {
+                attempts++;
+                console.log(`🔵 SurveyButton: Attempt ${attempts}/${maxAttempts} to find nav bar`);
+
+                // Try to find the ChatMRPT navigation bar - look for the area with Clear and Export buttons
+                let navBar = document.querySelector('header') ||
+                            document.querySelector('[class*="navbar"]') ||
+                            document.querySelector('[class*="nav-bar"]') ||
+                            document.querySelector('[class*="header"]') ||
+                            document.querySelector('nav');
+
+                // Find both Clear and Export buttons to locate the navbar correctly
+                const clearButton = Array.from(document.querySelectorAll('button')).find(btn =>
+                    btn.textContent.includes('Clear')
+                );
+                const exportButton = Array.from(document.querySelectorAll('button')).find(btn =>
+                    btn.textContent.includes('Export')
+                );
+
+                console.log('🔵 SurveyButton: Found navBar?', !!navBar, 'Found Clear?', !!clearButton, 'Found Export?', !!exportButton);
+
+                // Use the common parent of Clear and Export buttons as the navbar
+                if (clearButton && exportButton) {
+                    // Find common parent that contains both buttons
+                    let commonParent = exportButton.parentElement;
+                    while (commonParent && !commonParent.contains(clearButton)) {
+                        commonParent = commonParent.parentElement;
+                    }
+                    if (commonParent) {
+                        navBar = commonParent;
+                    }
+                } else if (exportButton) {
+                    // Fallback to Export button's parent
+                    navBar = exportButton.parentElement;
+                }
+
+                // If still no nav bar found and we've tried enough times, create our own
+                if (!navBar && attempts >= maxAttempts) {
+                    navBar = document.createElement('div');
+                    navBar.style.cssText = `
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        height: 60px;
+                        background: #ffffff;
+                        border-bottom: 1px solid #e5e7eb;
+                        display: flex;
+                        align-items: center;
+                        justify-content: flex-end;
+                        padding: 0 20px;
+                        z-index: 9998;
+                        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+                    `;
+                    document.body.appendChild(navBar);
+                    // Add padding to body to account for fixed header
+                    document.body.style.paddingTop = '60px';
+                } else if (!navBar) {
+                    // Try again in 500ms if we haven't reached max attempts
+                    setTimeout(tryCreateButton, 500);
+                    return;
+                }
+
+                // Check if button already exists to avoid duplicates
+                if (document.getElementById('survey-button')) {
+                    return;
+                }
+
+                this.insertSurveyButton(navBar);
+            }; // Arrow functions inherit this context
+
+            // Start trying to create the button
+            tryCreateButton();
+        }
+
+        insertSurveyButton(navBar) {
+            // Create button container for top nav
             const buttonContainer = document.createElement('div');
             buttonContainer.id = 'survey-button-container';
             buttonContainer.style.cssText = `
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                z-index: 9999;
+                display: inline-flex;
+                align-items: center;
+                margin-left: 20px;
+                margin-right: 10px;
             `;
 
-            // Create button
+            // Create button with a design that fits in the nav bar
             const button = document.createElement('button');
             button.id = 'survey-button';
             button.className = 'survey-btn';
             button.style.cssText = `
-                background: #2563eb;
-                color: white;
-                border: none;
-                border-radius: 50px;
-                padding: 12px 24px;
-                font-size: 16px;
+                background: transparent;
+                color: #374151;
+                border: 2px solid #e5e7eb;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 14px;
                 font-weight: 500;
                 cursor: pointer;
-                display: flex;
+                display: inline-flex;
                 align-items: center;
                 gap: 8px;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                transition: all 0.3s ease;
+                transition: all 0.2s ease;
+                position: relative;
             `;
 
             button.innerHTML = `
-                <span>📋</span>
+                <span style="font-size: 16px;">📋</span>
                 <span>Survey</span>
                 <span id="survey-badge" style="
                     display: none;
+                    position: absolute;
+                    top: -8px;
+                    right: -8px;
                     background: #ef4444;
                     color: white;
                     border-radius: 50%;
                     width: 20px;
                     height: 20px;
-                    font-size: 12px;
+                    font-size: 11px;
                     text-align: center;
                     line-height: 20px;
+                    font-weight: bold;
                 ">0</span>
             `;
 
             button.onmouseover = () => {
-                button.style.background = '#1d4ed8';
-                button.style.transform = 'scale(1.05)';
+                button.style.background = '#2563eb';
+                button.style.color = 'white';
+                button.style.borderColor = '#2563eb';
             };
 
             button.onmouseout = () => {
-                button.style.background = '#2563eb';
-                button.style.transform = 'scale(1)';
+                button.style.background = 'transparent';
+                button.style.color = '#374151';
+                button.style.borderColor = '#e5e7eb';
             };
 
             button.onclick = () => this.openSurvey();
 
+            // Add a subtle separator before the survey button
+            const separator = document.createElement('span');
+            separator.style.cssText = `
+                display: inline-block;
+                width: 1px;
+                height: 24px;
+                background: #e5e7eb;
+                margin-right: 15px;
+                vertical-align: middle;
+            `;
+            buttonContainer.appendChild(separator);
             buttonContainer.appendChild(button);
 
-            // Add to page
-            document.body.appendChild(buttonContainer);
+            // Add to nav bar - insert at the END after all existing buttons
+            // Find all buttons in the nav bar
+            const allButtons = Array.from(navBar.querySelectorAll('button'));
+
+            if (allButtons.length > 0) {
+                // Get the last button (should be Export)
+                const lastButton = allButtons[allButtons.length - 1];
+
+                // Insert after the last button
+                if (lastButton.nextSibling) {
+                    lastButton.parentElement.insertBefore(buttonContainer, lastButton.nextSibling);
+                } else {
+                    // If last button is the final element, append to its parent
+                    lastButton.parentElement.appendChild(buttonContainer);
+                }
+            } else {
+                // No buttons found, just append to nav bar
+                navBar.appendChild(buttonContainer);
+            }
 
             // Add pulsing animation when surveys are pending
             const style = document.createElement('style');
@@ -377,5 +497,7 @@
     }
 
     // Initialize survey button
+    console.log('🔵 SurveyButton: Script loaded, creating instance');
     window.surveyButton = new SurveyButton();
+    console.log('🔵 SurveyButton: Instance created:', !!window.surveyButton);
 })();
