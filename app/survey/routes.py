@@ -64,7 +64,11 @@ def start_survey():
         trigger_type = data.get('trigger_type')
         context = data.get('context', {})
 
+        logger.info(f"[DEBUG] Start survey request: chatmrpt_session={chatmrpt_session}, trigger_type={trigger_type}")
+        logger.info(f"[DEBUG] Context: {context}")
+
         if not chatmrpt_session:
+            logger.error("[DEBUG] No ChatMRPT session ID provided")
             return jsonify({
                 'success': False,
                 'error': 'ChatMRPT session ID required'
@@ -72,14 +76,20 @@ def start_survey():
 
         # Create survey session
         session_id = survey_db.create_survey_session(chatmrpt_session, context)
+        logger.info(f"[DEBUG] Created survey session: {session_id}")
 
         # Get questions for this trigger
         questions = SurveyQuestions.get_questions_for_trigger(trigger_type, context)
+        logger.info(f"[DEBUG] Got {len(questions) if questions else 0} questions for trigger type: {trigger_type}")
+
+        if questions:
+            logger.info(f"[DEBUG] First question: {questions[0] if questions else 'None'}")
 
         # Mark trigger as started if provided
         trigger_id = context.get('trigger_id')
         if trigger_id:
             survey_db.mark_trigger_completed(trigger_id, session_id)
+            logger.info(f"[DEBUG] Marked trigger {trigger_id} as completed")
 
         return jsonify({
             'success': True,
@@ -89,6 +99,8 @@ def start_survey():
 
     except Exception as e:
         logger.error(f"Error starting survey: {e}")
+        import traceback
+        logger.error(f"[DEBUG] Traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'error': str(e)

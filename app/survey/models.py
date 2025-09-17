@@ -257,6 +257,17 @@ class SurveyDatabase:
         conn.commit()
         conn.close()
 
+    def get_question_count(self) -> int:
+        """Get the count of questions in the database."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT COUNT(*) FROM survey_questions')
+        count = cursor.fetchone()[0]
+
+        conn.close()
+        return count
+
 
 # Initialize database on module import
 survey_db = SurveyDatabase()

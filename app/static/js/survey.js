@@ -55,61 +55,162 @@ class SurveyHandler {
     }
 
     async startSurvey() {
+        console.log('[DEBUG] Starting survey...');
+        console.log('[DEBUG] Config:', this.config);
+
         try {
             this.showSection('loadingScreen');
 
             // Start survey session
+            // Generate a session ID if none provided (for testing)
+            const sessionId = this.config.chatmrptSession || 'test_' + Date.now();
+            const triggerType = this.config.trigger || 'general_assessment';
+
+            console.log('[DEBUG] Session ID:', sessionId);
+            console.log('[DEBUG] Trigger Type:', triggerType);
+            console.log('[DEBUG] Context:', this.config.context || {});
+
+            const requestBody = {
+                chatmrpt_session_id: sessionId,
+                trigger_type: triggerType,
+                context: this.config.context || {}
+            };
+
+            console.log('[DEBUG] Request body:', requestBody);
+            console.log('[DEBUG] Sending POST to /survey/api/start');
+
             const response = await fetch('/survey/api/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chatmrpt_session_id: this.config.chatmrptSession,
-                    trigger_type: this.config.trigger || 'general_usability',
-                    context: this.config.context
-                })
+                body: JSON.stringify(requestBody)
             });
 
+            console.log('[DEBUG] Response status:', response.status);
             const data = await response.json();
+            console.log('[DEBUG] Response data:', data);
 
             if (!data.success) {
+                console.error('[DEBUG] Survey start failed:', data.error);
                 throw new Error(data.error || 'Failed to start survey');
             }
 
             this.sessionId = data.session_id;
-            this.questions = data.questions;
+
+            // Validate and clean questions array
+            if (!data.questions || !Array.isArray(data.questions)) {
+                console.error('[DEBUG] Invalid questions data received:', data.questions);
+                throw new Error('Invalid questions data received from server');
+            }
+
+            // Filter out any null/undefined questions and validate structure
+            this.questions = data.questions.filter(q => {
+                if (!q || typeof q !== 'object') {
+                    console.warn('[DEBUG] Filtering out invalid question:', q);
+                    return false;
+                }
+                if (!q.id || !q.type || !q.text) {
+                    console.warn('[DEBUG] Question missing required fields:', q);
+                    return false;
+                }
+
+                // Ensure numeric values are numbers, not strings
+                if (q.type === 'scale') {
+                    if (q.min !== undefined) q.min = parseInt(q.min, 10);
+                    if (q.max !== undefined) q.max = parseInt(q.max, 10);
+                }
+
+                return true;
+            });
+
             this.startTime = Date.now();
 
+            console.log('[DEBUG] Session ID set:', this.sessionId);
+            console.log('[DEBUG] Questions after validation:', this.questions.length);
+            console.log('[DEBUG] First few questions:', this.questions.slice(0, 3));
+
+            // Extra debug - check if first question has all properties
+            if (this.questions && this.questions.length > 0) {
+                console.log('[DEBUG] First question full details:', JSON.stringify(this.questions[0], null, 2));
+                console.log('[DEBUG] First question type:', this.questions[0].type);
+                console.log('[DEBUG] First question text:', this.questions[0].text);
+
+                // Check a scale question if we have one
+                const scaleQ = this.questions.find(q => q.type === 'scale');
+                if (scaleQ) {
+                    console.log('[DEBUG] Scale question found:', {
+                        id: scaleQ.id,
+                        min: scaleQ.min,
+                        max: scaleQ.max,
+                        typeOfMin: typeof scaleQ.min,
+                        typeOfMax: typeof scaleQ.max
+                    });
+                }
+            }
+
+            if (this.questions.length === 0) {
+                throw new Error('No valid questions received from server');
+            }
+
             // Show first question
+            console.log('[DEBUG] Showing first question...');
             this.showQuestion(0);
             this.showSection('questionContainer');
             document.getElementById('navigation').style.display = 'flex';
+            console.log('[DEBUG] Survey UI updated');
 
         } catch (error) {
+            console.error('[DEBUG] Error in startSurvey:', error);
+            console.error('[DEBUG] Error stack:', error.stack);
             this.showError(error.message);
         }
     }
 
     showQuestion(index) {
-        if (index < 0 || index >= this.questions.length) return;
+        console.log('[DEBUG] showQuestion called with index:', index);
+        console.log('[DEBUG] Total questions:', this.questions ? this.questions.length : 0);
+
+        if (!this.questions || this.questions.length === 0) {
+            console.error('[DEBUG] No questions available to show!');
+            return;
+        }
+
+        if (index < 0 || index >= this.questions.length) {
+            console.error('[DEBUG] Invalid question index:', index);
+            return;
+        }
 
         this.currentQuestionIndex = index;
         this.questionStartTime = Date.now();
 
         const question = this.questions[index];
+        console.log('[DEBUG] Current question:', question);
+
         const container = document.getElementById('questionContent');
+        if (!container) {
+            console.error('[DEBUG] questionContent element not found!');
+            return;
+        }
 
         // Update question number
-        document.getElementById('questionNumber').textContent =
-            `Question ${index + 1} of ${this.questions.length}`;
+        const questionNumberEl = document.getElementById('questionNumber');
+        if (questionNumberEl) {
+            questionNumberEl.textContent = `Question ${index + 1} of ${this.questions.length}`;
+            console.log('[DEBUG] Updated question number display');
+        } else {
+            console.error('[DEBUG] questionNumber element not found!');
+        }
 
         // Update progress bar
         this.updateProgress();
 
         // Render question based on type
-        container.innerHTML = this.renderQuestion(question);
+        const questionHTML = this.renderQuestion(question);
+        console.log('[DEBUG] Rendered question HTML length:', questionHTML ? questionHTML.length : 0);
+        container.innerHTML = questionHTML;
 
         // Load saved response if exists
         if (this.responses[question.id]) {
+            console.log('[DEBUG] Loading saved response for question:', question.id);
             this.loadSavedResponse(question.id, this.responses[question.id]);
         }
 
@@ -118,12 +219,34 @@ class SurveyHandler {
 
         // Start time tracking
         this.startTimeTracking();
+        console.log('[DEBUG] Question display complete');
     }
 
     renderQuestion(question) {
         let html = '';
 
-        switch (question.type) {
+        console.log('[DEBUG] renderQuestion called with:', question);
+
+        if (!question) {
+            console.error('[DEBUG] No question object provided to renderQuestion!');
+            return '<div class="error">No question data available</div>';
+        }
+
+        // Validate question structure
+        if (!question.id || !question.type) {
+            console.error('[DEBUG] Question missing required fields:', question);
+            return `
+                <div class="error-message" style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">
+                    Error: Invalid question structure<br>
+                    ID: ${question.id || 'missing'}<br>
+                    Type: ${question.type || 'missing'}<br>
+                    Text: ${question.text ? question.text.substring(0, 50) + '...' : 'missing'}
+                </div>
+            `;
+        }
+
+        try {
+            switch (question.type) {
             case 'text':
                 html = `
                     <div class="question-text">${question.text}</div>
@@ -186,26 +309,137 @@ class SurveyHandler {
                 break;
 
             case 'scale':
-                html = `
-                    <div class="question-text">${question.text}</div>
-                    <div class="scale-container">
-                        <div class="scale-labels">
-                            ${question.labels ? question.labels.map(label =>
-                                `<span>${label}</span>`).join('') : ''}
+                // Ensure min/max are numbers
+                const minVal = parseInt(question.min !== undefined ? question.min : 0, 10);
+                const maxVal = parseInt(question.max !== undefined ? question.max : 100, 10);
+
+                // Debug logging
+                console.log('[DEBUG] Scale question:', {
+                    id: question.id,
+                    originalMin: question.min,
+                    originalMax: question.max,
+                    parsedMin: minVal,
+                    parsedMax: maxVal,
+                    diff: maxVal - minVal,
+                    shouldUseSlider: (maxVal - minVal) > 10,
+                    typeOfMin: typeof question.min,
+                    typeOfMax: typeof question.max
+                });
+
+                // For 0-100 scales, use a slider. For smaller ranges, show individual options
+                if (maxVal - minVal > 10) {
+                    console.log('[DEBUG] Using SLIDER for this scale question');
+                    // Use slider for large ranges (like 0-100)
+                    html = `
+                        <div class="question-text">${question.text}</div>
+                        <div class="scale-container" style="padding: 1.5rem 0;">
+                            <div class="scale-slider-container" style="margin: 0 auto; max-width: 600px;">
+                                <div class="scale-labels" style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                    ${question.labels ? question.labels.map((label, i) =>
+                                        `<span style="font-size: 0.875rem; color: #6b7280;">${label}</span>`
+                                    ).join('') : `
+                                        <span style="font-size: 0.875rem; color: #6b7280;">${minVal}</span>
+                                        <span style="font-size: 0.875rem; color: #6b7280;">${Math.floor((maxVal + minVal) / 2)}</span>
+                                        <span style="font-size: 0.875rem; color: #6b7280;">${maxVal}</span>
+                                    `}
+                                </div>
+                                <input type="range"
+                                       id="response_${question.id}"
+                                       min="${minVal}"
+                                       max="${maxVal}"
+                                       value="${Math.floor((maxVal + minVal) / 2)}"
+                                       style="width: 100%; height: 8px; border-radius: 4px;"
+                                       oninput="surveyHandler.updateScaleValue('${question.id}', this.value)">
+                                <div style="text-align: center; margin-top: 1rem;">
+                                    <span style="font-size: 1.5rem; font-weight: bold; color: #2563eb;"
+                                          id="scale_value_${question.id}">${Math.floor((maxVal + minVal) / 2)}</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="scale-options">
-                `;
-                for (let i = question.min; i <= question.max; i++) {
+                    `;
+                } else {
+                    console.log('[DEBUG] Using INDIVIDUAL BUTTONS for this scale question');
+                    // Show individual options for small ranges (like 1-5)
+                    html = `
+                        <div class="question-text">${question.text}</div>
+                        <div class="scale-container">
+                            <div class="scale-labels">
+                                ${question.labels ? question.labels.map(label =>
+                                    `<span>${label}</span>`).join('') : ''}
+                            </div>
+                            <div class="scale-options">
+                    `;
+                    for (let i = minVal; i <= maxVal; i++) {
+                        html += `
+                            <div class="scale-option"
+                                 onclick="surveyHandler.selectScale('${question.id}', ${i})"
+                                 id="scale_${question.id}_${i}">
+                                ${i}
+                            </div>
+                        `;
+                    }
                     html += `
-                        <div class="scale-option"
-                             onclick="surveyHandler.selectScale('${question.id}', ${i})"
-                             id="scale_${question.id}_${i}">
-                            ${i}
+                            </div>
                         </div>
                     `;
                 }
-                html += `
+                break;
+
+            case 'model_comparison':
+                // Validate question text exists
+                if (!question.text) {
+                    console.error('[DEBUG] Model comparison question missing text:', question);
+                    html = `
+                        <div class="error-message" style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">
+                            Error: Question text is missing. Question ID: ${question.id || 'unknown'}
                         </div>
+                    `;
+                    break;
+                }
+
+                // For model comparison, display the question prominently
+                const cleanQuestion = question.text.replace('(Select your preferred model answer)', '').trim();
+                html = `
+                    <div class="question-text" style="font-size: 1.25rem; font-weight: 600; color: #1f2937; margin-bottom: 1.5rem;">
+                        ${question.text}
+                    </div>
+
+                    <div class="model-comparison-container">
+                        <!-- Show the actual question being asked -->
+                        <div style="padding: 1.5rem; background: #fff; border: 2px solid #2563eb; border-radius: 8px; margin-bottom: 1rem;">
+                            <h3 style="margin: 0 0 0.5rem 0; color: #1e40af; font-size: 1.1rem;">
+                                Core Question:
+                            </h3>
+                            <p style="font-size: 1.1rem; margin: 0; color: #374151;">
+                                <strong>${cleanQuestion}</strong>
+                            </p>
+                        </div>
+
+                        <!-- Arena mode reference -->
+                        <div style="padding: 1rem; background: #f3f4f6; border-radius: 8px; margin-bottom: 1rem;">
+                            <p style="margin: 0; color: #4b5563; font-size: 0.95rem;">
+                                <em>You just compared different model responses to this question in Arena mode.</em>
+                            </p>
+                        </div>
+
+                        <!-- Response area -->
+                        <div style="padding: 1.5rem; background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px;">
+                            <label style="display: block; margin-bottom: 0.75rem; font-weight: 500; color: #111827;">
+                                Based on the Arena comparison, which model's answer did you prefer and why?
+                            </label>
+                            <textarea class="input-textarea"
+                                      id="response_${question.id}"
+                                      rows="5"
+                                      placeholder="Describe which model answer you found most accurate, clear, and helpful. What made it better than the others?"
+                                      style="width: 100%; font-size: 1rem;"
+                                      ${question.required ? 'required' : ''}></textarea>
+                        </div>
+
+                        ${question.instruction ? `
+                            <div style="margin-top: 1rem; padding: 0.75rem; background: #fef3c7; border-left: 4px solid #f59e0b;">
+                                <small style="color: #92400e;">${question.instruction}</small>
+                            </div>
+                        ` : ''}
                     </div>
                 `;
                 break;
@@ -257,6 +491,16 @@ class SurveyHandler {
                     html += `</div>`;
                 }
                 break;
+            }
+        } catch (error) {
+            console.error('[DEBUG] Error rendering question:', error, question);
+            return `
+                <div class="error-message" style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">
+                    Error rendering question: ${error.message}<br>
+                    Question ID: ${question.id}<br>
+                    Question Type: ${question.type}
+                </div>
+            `;
         }
 
         return html;
@@ -285,6 +529,16 @@ class SurveyHandler {
             selected.classList.add('selected');
             this.responses[questionId] = value;
         }
+    }
+
+    updateScaleValue(questionId, value) {
+        // Update the displayed value for slider scales
+        const valueDisplay = document.getElementById(`scale_value_${questionId}`);
+        if (valueDisplay) {
+            valueDisplay.textContent = value;
+        }
+        // Save the response
+        this.responses[questionId] = parseInt(value);
     }
 
     selectMatrix(questionId, rowLabel, value) {
@@ -354,6 +608,11 @@ class SurveyHandler {
 
     getQuestionResponse(question) {
         switch (question.type) {
+            case 'model_comparison':
+                // Model comparison uses a textarea for the response
+                const modelInput = document.getElementById(`response_${question.id}`);
+                return modelInput ? modelInput.value.trim() : '';
+
             case 'text':
             case 'textarea':
                 const input = document.getElementById(`response_${question.id}`);
@@ -388,6 +647,12 @@ class SurveyHandler {
                 return value;
 
             case 'scale':
+                // Check if we're using a slider (for large ranges)
+                const slider = document.getElementById(`response_${question.id}`);
+                if (slider && slider.type === 'range') {
+                    return parseInt(slider.value);
+                }
+                // Otherwise return from saved responses (for clickable scales)
                 return this.responses[question.id] || '';
 
             case 'rating_matrix':
@@ -400,6 +665,14 @@ class SurveyHandler {
         if (!question) return;
 
         switch (question.type) {
+            case 'model_comparison':
+                // Model comparison uses a textarea
+                const modelInput = document.getElementById(`response_${questionId}`);
+                if (modelInput) {
+                    modelInput.value = response || '';
+                }
+                break;
+
             case 'text':
             case 'textarea':
                 const input = document.getElementById(`response_${questionId}`);
@@ -437,7 +710,14 @@ class SurveyHandler {
                 break;
 
             case 'scale':
-                this.selectScale(questionId, response);
+                // Check if using a slider
+                const slider = document.getElementById(`response_${questionId}`);
+                if (slider && slider.type === 'range') {
+                    slider.value = response;
+                    this.updateScaleValue(questionId, response);
+                } else {
+                    this.selectScale(questionId, response);
+                }
                 break;
 
             case 'rating_matrix':
@@ -583,14 +863,32 @@ class SurveyHandler {
     }
 
     showSection(sectionId) {
-        document.querySelectorAll('.survey-section').forEach(section => {
+        console.log('[DEBUG] showSection called with:', sectionId);
+        const sections = document.querySelectorAll('.survey-section');
+        console.log('[DEBUG] Found survey sections:', sections.length);
+
+        sections.forEach(section => {
+            console.log('[DEBUG] Hiding section:', section.id);
             section.classList.remove('active');
         });
-        document.getElementById(sectionId).classList.add('active');
+
+        const targetSection = document.getElementById(sectionId);
+        if (targetSection) {
+            console.log('[DEBUG] Showing section:', sectionId);
+            targetSection.classList.add('active');
+        } else {
+            console.error('[DEBUG] Section not found:', sectionId);
+        }
     }
 
     showError(message) {
-        document.getElementById('errorMessage').textContent = message;
+        console.error('[DEBUG] Showing error:', message);
+        const errorEl = document.getElementById('errorMessage');
+        if (errorEl) {
+            errorEl.textContent = message;
+        } else {
+            console.error('[DEBUG] errorMessage element not found!');
+        }
         this.showSection('errorScreen');
     }
 }
@@ -598,11 +896,18 @@ class SurveyHandler {
 // Initialize handler
 let surveyHandler;
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('[DEBUG] DOMContentLoaded - initializing survey handler');
     surveyHandler = new SurveyHandler();
+    console.log('[DEBUG] Survey handler initialized:', surveyHandler);
 });
 
 // Global functions for HTML onclick handlers
 function startSurvey() {
+    console.log('[DEBUG] startSurvey() called from HTML button');
+    if (!surveyHandler) {
+        console.error('[DEBUG] surveyHandler not initialized!');
+        return;
+    }
     surveyHandler.startSurvey();
 }
 
