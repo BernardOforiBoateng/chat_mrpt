@@ -1,7 +1,0 @@
-Hi team,
-
-I've completed my review of the UC Berkeley paper on LLM specifications. Here's my analysis: Paper_Review_ChatMRPT_Specific.txt
-
-The paper argues that clear specifications (what to do + how to verify) are key to making LLM systems reliable. Good news: we're already doing most of what they recommend with our Pydantic models and validation systems. The main opportunity I see is adding a disambiguation module to catch when users don't specify which state/LGA to analyze.
-
-Happy to discuss in tomorrow's meeting!

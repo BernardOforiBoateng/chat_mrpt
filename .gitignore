@@ -59,9 +59,14 @@ archive/
 *.xls
 data/
 cleaned_tpr_data/
-tpr_ward_cleaning/
 kano_settlement_data/
 rasters/
+
+# TPR Ward Cleaning - exclude everything except README and main script
+# ==========================================
+tpr_ward_cleaning/*
+!tpr_ward_cleaning/README.md
+!tpr_ward_cleaning/comprehensive_tpr_ward_cleaning.py
 
 # Geospatial Files
 # ==========================================

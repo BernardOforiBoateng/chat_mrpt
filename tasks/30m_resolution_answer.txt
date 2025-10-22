@@ -1,5 +1,0 @@
-Yes, 30m is correct for DBI export.
-
-The bands have different native resolutions (B4 and B8 at 10m, B11 at 20m), but GEE automatically handles the resampling when you specify scale: 30 in the export. All bands get resampled to 30m, and the DBI calculation happens at that common resolution.
-
-30m is a standard choice for large-area analysis—it balances detail with processing speed and file size.
