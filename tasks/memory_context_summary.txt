@@ -1,0 +1,28 @@
+Changes Implemented
+--------------------
+1. Added `_store_conversation`, summary tracking, and memory enrichment logic to `app/core/request_interpreter.py` so main-flow prompts now include LLM-generated conversation briefs and schema-aware context.
+2. Extended `app/services/memory_service.py` with `get_fact` / `get_all_facts` helpers for structured memory retrieval.
+3. Updated `app/core/prompt_builder.py` to weave memory summaries, dataset schema summaries, and recent turns into the system prompt.
+4. Injected memory summaries (including dataset schema) into the LangGraph agent (`app/data_analysis_v3/core/agent.py`) to keep data-analysis flow context-aware.
+5. Enhanced `app/core/session_context_service.py` to build rich dataset schema profiles, persist them via MemoryService, and expose them in the session context.
+6. Added the `list_dataset_columns` helper tool for paginated column exploration.
+7. Enhanced `SimpleExecutor` + `analyze_data_with_python` to capture DataFrame outputs, render them as Markdown tables, and expose CSV downloads for cleaner exploratory analysis results.
+
+Modified Files
+--------------
+- app/core/request_interpreter.py
+- app/services/memory_service.py
+- app/core/prompt_builder.py
+- app/data_analysis_v3/core/agent.py
+- app/core/session_context_service.py
+- app/data_analysis_v3/core/executor_simple.py
+- app/data_analysis_v3/tools/python_tool.py
+
+Recommended Tests
+------------------
+1. Manual smoke: run a session in the main chat, ask for analysis, then follow with pronoun-based questions to confirm context is recalled.
+2. Manual analytics tab: execute Data Analysis V3 workflow, then issue follow-up queries to verify continuity.
+3. Manual check: invoke the new `list_dataset_columns` tool (e.g., ask “show me the next page of columns”) to ensure pagination and formatting work as expected.
+4. Manual check: run a Python analysis that returns a DataFrame and verify the assistant outputs Markdown tables plus CSV download paths (no raw code dumps).
+5. Automated pytest (if available): `pytest test_context_persistence.py test_context_recall.py` to ensure no regressions in context handling.
+6. Monitoring: inspect new memory/schema facts and generated CSVs in `instance/memory/<session>.json` and `instance/uploads/<session>/visualizations/`.

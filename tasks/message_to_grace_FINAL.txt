@@ -1,0 +1,53 @@
+Hi Grace,
+
+I analyzed your Mali CSV data in detail. Found the root cause!
+
+**THE PROBLEM: WRONG GEOGRAPHY**
+
+Your code is using **Nigeria rasters for Mali analysis**:
+- Line 239: `Nigeria_GHSL_2018` for Mali points
+- Line 240: `Nigeria_DBI_2018` for Mali points
+
+**Evidence from your data:**
+For 46 urban Bamako points (where MODIS shows 85% urban):
+- MODIS: 85.3% ✓ (correct)
+- GHSL: 29.7% ❌ (capped at 30% - wrong geography)
+- DBI: 35.5% ❌ (likely wrong geography too)
+
+GHSL never exceeds 30.0% for ANY of your 345 Mali points. This hard cap indicates you're analyzing the wrong geographic region.
+
+**BEFORE WE CAN TEST IF DBI WORKS CORRECTLY:**
+
+We need to use the correct rasters. Can you check if these exist in your GEE assets?
+- `projects/ee-gracebea/assets/Mali_GHSL_2018`
+- `projects/ee-gracebea/assets/Mali_DBI_2018`
+
+If they don't exist, you'll need to create them using your DBI raster creation script (lines 10-204 in contxt.md), but run it for Mali instead of Nigeria.
+
+**I'VE PREPARED A CORRECTED SCRIPT:**
+
+File: `tasks/grace_code_CORRECTED.js`
+
+Changes made:
+1. ✓ Use Mali_GHSL_2018 (not Nigeria)
+2. ✓ Use Mali_DBI_2018 (not Nigeria)
+3. ✓ GHSL scale: 1000m → 30m (was too coarse)
+4. ✓ GHSL multiply by 100 (for percentage)
+
+**NEXT STEPS:**
+
+1. Verify Mali rasters exist (or create them)
+2. Run the corrected script
+3. Export CSV: `Mali_points_CORRECTED`
+4. Share the new CSV
+
+**Expected results after fix:**
+- MODIS: ~85% (unchanged)
+- GHSL: 65-80% (no longer capped at 30%)
+- DBI: 60-75% (should align with GHSL/MODIS)
+
+If after fixing the geography, DBI still shows significantly lower values than MODIS/GHSL, then we have a real DBI methodology issue to investigate. But first we need to test with the correct rasters.
+
+See `tasks/grace_code_issues_documented.md` for full documentation of all issues found.
+
+— Bernard

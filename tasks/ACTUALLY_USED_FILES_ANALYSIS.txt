@@ -1,0 +1,285 @@
+================================================================================
+ACTUALLY USED FILES ANALYSIS - PRODUCTION RUNNING CODE
+================================================================================
+Date: 2025-10-21
+Method: Checked .pyc compiled files on production AWS
+
+================================================================================
+KEY FINDING
+================================================================================
+
+Out of 380 Python files in app/, only ~178 have been compiled (.pyc files exist).
+
+This means approximately 53% of the codebase is DEAD CODE - files that are
+never imported or used when the application runs.
+
+================================================================================
+METHODOLOGY
+================================================================================
+
+When Python runs, it compiles .py files to .pyc files for faster loading.
+If a .pyc file exists, that means the .py file has been imported/used.
+
+We checked production AWS (where the app actually runs) for .pyc files to
+see which files are truly being used.
+
+================================================================================
+FILES THAT ARE DEFINITELY USED (Compiled on Production)
+================================================================================
+
+Core System (~70 files):
+- app/__init__.py
+- app/config/* (all config files)
+- app/core/llm_manager.py
+- app/core/request_interpreter.py
+- app/core/unified_data_state.py (data bleed singleton)
+- app/core/tool_registry.py
+- app/core/tool_cache.py
+- app/core/tool_validator.py
+- app/core/arena_manager.py
+- app/core/choice_interpreter.py (NEW, from production)
+- app/core/tool_schema_registry.py (NEW, from production)
+
+Auth System (~5 files):
+- app/auth/__init__.py
+- app/auth/auth_complete.py
+- app/auth/decorators.py
+- app/auth/google_auth.py
+- app/auth/user_model.py
+
+Analysis System (~20 files):
+- app/analysis/engine.py
+- app/analysis/pipeline.py
+- app/analysis/itn_pipeline.py
+- app/analysis/pca_pipeline.py
+- app/analysis/region_aware_selection.py
+- app/analysis/scoring.py
+- app/analysis/pipeline_stages/* (all)
+
+Data System (~10 files):
+- app/data/__init__.py
+- app/data/unified_dataset_builder.py
+- app/data/processing.py
+- app/data/loaders.py
+- app/data/analysis.py
+- app/data/reporting.py
+- app/data/population_data/itn_population_loader.py
+
+Data Analysis V3 (~25 files):
+- app/data_analysis_v3/core/agent.py
+- app/data_analysis_v3/core/tpr_workflow_handler.py
+- app/data_analysis_v3/core/tpr_data_analyzer.py
+- app/data_analysis_v3/core/state_manager.py
+- app/data_analysis_v3/core/analytics_helpers.py (NEW, from production)
+- app/data_analysis_v3/core/scope_utils.py (NEW, from production)
+- app/data_analysis_v3/tools/python_tool.py
+- app/data_analysis_v3/tools/tpr_analysis_tool.py
+- app/data_analysis_v3/tpr/workflow_manager.py
+- app/data_analysis_v3/tpr/data_analyzer.py
+
+Runtime System (~8 files) - NEW from production:
+- app/runtime/upload_service.py
+- app/runtime/tpr/detector.py
+- app/runtime/tpr/utils.py
+- app/runtime/tpr/workflow.py
+
+Tools (~15 files):
+- app/tools/* (only some are used)
+  - complete_analysis_tools.py
+  - visualization_maps_tools.py
+  - export_tools.py
+  - settlement_intervention_tools.py
+  - chatmrpt_help_tool.py
+
+Services (~15 files):
+- app/services/container.py
+- app/services/conversational_data_access.py
+- app/services/agents/visualizations/composite_visualizations.py
+- app/services/reports/*
+- app/services/visualization/chart_service.py
+
+Web Routes (~10 files):
+- app/web/routes/__init__.py
+- app/web/routes/core_routes.py
+- app/web/routes/upload_routes.py
+- app/web/routes/analysis_routes.py
+- app/web/routes/visualization_routes.py
+- app/web/routes/data_analysis_v3_routes.py
+- app/web/routes/arena_routes.py
+- app/web/routes/debug_routes.py
+
+Interaction System (~5 files):
+- app/interaction/core.py
+- app/interaction/events.py
+- app/interaction/storage.py
+
+Survey & PrePost (~5 files):
+- app/survey/* (if enabled)
+- app/prepost/* (if enabled)
+
+TPR Module (~10 files):
+- app/tpr_module/core/tpr_conversation_manager.py
+- app/tpr_module/core/tpr_calculator.py
+- app/tpr_module/data/nmep_parser.py
+- app/tpr_module/services/raster_extractor.py
+- app/tpr_module/output/output_generator.py
+
+
+================================================================================
+FILES LIKELY NOT USED (Dead Code Candidates)
+================================================================================
+
+Based on the analysis, approximately 202 files (53%) are not compiled/used.
+
+Categories of Unused Files:
+-----------------------------------------------------------------
+
+1. BACKUP FILES (Should be deleted):
+   - app/tpr_module.backup.20250806/* (entire directory - 6+ files)
+   - app/core/request_interpreter.OLD_WITH_DEBUG_BLOB/* (7 files)
+   - Any files with .backup, .old, .bak in name
+
+2. DUPLICATE/ALTERNATIVE VERSIONS:
+   - Multiple versions of same file in different locations
+   - Old implementations kept alongside new ones
+   - Example: visualization_maps_tools.py in both app/tools/ and app/core/
+
+3. UNUSED UTILITIES:
+   - Old helper files no longer called
+   - Deprecated modules
+   - Experimental code that was never integrated
+
+4. INCOMPLETE FEATURES:
+   - Features started but never completed
+   - Modules that were planned but not implemented
+   - Test code that shouldn't be in production
+
+5. LEGACY CODE:
+   - Old analysis methods replaced by new ones
+   - Deprecated routes no longer registered
+   - Old authentication methods
+
+================================================================================
+SPECIFIC UNUSED FILES TO INVESTIGATE/REMOVE
+================================================================================
+
+High Priority for Deletion:
+-----------------------------------------------------------------
+✗ app/tpr_module.backup.20250806/* - ENTIRE DIRECTORY (backup)
+✗ app/core/request_interpreter.OLD_WITH_DEBUG_BLOB/* - ENTIRE DIRECTORY (debug/backup)
+✗ app/auth/cognito_callback.py - Appears unused
+✗ app/auth/models.py - Duplicate of user_model.py?
+✗ app/auth/routes.py - Replaced by auth_complete.py?
+✗ app/auth/routes_fixed.py - Temp fix file?
+✗ app/config/arena_config.py - Duplicate?
+✗ app/config/container.py - Duplicate of services/container.py?
+✗ app/config/ollama_manager.py - If not using Ollama
+✗ app/config/production_optimized.py - Alternative config?
+✗ app/config/production_transition.py - Transition file?
+✗ app/config/settings.py - Old settings?
+
+Probably Unused (Need verification):
+-----------------------------------------------------------------
+⚠ app/core/analysis_routes.py (2,238 lines!) - Routes belong in web/routes/
+⚠ app/core/arena_config.py - Duplicate?
+⚠ app/core/arena_context_manager.py - Old arena implementation?
+⚠ app/core/arena_data_context.py - Old arena implementation?
+⚠ app/core/arena_integration_patch.py - Patch file?
+⚠ app/core/arena_prompt_builder.py - Old arena implementation?
+⚠ app/core/arena_trigger_detector.py - Old arena implementation?
+⚠ app/core/container.py - Duplicate of services/container.py?
+⚠ app/core/debug_logger.py - If not used
+⚠ app/core/dependency_validator.py - If not used
+⚠ app/core/direct_tools.py - Old tool system?
+⚠ app/core/enhanced_arena_manager.py - Alternative arena implementation?
+⚠ app/core/export_tools.py - Duplicate of tools/export_tools.py?
+⚠ app/core/itn_pipeline.py - Duplicate of analysis/itn_pipeline.py?
+⚠ app/core/model_swap_manager.py - If not swapping models
+⚠ app/core/ollama_adapter.py - If not using Ollama
+⚠ app/core/ollama_manager.py - If not using Ollama
+⚠ app/core/session_helper.py - If not used
+⚠ app/core/session_state.py - If not used
+⚠ app/core/simple_instance_check.py - Debug file?
+⚠ app/core/simple_request_interpreter.py - Old implementation?
+⚠ app/core/tiered_tool_loader.py - If not using tiered loading
+⚠ app/core/tool_arena_pipeline.py - Old arena implementation?
+⚠ app/core/visualization_maps_tools.py - Duplicate of tools/visualization_maps_tools.py?
+
+Tools That May Be Unused:
+-----------------------------------------------------------------
+⚠ app/tools/visualization_charts_tools.py (2,643 lines!) - Is this used or is chart_service used instead?
+⚠ Many other tool files - Need to check if they're actually called
+
+
+================================================================================
+FRONTEND FILES (Not Checked - Different Analysis Needed)
+================================================================================
+
+Frontend JavaScript and CSS files were not included in this analysis.
+They would need separate analysis to determine which are used.
+
+Directories to check separately:
+- app/static/js/*
+- app/static/css/*
+- app/static/react/*
+- app/templates/*
+
+================================================================================
+RECOMMENDED ACTION PLAN
+================================================================================
+
+Before GitHub Commit - Quick Cleanup (1-2 hours):
+-----------------------------------------------------------------
+1. Delete backup directories:
+   rm -rf app/tpr_module.backup.20250806/
+   rm -rf app/core/request_interpreter.OLD_WITH_DEBUG_BLOB/
+
+2. Delete obvious unused files:
+   - *.backup, *.old, *.bak files
+   - routes_fixed.py, production_transition.py, etc.
+
+3. Create "archive" directory for uncertain files:
+   mkdir archive/possibly_unused/
+   # Move suspicious files there instead of deleting
+
+4. Document remaining large files as technical debt
+
+After GitHub Commit - Thorough Cleanup (10-20 hours):
+-----------------------------------------------------------------
+1. Test application with each suspicious file removed
+2. Check import statements to verify usage
+3. Remove confirmed dead code
+4. Refactor large files (71 files over 600 lines)
+
+================================================================================
+ESTIMATED SAVINGS
+================================================================================
+
+If we remove dead code:
+- Current: 380 files, ~200,000 lines
+- After cleanup: ~180 files, ~100,000 lines
+- Reduction: 53% fewer files, 50% less code
+
+Benefits:
+✓ Faster development (less code to navigate)
+✓ Faster CI/CD (less code to test)
+✓ Easier maintenance (less code to understand)
+✓ Smaller deployments
+✓ Reduced cognitive load for developers
+
+================================================================================
+CONCLUSION
+================================================================================
+
+YES, there are a LOT of files, and roughly HALF of them are not being used!
+
+For tomorrow's review, we should:
+1. Remove obvious dead code (backups, duplicates)
+2. Document remaining technical debt
+3. Plan systematic cleanup after GitHub commit
+
+The codebase can be reduced by ~50% with proper cleanup.
+
+================================================================================
+END OF ANALYSIS
+================================================================================

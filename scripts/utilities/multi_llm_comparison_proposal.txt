@@ -1,0 +1,219 @@
+================================================================================
+                    PROPOSAL FOR MULTI-MODEL COMPARISON SYSTEM
+                         ChatMRPT Pretest Enhancement
+================================================================================
+
+Date: August 2025
+Prepared for: ChatMRPT Supervisory Committee
+
+--------------------------------------------------------------------------------
+EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+
+This proposal outlines the implementation of a multi-model comparison system for 
+the ChatMRPT pretest phase. The system will allow simultaneous evaluation of 
+different AI language models to gather quantitative data on performance, user 
+preference, and cost-effectiveness for malaria risk prioritization tasks.
+
+--------------------------------------------------------------------------------
+1. BACKGROUND AND MOTIVATION
+--------------------------------------------------------------------------------
+
+Current Situation:
+- ChatMRPT currently uses OpenAI's GPT-4 model exclusively
+- No comparative data exists on how other models perform for our specific use cases
+- API costs are significant and will scale with user adoption
+- The pretest phase requires quantitative metrics for thesis evaluation
+
+Proposed Solution:
+- Implement a comparison interface similar to Stanford's Language Model Arena
+- Run multiple AI models locally on our AWS infrastructure
+- Allow users to compare responses side-by-side in blind testing
+- Collect preference data and performance metrics automatically
+
+--------------------------------------------------------------------------------
+2. PROPOSED SYSTEM DESIGN
+--------------------------------------------------------------------------------
+
+User Experience:
+- Users ask questions in the ChatMRPT interface as normal
+- The system presents two anonymous responses labeled "Assistant A" and "Assistant B"
+- Users can compare responses side-by-side and vote for the better answer
+- After voting, the system reveals which models were used
+- An embedded questionnaire collects additional feedback per task
+
+Technical Approach:
+- Download and host AI models on our own servers (no external API calls)
+- Models being considered: Meta's Llama 3.1, Mistral AI, Qwen, and Microsoft Phi
+- All data processing happens on our secure AWS infrastructure
+- No user data leaves our servers (complete privacy compliance)
+
+--------------------------------------------------------------------------------
+3. BENEFITS AND ADVANTAGES
+--------------------------------------------------------------------------------
+
+Cost Savings:
+- Eliminate per-query API charges (currently $0.01-0.03 per query)
+- Fixed monthly cost regardless of usage volume
+- Break-even point: approximately 20,000-30,000 queries per month
+
+Research Benefits:
+- Quantitative comparison data across multiple models
+- User preference metrics for different task types
+- Response time and quality measurements
+- Valuable data for thesis and publication
+
+Operational Benefits:
+- Complete data privacy and security
+- No dependency on external services
+- Consistent performance without API rate limits
+- Ability to customize models for our specific needs
+
+--------------------------------------------------------------------------------
+4. IMPLEMENTATION APPROACH
+--------------------------------------------------------------------------------
+
+Phase 1: Keep Current System for Complex Analysis (Week 0)
+- Data Analysis module continues using OpenAI (most complex features)
+- Ensures system stability during transition
+- No disruption to current users
+
+Phase 2: Infrastructure Setup (Week 1)
+- Provision GPU-enabled server on AWS
+- Download and install selected AI models
+- Configure model serving software
+- Estimated storage: 50GB for all models
+
+Phase 3: Interface Development (Week 2)
+- Build side-by-side comparison interface
+- Implement blind testing mechanism
+- Add voting and feedback collection
+- Ensure mobile device compatibility
+
+Phase 4: Integration and Testing (Week 3)
+- Connect new models to existing ChatMRPT system
+- Comprehensive testing with sample data
+- Performance optimization
+- User acceptance testing
+
+Phase 5: Deployment and Data Collection (Week 4)
+- Deploy to staging environment
+- Train users on new interface
+- Begin collecting comparison data
+- Monitor system performance
+
+--------------------------------------------------------------------------------
+5. RESOURCE REQUIREMENTS
+--------------------------------------------------------------------------------
+
+Infrastructure Costs (Monthly):
+- AWS GPU Server: $360-880/month (depending on configuration)
+- Storage: $10/month
+- Total: $370-890/month
+
+Compare to Current API Costs:
+- Current: $0.01-0.03 per query (variable, can exceed $1000/month with scale)
+- Proposed: Fixed $370-890/month (unlimited queries)
+
+Human Resources:
+- Development time: 3-4 weeks (one developer)
+- Testing and validation: 1 week
+- No additional long-term staffing required
+
+--------------------------------------------------------------------------------
+6. RISK ASSESSMENT AND MITIGATION
+--------------------------------------------------------------------------------
+
+Risk 1: Model Quality
+- Mitigation: Keep OpenAI as backup option for critical tasks
+
+Risk 2: Technical Complexity
+- Mitigation: Phased rollout, extensive testing before full deployment
+
+Risk 3: User Confusion
+- Mitigation: Clear instructions, intuitive interface design
+
+Risk 4: Infrastructure Reliability
+- Mitigation: AWS auto-scaling, monitoring, and backup systems
+
+--------------------------------------------------------------------------------
+7. SUCCESS METRICS
+--------------------------------------------------------------------------------
+
+Quantitative Metrics:
+- Number of model comparisons completed
+- User preference distribution across models
+- Response time measurements
+- Cost per query reduction
+
+Qualitative Metrics:
+- User satisfaction scores from questionnaires
+- Feedback on response quality
+- Usability of comparison interface
+- Research value of collected data
+
+--------------------------------------------------------------------------------
+8. TIMELINE SUMMARY
+--------------------------------------------------------------------------------
+
+Week 1: Infrastructure setup and model installation
+Week 2: Interface development and integration
+Week 3: Testing and optimization
+Week 4: Deployment and initial data collection
+
+Total Duration: 4 weeks from approval
+
+--------------------------------------------------------------------------------
+9. RECOMMENDATION
+--------------------------------------------------------------------------------
+
+We recommend proceeding with this implementation for the following reasons:
+
+1. Significant cost savings (fixed vs. variable pricing)
+2. Valuable research data for the thesis
+3. Enhanced user experience with choice and transparency
+4. Complete data privacy and control
+5. Alignment with academic research standards
+
+The system can be implemented within 4 weeks and will provide immediate value
+for the pretest phase while establishing a sustainable long-term solution for
+ChatMRPT's AI infrastructure.
+
+--------------------------------------------------------------------------------
+10. NEXT STEPS
+--------------------------------------------------------------------------------
+
+Upon approval:
+1. Provision AWS infrastructure
+2. Begin model downloads and setup
+3. Start interface development
+4. Schedule user training sessions
+5. Establish data collection protocols
+
+--------------------------------------------------------------------------------
+APPENDIX: VISUAL REPRESENTATION
+--------------------------------------------------------------------------------
+
+Current System:
+User -> ChatMRPT -> OpenAI API -> Response
+
+Proposed System:
+User -> ChatMRPT -> Local Model Server -> Multiple Models -> Comparison Interface
+
+Example Interface Layout:
++----------------------------------------------------------+
+|                    Compare Responses                      |
++---------------------------+------------------------------+
+|      Assistant A          |       Assistant B            |
+|                          |                               |
+| [Response from Model 1]   | [Response from Model 2]      |
+|                          |                               |
++---------------------------+------------------------------+
+| [A is Better] [It's a Tie] [B is Better] [Show Models]  |
++----------------------------------------------------------+
+
+--------------------------------------------------------------------------------
+END OF PROPOSAL
+--------------------------------------------------------------------------------
+
+For questions or clarifications, please contact the development team.

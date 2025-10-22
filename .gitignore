@@ -1,0 +1,158 @@
+# ==========================================
+# ChatMRPT .gitignore
+# ==========================================
+
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+# ==========================================
+venv/
+env/
+ENV/
+chatmrpt_venv/
+chatmrpt_venv_new/
+.venv
+
+# Environment Variables & Secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+aws_files/
+
+# Instance Data (uploads, databases, logs)
+# ==========================================
+instance/
+instance/uploads/
+instance/*.db
+instance/*.sqlite3
+instance/*.log
+instance/flask_session/
+
+# Backups & Archives
+# ==========================================
+backups/
+archive/
+*.tar.gz
+*.zip
+*.bak
+*.backup
+*.old
+*_backup_*
+*_archive_*
+
+# Data Files
+# ==========================================
+*.csv
+*.xlsx
+*.xls
+data/
+cleaned_tpr_data/
+tpr_ward_cleaning/
+kano_settlement_data/
+rasters/
+
+# Geospatial Files
+# ==========================================
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.geojson
+
+# Reports & Output
+# ==========================================
+*.pdf
+*.docx
+*.html
+!app/templates/**/*.html
+!frontend/**/*.html
+
+# Frontend
+# ==========================================
+# Compiled React builds
+app/static/react/
+app/static/react-stable/
+!app/static/react/.gitkeep
+!app/static/react/README.md
+!app/static/react-stable/.gitkeep
+!app/static/react-stable/README.md
+
+# Node modules
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+node_modules/
+
+# Frontend build artifacts
+*.js.map
+*.css.map
+
+# IDEs & Editors
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+.DS_Store
+
+# OS
+# ==========================================
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Logs
+# ==========================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+# ==========================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage/
+*.cover
+.hypothesis/
+
+# Jupyter
+# ==========================================
+.ipynb_checkpoints/
+
+# Temporary Files
+# ==========================================
+*.tmp
+*.temp
+.cache/
+
+# Production-specific
+# ==========================================
+deployment/*.pem
+infrastructure/*.tfstate
+infrastructure/*.tfstate.backup
+
+# Keep these files
+# ==========================================
+!.gitkeep
+!README.md
+!LICENSE
+CLAUDE.md

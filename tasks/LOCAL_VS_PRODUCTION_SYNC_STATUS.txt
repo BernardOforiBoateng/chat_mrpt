@@ -1,0 +1,240 @@
+================================================================================
+LOCAL vs PRODUCTION CODE SYNC STATUS
+================================================================================
+Date: 2025-10-21
+Comparison: Local (WSL) vs Production Instance 1 (3.21.167.170)
+
+================================================================================
+SUMMARY
+================================================================================
+
+Status: NOT FULLY SYNCED ⚠️
+
+Key Findings:
+- Production has 380 Python files vs Local's 343 files (37 more files)
+- Production has 10 extra directories (excluding __pycache__)
+- Key file: visualization_routes.py is DIFFERENT between local and production
+- Most core files match (unified_data_state.py, request_interpreter.py, run.py)
+
+RECOMMENDATION: Local is MISSING some production code!
+
+
+================================================================================
+FILE COUNT COMPARISON
+================================================================================
+
+Python Files (.py):
+  Local:      343 files
+  Production: 380 files
+  Difference: +37 files in production
+
+Directories:
+  Local:      127 directories
+  Production: 137 directories
+  Difference: +10 directories in production
+
+
+================================================================================
+DIRECTORIES IN PRODUCTION BUT NOT IN LOCAL
+================================================================================
+
+1. app/core/request_interpreter.OLD_WITH_DEBUG_BLOB
+   - Appears to be a backup/old version directory
+   - Likely contains debugging code
+
+2. app/runtime/
+   - Contains workflow management code
+   - Subdirectories: standard/, tpr/
+   - Files:
+     * upload_service.py
+     * standard/workflow.py
+     * standard/__init__.py
+     * tpr/detector.py
+     * tpr/utils.py
+     * tpr/workflow.py
+     * tpr/__init__.py
+     * __init__.py
+   - MISSING FROM LOCAL! ⚠️
+
+3. app/tools/visualization_charts/
+   - Contains chart generation modules
+   - Files:
+     * __init__.py
+     * advanced.py (17,886 bytes)
+     * categorical.py (8,696 bytes)
+     * common.py (1,747 bytes)
+     * comparative.py (13,777 bytes)
+     * distribution.py (16,102 bytes)
+     * ranking.py (5,447 bytes)
+     * relationship.py (24,411 bytes)
+     * spatial.py (11,042 bytes)
+   - Last modified: Oct 18 16:15
+   - MISSING FROM LOCAL! ⚠️
+
+4. app/web/routes/analysis/
+   - Route module for analysis endpoints
+   - MISSING FROM LOCAL! ⚠️
+
+
+================================================================================
+CRITICAL FILES COMPARISON (MD5 Checksums)
+================================================================================
+
+✓ MATCHING FILES:
+-----------------------------------------------------------------
+app/core/unified_data_state.py
+  Local:      a1b8e132128f885e26702bd421004bf2
+  Production: a1b8e132128f885e26702bd421004bf2
+  Status: IDENTICAL ✓
+  Note: This is the file with the data bleed singleton issue
+
+app/core/request_interpreter.py
+  Local:      35d683b7fc773d9ce7fe4c6fb67125bb
+  Production: 35d683b7fc773d9ce7fe4c6fb67125bb
+  Status: IDENTICAL ✓
+
+run.py
+  Local:      b58279007f8bf5c99755483a6f70d186
+  Production: b58279007f8bf5c99755483a6f70d186
+  Status: IDENTICAL ✓
+
+
+✗ DIFFERENT FILES:
+-----------------------------------------------------------------
+app/web/routes/visualization_routes.py
+  Local:      8e50a6977595dff0b978bddd86c3e0e5
+  Production: 2ad08010026414ed719e65126fdad3b4
+  Status: DIFFERENT! ✗
+  Note: This is the file with the serve_viz_file vulnerability
+  Impact: Production may have different session validation logic
+
+
+================================================================================
+ANALYSIS
+================================================================================
+
+Why Are They Different?
+-----------------------------------------------------------------
+1. Production has been updated with new features not pulled to local:
+   - app/runtime/ module (workflow management)
+   - app/tools/visualization_charts/ (chart generation)
+   - app/web/routes/analysis/ (analysis routes)
+
+2. visualization_routes.py differs - possible scenarios:
+   - Production has hotfixes not in local
+   - Local has recent changes not deployed to production
+   - Both have diverged independently
+
+3. Missing 37 Python files suggests:
+   - Local is behind production by several commits/deployments
+   - OR production has accumulated test/debug files
+
+
+What's the Risk?
+-----------------------------------------------------------------
+1. CRITICAL: visualization_routes.py mismatch
+   - This file contains the data bleed vulnerability
+   - If production version is different, our investigation might be inaccurate
+   - Need to check which version has the vulnerability
+
+2. HIGH: Missing app/runtime/ module
+   - Could be core functionality that local doesn't have
+   - May affect testing and development accuracy
+
+3. MEDIUM: Missing visualization_charts/
+   - Chart generation might work differently in production
+   - Could cause unexpected behavior when deploying local changes
+
+4. LOW: request_interpreter.OLD_WITH_DEBUG_BLOB
+   - Appears to be backup/debug code
+   - Should probably be cleaned up
+
+
+================================================================================
+IMMEDIATE ACTIONS NEEDED
+================================================================================
+
+1. Compare visualization_routes.py in detail
+   - Check if production has vulnerability fix
+   - Or if local has uncommitted changes
+   - Determine which version is "correct"
+
+2. Pull missing modules from production to local:
+   - app/runtime/
+   - app/tools/visualization_charts/
+   - app/web/routes/analysis/
+
+3. Verify functionality:
+   - Test if local code still works after pulling prod changes
+   - Check if any breaking changes exist
+
+4. Document the differences:
+   - Create changelog of what's in production vs local
+   - Identify which changes were intentional vs accidental
+
+
+================================================================================
+RECOMMENDED NEXT STEPS
+================================================================================
+
+Step 1: Download visualization_routes.py from production for comparison
+Command:
+  scp -i /tmp/chatmrpt-key.pem \
+    ec2-user@3.21.167.170:/home/ec2-user/ChatMRPT/app/web/routes/visualization_routes.py \
+    /tmp/prod_visualization_routes.py
+
+Step 2: Compare the two versions
+Command:
+  diff -u /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/web/routes/visualization_routes.py \
+    /tmp/prod_visualization_routes.py
+
+Step 3: Pull missing directories from production
+Commands:
+  scp -r -i /tmp/chatmrpt-key.pem \
+    ec2-user@3.21.167.170:/home/ec2-user/ChatMRPT/app/runtime/ \
+    /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/
+
+  scp -r -i /tmp/chatmrpt-key.pem \
+    ec2-user@3.21.167.170:/home/ec2-user/ChatMRPT/app/tools/visualization_charts/ \
+    /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/tools/
+
+  scp -r -i /tmp/chatmrpt-key.pem \
+    ec2-user@3.21.167.170:/home/ec2-user/ChatMRPT/app/web/routes/analysis/ \
+    /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/web/routes/
+
+Step 4: Verify data bleed issue exists in both versions
+- Check if singleton pattern exists in both
+- Verify serve_viz_file vulnerability in both
+- Ensure our investigation findings are accurate
+
+Step 5: Create proper sync workflow
+- Establish git repository
+- Set up deployment process
+- Ensure local and production stay in sync
+
+
+================================================================================
+CONCLUSION
+================================================================================
+
+Local and Production are NOT in sync.
+
+Key Issues:
+1. Production has ~37 more Python files than local
+2. visualization_routes.py differs (CRITICAL for data bleed issue)
+3. Three major directories missing from local
+4. Unclear which version is "source of truth"
+
+Before GitHub cleanup, we MUST:
+1. Sync local with production
+2. Understand why they diverged
+3. Establish which version to use as baseline
+4. Fix the data bleed issue in BOTH environments
+
+RECOMMENDATION: Pull production changes to local FIRST, then proceed with
+GitHub cleanup plan.
+
+
+================================================================================
+END OF SYNC STATUS REPORT
+================================================================================

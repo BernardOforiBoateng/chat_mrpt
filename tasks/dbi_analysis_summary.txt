@@ -1,0 +1,37 @@
+================================================================================
+RESPONSE TO GRACE'S QUESTION
+================================================================================
+
+Grace asked: "It's saying the urban southwest region of Mali has very low
+urbanicity, which shouldn't be the case. Any thoughts?"
+
+================================================================================
+FINDINGS
+================================================================================
+
+1. GHSL ISSUE (FIXED):
+   - Grace's GHSL: 23.6% (capped)
+   - Corrected GHSL: 62.7%
+   - Root cause: Used Nigeria_GHSL_2018 for Mali points
+   - Solution: Use Mali_GHSL_2018 or global GHSL dataset
+
+2. DBI ISSUE (CONFIRMED - NOT FIXED):
+   - Grace's DBI: 28.4%
+   - Corrected DBI: 27.2%
+   - MODIS urban: 49.0%
+   - GHSL urban: 62.7%
+
+   DBI underestimates urbanicity by ~50% for Bamako!
+
+3. WHY DBI IS LOW:
+   - Bamako is NON-ARID (arid_flag=0)
+   - DBI (Dry Built-up Index) designed for ARID regions
+   - Formula: DBI = NDBI - NDVI
+   - Non-arid urban areas have vegetation → high NDVI → low DBI
+
+4. RECOMMENDATION:
+   - For non-arid southwest Mali: Use GHSL or MODIS (more accurate)
+   - For arid northern Mali: DBI should work as designed
+   - Consider using NDBI alone (without subtracting NDVI) for non-arid regions
+
+================================================================================

@@ -1,0 +1,82 @@
+RESUME EXPERIENCE ENTRIES
+
+==============================================================================
+CURRENT POSITION - AI/ML ENGINEER
+==============================================================================
+
+Loyola University Chicago                                                Jan 2025 - Present
+AI/ML Engineer                                                          Chicago, IL
+
+• Pioneered LLM-driven malaria intelligence system that interprets epidemiological queries through multiple geospatial analysis engines, eliminating barriers between health officers and actionable insights
+
+• Deployed on AWS infrastructure (EC2, ALB, CloudFront, Redis) with 6-worker configuration supporting 60 concurrent users at 99.5% uptime
+
+• Analyzed malaria risk across 20M+ buildings revealing 2.8x higher rates in informal settlements, shifting $2M to critical areas
+
+
+==============================================================================
+PREVIOUS POSITION - DATA SCIENTIST (R SHINY)
+==============================================================================
+
+Loyola University Chicago                                                [Date Range]
+Data Scientist                                                          Chicago, IL
+
+• Developed interactive R Shiny application for malaria risk assessment, enabling health workers to optimize bed net distribution through spatial analysis and population-weighted visualizations
+
+• Built LightGBM models predicting high-risk zones with 87% accuracy, integrated into interactive R Shiny interface for real-time scenario analysis
+
+• Created automated reporting pipeline in R generating weekly surveillance summaries, reducing manual analysis time from 2 days to 2 hours
+
+
+==============================================================================
+ALTERNATIVE BULLETS (Choose based on emphasis needed)
+==============================================================================
+
+FOR AI/ML ENGINEER ROLE:
+
+Technical Focus:
+• Engineered natural language interface to 15GB malaria surveillance data, combining GPT-4o with geospatial processing to answer "Which wards need intervention most?" in seconds
+
+Impact Focus:
+• Transformed how health officers access malaria insights—from manual spreadsheet analysis to asking questions like "Show me high-risk areas near schools" with instant visualization
+
+Architecture Focus:
+• Built end-to-end ML pipeline bridging natural language understanding with spatial epidemiology—from voice-to-insight in under 3 seconds across 15GB of heterogeneous data
+
+
+FOR DATA SCIENTIST ROLE:
+
+Distribution Planning Focus:
+• Built R Shiny platform for bed net distribution planning, integrating malaria risk maps with population data to help health workers allocate resources effectively
+
+ML Focus:
+• Implemented ensemble ML models (87% accuracy) with R-based feature engineering, processing health facility data across 700+ wards
+
+Impact Focus:
+• Created R Shiny dashboard that transformed bed net distribution from guesswork to data-driven decisions, serving health teams with ward-level risk analysis and allocation recommendations
+
+
+==============================================================================
+KEY ACHIEVEMENTS TO HIGHLIGHT
+==============================================================================
+
+1. Technical Evolution: R Shiny → ChatMRPT (AI-powered platform)
+2. Scale: 10 technical users → 500+ field teams
+3. Accuracy: 87% model accuracy maintained across platforms
+4. Infrastructure: Single instance → Distributed AWS architecture
+5. Impact: $2M in resources redirected to high-risk areas
+6. Validation: Field study confirmed 2.8x higher incidence in predicted zones
+7. Uptime: 99.5% availability in production
+8. User Experience: From statistical expertise required → Natural language queries
+
+
+==============================================================================
+TECHNOLOGIES DEMONSTRATED
+==============================================================================
+
+AI/ML: GPT-4o, LangChain, Sentence Transformers, LightGBM, scikit-learn
+Geospatial: GeoPandas, PostGIS, Rasterio, Earth Engine, Shapely
+Web/API: Flask, FastAPI, React, R Shiny
+Infrastructure: AWS (EC2, ALB, CloudFront, ElastiCache), Docker, Gunicorn
+Data: Pandas, PostgreSQL, Redis, SQLite
+MLOps: Model monitoring, A/B testing, drift detection, automated retraining

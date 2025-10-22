@@ -1,0 +1,103 @@
+Hi Grace,
+
+Great question! I analyzed your Mali results and maps. Found TWO issues:
+
+================================================================================
+ISSUE #1: GHSL (FIXED) ✓
+================================================================================
+
+**Problem:** Your GHSL is capped at 30% for ALL Mali points.
+
+**Root Cause:** Lines 239-240 in your buffer script use Nigeria rasters for Mali:
+- Line 239: Nigeria_GHSL_2018 → Should be Mali_GHSL_2018
+- Line 240: Nigeria_DBI_2018 → Should be Mali_DBI_2018
+
+**Evidence:**
+- Your urban Bamako: GHSL = 29.7% (capped at 30%)
+- My corrected test: GHSL = 99.3% (using global GHSL dataset)
+- Improvement: +69.6%
+
+**Fix:** See attached grace_code_CORRECTED.js
+- Use Mali_GHSL_2018 or global GHSL: JRC/GHSL/P2023A/GHS_SMOD/2020
+- Change GHSL scale from 1000m to 30m (line 306)
+- Add .multiply(100) to GHSL (line 309)
+
+================================================================================
+ISSUE #2: DBI ACTUALLY LOW (CONFIRMED) ⚠️
+================================================================================
+
+**Your observation is CORRECT!** Southwest Mali (Bamako) shows low DBI despite being urban.
+
+**The numbers:**
+Non-arid Southwest Mali (86 points):
+- MODIS: 49-53% urban ✓
+- GHSL (fixed): 63% urban ✓
+- DBI: 27-28% urban ❌ TOO LOW!
+
+Urban Bamako core (45 points, MODIS > 50%):
+- MODIS: 85-87% urban ✓
+- GHSL (fixed): 99% urban ✓
+- DBI: 35-36% urban ❌ HALF of what it should be!
+
+**Why DBI is low:**
+1. Bamako is NON-ARID (blue dots in your aridity map)
+2. DBI = NDBI - NDVI was designed for ARID regions (Rasul et al. 2018)
+3. Non-arid urban areas have vegetation → high NDVI → low DBI
+4. The NDVI subtraction penalizes vegetated urban areas
+
+**Evidence:** See attached comparison maps
+- mali_grace_style_comparison.png: 4-panel side-by-side
+- bernard_dbi_map_grace_style.png: Matches your bb.png style
+- Shows DBI stays low even with corrected methodology
+
+**DBI Correlation with MODIS:**
+- GHSL: r=0.867 (strong) ✓
+- DBI: r=0.189 (weak) ❌
+
+================================================================================
+RECOMMENDATION
+================================================================================
+
+**For your Mali analysis:**
+
+1. **Fix GHSL geography issue** (critical):
+   - Check if Mali_GHSL_2018 exists in your assets
+   - If not, create it using your DBI creation script (contxt.md lines 10-204)
+   - Or use global GHSL dataset (simpler, no geography mismatch risk)
+
+2. **For non-arid regions (southwest Mali/Bamako):**
+   - ✓ Use GHSL or MODIS (accurate)
+   - ⚠️ DBI underestimates by ~50%
+   - Consider using NDBI alone (without subtracting NDVI)
+
+3. **For arid regions (northern Mali):**
+   - ✓ DBI should work as designed
+   - Your methodology is correct for these areas
+
+**Bottom line:**
+Your instinct was right - "urban southwest Mali has very low urbanicity"
+from DBI is incorrect. GHSL (when fixed) and MODIS both confirm Bamako is
+highly urban (85-99%). DBI just doesn't work well in non-arid regions.
+
+================================================================================
+FILES ATTACHED
+================================================================================
+
+Evidence:
+✓ Bernard_Mali_Test.csv - My corrected analysis (345 points)
+✓ mali_grace_style_comparison.png - Visual comparison
+✓ bernard_dbi_map_grace_style.png - Matches your bb.png
+✓ mali_comparison_charts.png - Statistical evidence
+
+Scripts:
+✓ bernard_test_mali.js - Full test script with corrections
+✓ grace_code_CORRECTED.js - Your buffer script with fixes
+✓ export_mali_shapefile.js - Export Mali boundary
+
+Documentation:
+✓ MALI_FINAL_REPORT.md - Complete technical analysis
+✓ dbi_analysis_summary.txt - Detailed DBI findings
+
+Let me know if you need help creating Mali-specific rasters or have questions!
+
+— Bernard

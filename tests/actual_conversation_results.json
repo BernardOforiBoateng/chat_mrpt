@@ -1,0 +1,99 @@
+{
+  "timestamp": "2025-09-26T21:07:11.809860",
+  "session_id": "actual-test-1758938715",
+  "test_results": [
+    {
+      "test": "Identity Test",
+      "message": "Hello, who are you?",
+      "success": true,
+      "arena_mode": true,
+      "models": {
+        "a": "mistral:7b",
+        "b": "llama3.1:8b"
+      },
+      "has_suggestions": false,
+      "suggestions": [],
+      "has_reminder": false,
+      "reminder": null,
+      "model_a_response": "Hello there! I am ChatMRPT, a comprehensive health assistant specializing in malaria and public health. I provide both general knowledge about malaria and data-driven analysis for decision support. I ",
+      "model_b_response": "I'm ChatMRPT, a comprehensive health assistant specializing in malaria and public health. I provide both general health knowledge and data-driven analysis for decision support.\n\nI can offer evidence-b"
+    },
+    {
+      "test": "Context Setup",
+      "message": "I'm working with malaria data from Kano state with 100 health facilities",
+      "success": true,
+      "arena_mode": true,
+      "models": {
+        "a": "mistral:7b",
+        "b": "llama3.1:8b"
+      },
+      "has_suggestions": false,
+      "suggestions": [],
+      "has_reminder": false,
+      "reminder": null,
+      "model_a_response": "**Chat MRPT:**\nWelcome! I am here to help you analyze and understand malaria trends in Kano State, Nigeria, using the data you have provided from 100 health facilities. Let's start by providing a quic",
+      "model_b_response": "Let's get started.\n\nAs a comprehensive health assistant, I'll help you navigate and analyze this dataset. Before we proceed, please confirm if you have uploaded the data or would like to provide it in"
+    },
+    {
+      "test": "Context Recall",
+      "success": false,
+      "error": "Timeout"
+    },
+    {
+      "test": "Workflow Start",
+      "message": "I want to calculate TPR",
+      "success": true,
+      "arena_mode": true,
+      "models": {
+        "a": "mistral:7b",
+        "b": "llama3.1:8b"
+      },
+      "has_suggestions": false,
+      "suggestions": [],
+      "has_reminder": false,
+      "reminder": null,
+      "model_a_response": "To calculate the Transmission Potential (TPR), I will need some information about the number of malaria cases and the population at risk in a specific area. Here's the workflow for calculating TPR:\n\n1",
+      "model_b_response": "**TPR Calculation Mode Activated**\n\nTo calculate Test Positivity Rate (TPR), we'll need some specific data from you. Please provide the following:\n\n1. **Number of tests conducted**: Total number of ma"
+    },
+    {
+      "test": "Workflow Interruption",
+      "message": "Actually, what does TPR mean?",
+      "success": true,
+      "arena_mode": true,
+      "models": {
+        "a": "mistral:7b",
+        "b": "llama3.1:8b"
+      },
+      "has_suggestions": false,
+      "suggestions": [],
+      "has_reminder": false,
+      "reminder": null,
+      "model_a_response": "In public health context, TPR stands for Test Positivity Rate. It is a measure used to evaluate disease prevalence or transmission intensity within a population. The Test Positivity Rate is calculated",
+      "model_b_response": "**TPR stands for Test Positivity Rate**, a measure used in public health and epidemiology.\n\n* **Definition:** The proportion of individuals tested who are found to be positive for malaria.\n* **Formula"
+    },
+    {
+      "test": "Suggestions Test",
+      "message": "I have uploaded my data. What should I do next?",
+      "success": true,
+      "arena_mode": false,
+      "models": {},
+      "has_suggestions": false,
+      "suggestions": [],
+      "has_reminder": false,
+      "reminder": null,
+      "model_a_response": "",
+      "model_b_response": ""
+    }
+  ],
+  "score": 60,
+  "verdict": "\u2b50\u2b50\u2b50\u2b50 Good - Mostly conversational",
+  "key_findings": {
+    "arena_active": true,
+    "models": [
+      "mistral:7b",
+      "llama3.1:8b"
+    ],
+    "has_suggestions": false,
+    "has_reminders": false
+  }
+}

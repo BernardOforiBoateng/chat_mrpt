@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatMRPT - AWS Cognito Login</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .btn {
+            background: #FF9900;
+            color: white;
+            padding: 16px 32px;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 20px 0;
+            transition: all 0.3s;
+        }
+        .btn:hover {
+            background: #EC7211;
+            transform: translateY(-2px);
+        }
+        .info {
+            background: #cce5ff;
+            border: 1px solid #b8daff;
+            color: #004085;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎉 ChatMRPT</h1>
+        <div class="success">
+            <h2>✅ AWS Cognito is Ready!</h2>
+            <p>Your professional authentication system is now active</p>
+        </div>
+
+        <div class="info">
+            <strong>User Pool ID:</strong> <code>us-east-1_K9Zw8NzNd</code><br>
+            <strong>Client ID:</strong> <code>1da4nl8rlu0u3ec9n0hqke210c</code>
+        </div>
+
+        <a href="#" class="btn" onclick="goToLogin()">
+            🚀 Go to AWS Cognito Login
+        </a>
+
+        <p style="color: #666; font-size: 14px;">
+            Users can now sign up with email, reset passwords, and more!<br>
+            All managed by AWS Cognito.
+        </p>
+    </div>
+
+    <script>
+        function goToLogin() {
+            // Construct the Cognito Hosted UI URL
+            const domain = 'https://user-pool-h41wyw.auth.us-east-1.amazoncognito.com';
+            const clientId = '1da4nl8rlu0u3ec9n0hqke210c';
+            const redirectUri = 'https://d225ar6c86586s.cloudfront.net/callback';
+            const responseType = 'code';
+            const scope = 'phone+email+openid+profile';
+
+            const loginUrl = `${domain}/login?client_id=${clientId}&response_type=${responseType}&scope=${scope}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+            window.location.href = loginUrl;
+        }
+
+        // Auto-redirect after 3 seconds
+        setTimeout(goToLogin, 3000);
+    </script>
+</body>
+</html>

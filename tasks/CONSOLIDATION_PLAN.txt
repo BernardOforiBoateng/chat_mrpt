@@ -1,0 +1,266 @@
+================================================================================
+LOCAL vs PRODUCTION SYNC - CONSOLIDATION PLAN
+================================================================================
+Date: 2025-10-21
+Goal: Merge local and production_sync into single source of truth for GitHub
+
+================================================================================
+DIRECTORY STRUCTURE
+================================================================================
+
+Current State:
+  Local Working:    /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/
+  Production Sync:  /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/production_sync/instance_3.21.167.170/
+
+File Counts:
+  Local:            343 Python files in app/
+  Production Sync:  380 Python files in app/
+  Difference:       +37 files in production
+
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+Files That Are IDENTICAL (✓):
+-----------------------------------------------------------------
+✓ app/core/unified_data_state.py (the data bleed singleton issue)
+✓ app/core/request_interpreter.py
+✓ app/__init__.py
+✓ run.py
+
+Files That DIFFER (✗):
+-----------------------------------------------------------------
+✗ app/web/routes/visualization_routes.py
+  - This is CRITICAL - contains data bleed vulnerability
+  - Need to determine which version is correct
+
+
+Files/Directories ONLY in Production:
+-----------------------------------------------------------------
+Python Code Files:
+  - app/core/choice_interpreter.py
+  - app/core/tool_schema_registry.py
+  - app/core/request_interpreter.OLD_WITH_DEBUG_BLOB/ (BACKUP - can ignore)
+  - app/data_analysis_v3/core/analytics_helpers.py
+  - app/data_analysis_v3/core/scope_utils.py
+  - app/runtime/ (entire directory - workflow management)
+    * Contains: upload_service.py, standard/workflow.py, tpr/detector.py, etc.
+
+React Build Files (app/static/react/assets/):
+  - Many index-*.js and index-*.css files
+  - These are compiled React assets (can regenerate from source)
+
+
+Files/Directories ONLY in Local:
+-----------------------------------------------------------------
+(Still analyzing - background process running)
+
+
+================================================================================
+CONSOLIDATION STRATEGY
+================================================================================
+
+RECOMMENDATION: Use Production as Base, Cherry-pick from Local
+
+Rationale:
+1. Production is actively serving users
+2. Production has newer features (app/runtime/, analytics_helpers.py, etc.)
+3. Most core files match between local and production
+4. Safer to start with "known working" production code
+
+Step-by-Step Plan:
+-----------------------------------------------------------------
+
+Phase 1: Analyze visualization_routes.py Difference
+  1. Compare the two versions in detail
+  2. Determine which has the correct logic
+  3. Decide: keep production, keep local, or merge both
+
+Phase 2: Identify Local-Only Changes
+  1. Find files that exist ONLY in local
+  2. Determine if they're important or can be discarded
+  3. Create list of files to preserve from local
+
+Phase 3: Create Consolidated Directory
+  Option A: Start with production, add local changes
+    - Copy production_sync to new location
+    - Cherry-pick important files from local
+    - Review and test
+
+  Option B: Update local with production changes
+    - Copy missing files from production to local
+    - Replace differing files with production versions
+    - Test functionality
+
+  Option C: Fresh merge
+    - Create new directory
+    - Copy production as base
+    - Selectively add local improvements
+    - Clean as we go
+
+
+================================================================================
+DETAILED COMPARISON: visualization_routes.py
+================================================================================
+
+Need to investigate:
+- What changed between the two versions?
+- Which version has the data bleed vulnerability fix (if any)?
+- Did local have unreleased improvements?
+- Did production have hotfixes?
+
+Action: Create side-by-side diff to understand changes
+
+
+================================================================================
+FILES TO COPY FROM PRODUCTION TO LOCAL
+================================================================================
+
+New Features (Production has, Local missing):
+  □ app/core/choice_interpreter.py
+  □ app/core/tool_schema_registry.py
+  □ app/data_analysis_v3/core/analytics_helpers.py
+  □ app/data_analysis_v3/core/scope_utils.py
+  □ app/runtime/ (entire directory)
+
+Backups/Debug (Production has, Don't need in GitHub):
+  ✗ app/core/request_interpreter.OLD_WITH_DEBUG_BLOB/
+
+React Assets (Production has, Auto-generated):
+  ~ app/static/react/assets/*.js
+  ~ app/static/react/assets/*.css
+  (Note: These should be .gitignored, generated from source)
+
+
+================================================================================
+RECOMMENDED WORKFLOW
+================================================================================
+
+Step 1: Compare visualization_routes.py
+-----------------------------------------------------------------
+Command:
+  diff -u /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/web/routes/visualization_routes.py \
+    /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/production_sync/instance_3.21.167.170/app/web/routes/visualization_routes.py \
+    > /tmp/viz_routes_diff.txt
+
+Review: Determine which version to keep
+
+
+Step 2: Copy Missing Production Files to Local
+-----------------------------------------------------------------
+# Copy new Python modules
+cp -r /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/production_sync/instance_3.21.167.170/app/runtime \
+  /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/
+
+cp /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/production_sync/instance_3.21.167.170/app/core/choice_interpreter.py \
+  /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/core/
+
+cp /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/production_sync/instance_3.21.167.170/app/core/tool_schema_registry.py \
+  /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/core/
+
+cp /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/production_sync/instance_3.21.167.170/app/data_analysis_v3/core/analytics_helpers.py \
+  /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/data_analysis_v3/core/
+
+cp /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/production_sync/instance_3.21.167.170/app/data_analysis_v3/core/scope_utils.py \
+  /mnt/c/Users/bbofo/OneDrive/Desktop/ChatMRPT/app/data_analysis_v3/core/
+
+
+Step 3: Decide on visualization_routes.py
+-----------------------------------------------------------------
+After reviewing diff:
+  - If production is better: Copy from production
+  - If local is better: Keep local
+  - If both have good parts: Manually merge
+
+
+Step 4: Clean Up Local for GitHub
+-----------------------------------------------------------------
+Now that local has all production files:
+  1. Remove backup files (*.backup, *.old)
+  2. Remove .env files
+  3. Remove aws_files/
+  4. Create comprehensive .gitignore
+  5. Proceed with GitHub cleanup
+
+
+Step 5: Archive production_sync
+-----------------------------------------------------------------
+Once consolidated:
+  mv production_sync production_sync_archive_20251021
+  # Keep for reference but don't use going forward
+
+
+================================================================================
+ALTERNATIVE: START FRESH WITH PRODUCTION
+================================================================================
+
+If we want cleaner approach:
+
+Step 1: Rename current local
+  mv ChatMRPT ChatMRPT_local_archive_20251021
+
+Step 2: Make production the new working directory
+  mv production_sync/instance_3.21.167.170 ChatMRPT
+
+Step 3: Check if any critical local changes need to be preserved
+  diff -rq ChatMRPT_local_archive_20251021/app ChatMRPT/app \
+    --exclude="__pycache__" --exclude="*.pyc"
+
+Step 4: Cherry-pick any local improvements
+  # Copy specific files if needed
+
+Step 5: Clean production code for GitHub
+  # Remove .env, backups, etc.
+
+
+================================================================================
+DECISION POINT
+================================================================================
+
+Which approach should we take?
+
+Option A: UPDATE LOCAL WITH PRODUCTION FILES ✓ RECOMMENDED
+  Pros:
+    - Keeps your current working directory structure
+    - Minimal disruption
+    - Can test incrementally
+  Cons:
+    - Need to carefully copy files
+    - Might miss some changes
+
+Option B: REPLACE LOCAL WITH PRODUCTION
+  Pros:
+    - Clean slate
+    - Know exactly what's in production
+    - Simpler consolidation
+  Cons:
+    - Loses any local-only work
+    - More disruptive
+
+Option C: MANUAL MERGE TO NEW DIRECTORY
+  Pros:
+    - Most control
+    - Can cherry-pick best of both
+  Cons:
+    - Most time-consuming
+    - Requires careful review
+
+
+RECOMMENDATION: Option A - Update Local with Production Files
+Then proceed with GitHub cleanup using the updated local directory.
+
+
+================================================================================
+NEXT IMMEDIATE ACTIONS
+================================================================================
+
+1. Review visualization_routes.py diff
+2. Copy production files to local (runtime/, choice_interpreter.py, etc.)
+3. Verify local still works after additions
+4. Proceed with GitHub cleanup plan
+
+
+================================================================================
+END OF CONSOLIDATION PLAN
+================================================================================

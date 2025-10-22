@@ -1,0 +1,68 @@
+I analyzed your Mali results and found the answer to why urban Bamako shows low urbanicity.
+
+================================================================================
+THE ISSUE: DBI DOESN'T WORK IN NON-ARID REGIONS
+================================================================================
+
+**Your observation is correct!** DBI shows low values (~27%) for urban Bamako despite being urban.
+
+**I validated your calculation:**
+- Ran fresh DBI analysis for Mali
+- Results: 99.4% identical to yours (343/345 points match exactly)
+- Your DBI calculation is correct, the low values are real
+
+**The numbers (Non-arid Southwest Mali):**
+```
+MODIS:  49% urban ✓ (reference)
+DBI:    27% urban ✗ (underestimated by 22%)
+```
+
+**Why DBI is low:**
+DBI = NDBI - NDVI (designed for arid regions)
+
+Bamako is NON-ARID with vegetation → High NDVI → DBI = NDBI - High NDVI → Low DBI
+
+The NDVI subtraction penalizes vegetated urban areas. This is a known limitation of DBI for non-arid regions.
+
+**Evidence:**
+- GHSL correlation with MODIS: r=0.867 (strong) ✓
+- DBI correlation with MODIS: r=0.189 (weak) ✗
+
+================================================================================
+BONUS FINDING: GHSL ALSO CAPPED AT 30%
+================================================================================
+
+I noticed your GHSL is capped at 30% for both Mali and Nigeria when it should go up to 100%.
+
+
+**Quick fix:** Use global GHSL directly:
+```javascript
+var ghsl = ee.Image('JRC/GHSL/P2023A/GHS_SMOD/2020').select('smod_code');
+var ghslUrban = ghsl.gte(21).and(ghsl.lte(30)).rename('ghsl');
+```
+
+================================================================================
+RECOMMENDATION
+================================================================================
+
+**For non-arid southwest Mali (Bamako):**
+→ Use GHSL or MODIS (DBI underestimates by ~50%)
+
+**For arid northern Mali:**
+→ DBI should work better, but verify
+
+**Simplest approach:**
+→ Use GHSL or MODIS uniformly across all Mali
+
+================================================================================
+FILES ATTACHED
+================================================================================
+
+Interactive maps showing DBI-MODIS gap:
+✓ dbi_only_interactive_map.html - Shows all 345 points
+✓ mali_comparison_charts.png - Statistical evidence
+
+Full analysis:
+✓ DBI_ONLY_ANSWER_TO_GRACE.md - Complete explanation
+✓ Bernard_Mali_Test.csv - My validation data
+

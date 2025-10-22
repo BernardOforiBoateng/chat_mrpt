@@ -1,0 +1,335 @@
+ChatMRPT 15-MINUTE SALES DEMO SCRIPT - FINAL VERSION
+====================================================
+GOAL: Get them FIRED UP, not sleepy!
+STRATEGY: Pre-loaded tabs. Show outputs. Get excited!
+IMPORTANT: Everything is already run. Just switch tabs and talk.
+
+====================================================
+OPENING (2 minutes)
+====================================================
+
+Hi everybody! Welcome to the ChatMRPT demo.
+
+I'm going to show you how ChatMRPT - the Chat-based Malaria Reprioritization Tool - works.
+
+There are several things this tool can offer you:
+
+You can analyze malaria risk and create vulnerability maps. What are vulnerability maps? These are maps that show you where people have high risk for malaria based on your analysis.
+
+You can analyze your test positivity rate data.
+
+And there are other capabilities, including helping you plan ITN distribution and answering conceptual malaria questions.
+
+I'm going to show you what your outputs could potentially look like. Then in the breakout rooms, you're going to pick ONE function that you want to explore further, and your facilitator will guide you.
+
+Get excited!
+
+
+====================================================
+TAB 1: DATA UPLOAD OPTIONS (2 minutes)
+====================================================
+
+[SHOW LANDING PAGE WITH UPLOAD INTERFACE]
+
+Alright, so when you first come to ChatMRPT, you'll see the interface.
+
+Notice we have TWO ways to upload your data:
+
+OPTION 1: "I already have my data ready"
+This is if you have BOTH your CSV file AND your shapefile ready. Your CSV already has TPR calculated and environmental variables like rainfall, vegetation, water proximity - everything is in there.
+
+If that's you, click this tab and upload both files. ChatMRPT will read them and you can start creating vulnerability maps immediately.
+
+OPTION 2: "I have TPR data"
+This is what MOST of you will use. This is if you only have your raw testing data from DHIS2 - facility names, test results, age groups - but you DON'T have the environmental variables or shapefiles yet.
+
+This is the tab I'm going to show you today. This is the one we'll use for the demo.
+
+[CLICK ON "I HAVE TPR DATA" TAB]
+
+When you click this tab, you upload your TPR data - just your CSV file from DHIS2.
+
+ChatMRPT will:
+- Calculate ward-level TPR for you
+- Pull the shapefile for your state from our database
+- Add environmental variables automatically - rainfall, vegetation, water indices, soil wetness - all the stuff you need
+- Prepare everything for risk analysis
+
+So you upload ONE file. ChatMRPT does the rest.
+
+That's the magic here. You don't need to hunt for shapefiles. You don't need to download satellite data. ChatMRPT has it all.
+
+Now, we all know that malaria data is often filled with inconsistencies because of the way it's collected. People collect it on paper forms, then try to type it into DHIS2.
+
+The data I'm showing you today has been cleaned already. In the real world, you'd clean your data first using our data cleaning guide. But once it's clean, ChatMRPT handles everything else.
+
+
+====================================================
+TAB 2: TPR ANALYSIS RESULTS (2 minutes)
+====================================================
+
+[SWITCH TO PRE-LOADED TPR TAB - ALREADY COMPLETE]
+
+Let me show you what a TPR analysis looks like when it's done.
+
+This is Adamawa data I ran earlier.
+
+ChatMRPT asked me three simple questions:
+- Which state? Adamawa was auto-detected from the data.
+- Which facility level? I picked Primary facilities - 9,912 facilities with over 900,000 tests.
+- Which age group? I picked Under-5 children - the highest risk group.
+
+And here's what I got back:
+
+Average TPR: 71% across 222 wards in Adamawa!
+
+Top 3 high-burden wards:
+- Humbutudi: 91.52% TPR
+- Rumde: 91.42% TPR
+- Girei 2: 89.97% TPR
+
+[SHOW TPR DISTRIBUTION MAP]
+
+And here's the interactive TPR distribution map.
+
+You can see dark red wards - very high TPR. Orange wards - high TPR. Yellow - moderate.
+
+You can zoom in, click on any ward to see exact values, and download the map or the data.
+
+This analysis - selecting facilities, calculating TPR by ward, creating maps - would take you 2-3 hours in Stata or Excel.
+
+ChatMRPT did it in 2 minutes.
+
+And notice what happened automatically: ChatMRPT prepared this data for the next step by adding environmental variables like rainfall, vegetation, water proximity.
+
+So now I can move straight to risk analysis.
+
+
+====================================================
+TAB 3: AGENT TRANSITION & DATA OVERVIEW (1 minute)
+====================================================
+
+[SHOW AGENT TRANSITION MESSAGE]
+
+After TPR calculation finishes, ChatMRPT transitions you to the AI agent.
+
+You'll see this message: "I've loaded your data from your region. It has 226 rows and 14 columns."
+
+Now you have options:
+- Map variable distribution - visualize how variables are spread
+- Check data quality - validate your dataset
+- Explore specific variables
+- Run malaria risk analysis - this is what we want!
+
+You can also ask the agent questions about your data. Like "Tell me about the variables in my data" or "What's the correlation between rainfall and TPR?"
+
+The agent will answer you. It's conversational. It's like talking to a data analyst.
+
+But for this demo, let me show you the main workflow - risk analysis and ITN planning.
+
+
+====================================================
+TAB 4: VULNERABILITY MAPS (3 minutes)
+====================================================
+
+[SWITCH TO PRE-LOADED RISK ANALYSIS TAB - SHOW MAPS]
+
+So here's the question: which wards have the HIGHEST malaria risk when we combine TPR with environmental factors?
+
+This is what vulnerability maps look like.
+
+ChatMRPT took the TPR data and combined it with environmental factors:
+- Rainfall patterns - affects mosquito breeding
+- Distance to water bodies - breeding sites
+- Soil wetness - ground-level moisture
+- Urban percentage - housing quality, drainage
+
+And it creates vulnerability maps that rank every ward from highest to lowest malaria risk.
+
+[SHOW COMPOSITE MAP]
+
+This is the Composite Score map. Wards in dark red have the highest composite risk score - high TPR plus high environmental risk. Wards in yellow and green are lower risk.
+
+You can zoom in and see clusters of high-risk wards. These are your priority intervention areas.
+
+[SHOW PCA MAP IF AVAILABLE]
+
+We also use Principal Component Analysis - a statistical method that validates the results using a different approach.
+
+You'll notice the two maps are similar but not identical. That's good! It means the results are robust.
+
+And the most important output is this: a ranked list of all 226 wards with their risk scores.
+
+Ward 1 = highest risk. Ward 226 = lowest risk.
+
+You can download the maps, the unified dataset with all scores, and ward shapefiles for ArcGIS.
+
+This is actionable intelligence. You now know exactly which wards need the most attention.
+
+And that leads to the next question: how do we distribute bed nets efficiently?
+
+
+====================================================
+TAB 5: ITN DISTRIBUTION PLAN (3 minutes)
+====================================================
+
+[SWITCH TO PRE-LOADED ITN TAB - SHOW ALLOCATION MAP]
+
+Once you know which wards have the highest risk, the critical question is: How do I distribute bed nets efficiently?
+
+ChatMRPT has an ITN distribution planning tool.
+
+I told it we have 100,000 nets available. It takes your risk rankings and population data and tells you how many nets to allocate to each ward.
+
+[SHOW ALLOCATION MAP]
+
+This map shows the allocation plan. Darker colors mean more nets allocated because of higher risk or higher population.
+
+The algorithm prioritizes:
+1. High-risk wards first - top 25% by composite rank
+2. Proportional to population - bigger wards get more nets
+3. Urban versus rural adjustment
+
+[SHOW ALLOCATION TABLE IF VISIBLE]
+
+And you get a detailed table showing for each ward:
+- Ward name and LGA
+- Risk rank (1 = highest)
+- Population
+- Nets allocated
+- Coverage percentage
+
+For example, Humbutudi ward - Rank 1, highest risk - gets the most nets because it has high TPR, high environmental risk, and a large population.
+
+This plan is ready to export as CSV for your logistics team, Excel for presentations, or shapefile for mapping.
+
+This is micro-planning at its finest. You're not guessing where to send nets - you're making data-driven decisions based on actual TPR data, environmental risk factors, and population distribution.
+
+And you can share this plan immediately with your logistics coordinator, state malaria program managers, funding partners like PMI and Global Fund, and community distribution teams.
+
+This entire workflow - from raw testing data to a complete ITN distribution plan - took less than 10 minutes.
+
+In a traditional workflow with Stata, Excel, and ArcGIS, this would take days.
+
+
+====================================================
+TAB 6: AI AGENT CAPABILITIES (2 minutes - OPTIONAL)
+====================================================
+
+[SHOW PRE-RUN AGENT QUESTIONS TAB]
+
+Oh, one more thing!
+
+ChatMRPT can also answer your data questions on the fly.
+
+[SHOW SCATTER PLOT: TPR VS DISTANCE TO WATER]
+
+I asked: "Create a scatter plot showing the relationship between distance to water bodies and TPR"
+
+And it generated this interactive scatter plot instantly. You can see there's a weak correlation - wards further from water don't necessarily have lower TPR. Interesting!
+
+[SHOW CORRELATION HEATMAP]
+
+I asked: "What is the correlation between rainfall and soil wetness?"
+
+And it created this correlation heatmap showing -0.609 correlation. Negative correlation! That means wards with higher rainfall actually have lower soil wetness in this dataset. Probably because high rainfall areas have better drainage.
+
+[SHOW URBAN PERCENTAGE MAP]
+
+I asked: "Plot the map distribution for urban percentage"
+
+And it created this spatial distribution map showing urbanization patterns across wards.
+
+So if you have specific questions about your data during the hands-on session, just ask ChatMRPT:
+
+"What's the average TPR for urban wards?"
+"Show me wards with high TPR but low rainfall"
+"Which LGA has the highest average TPR?"
+
+It's like having a data analyst on call. No Stata syntax, no R code - just ask in plain English.
+
+
+====================================================
+TAB 7: ARENA (1 minute - OPTIONAL, SKIP IF BROKEN)
+====================================================
+
+[SWITCH TO ARENA TAB OR SKIP]
+
+ChatMRPT also has a learning feature called the Arena.
+
+You ask a malaria concept question, and the system presents you with two AI-generated responses - Model A and Model B. The models are hidden.
+
+Your job is to read both responses, vote for which one is better, and rate your confidence.
+
+This helps you learn malaria concepts in an engaging way. It builds critical thinking - can you tell a good explanation from a mediocre one?
+
+We're using this in our research study to measure how ChatMRPT helps build conceptual knowledge.
+
+You'll get a chance to try it in the hands-on session if you're interested.
+
+
+====================================================
+TRANSITION TO BREAKOUT ROOMS (1 minute)
+====================================================
+
+Alright!
+
+So in the last 15 minutes, you've seen:
+
+1. Two data upload options - "I have everything ready" vs "I have TPR data"
+2. TPR analysis - Calculate test positivity rates by facility, age group, and location
+3. Vulnerability maps - Rank wards from highest to lowest risk using Composite and PCA methods
+4. ITN planning - Optimize bed net distribution based on risk and population
+5. AI Agent - Ask your data questions in plain English
+6. Arena - Learn malaria concepts through interactive comparisons
+
+Now it's YOUR turn to try it!
+
+We have breakout rooms set up for hands-on practice. You'll pick ONE function to explore in depth:
+
+ROOM 1: TPR Workflow
+Best for people who work with testing data, DHIS2 managers, state program officers.
+You'll upload data, calculate TPR, interpret maps.
+
+ROOM 2: Risk Analysis + ITN Planning
+Best for program planners, logistics coordinators, intervention designers.
+You'll run risk analysis, create vulnerability maps, plan ITN distribution.
+
+ROOM 3: Arena + General Exploration
+Best for trainers, educators, researchers, curious learners.
+You'll try the Arena, ask data questions, explore the AI agent.
+
+Pick the room most relevant to your work. Your facilitator will guide you step-by-step.
+
+Questions?
+
+[ANSWER 2-3 QUICK QUESTIONS MAX - DON'T LET IT DRAG]
+
+Great! Let's go to breakout rooms!
+
+
+====================================================
+END OF DEMO
+====================================================
+
+TIMING BREAKDOWN:
+- Opening: 2 min
+- Tab 1 (Upload Options): 2 min
+- Tab 2 (TPR Results): 2 min
+- Tab 3 (Agent Transition): 1 min
+- Tab 4 (Vulnerability Maps): 3 min
+- Tab 5 (ITN Planning): 3 min
+- Tab 6 (AI Agent): 2 min (OPTIONAL - cut if running over)
+- Tab 7 (Arena): 1 min (OPTIONAL - skip if broken)
+- Transition: 1 min
+TOTAL: 15-17 minutes
+
+REMEMBER:
+- Energy HIGH the whole time
+- Everything is PRE-RUN - just switch tabs
+- Show outputs, not process
+- Get them FIRED UP
+- Focus on SPEED, NO CODING, ACTIONABLE results
+- If running over time, CUT Tab 6 and 7
+- Don't explain algorithms - just show what you get
+- Make them feel smart for choosing this tool!

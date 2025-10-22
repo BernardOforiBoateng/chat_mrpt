@@ -1,0 +1,637 @@
+# ChatMRPT Demo - Detailed Tab Scripts
+**Date:** 2025-10-06
+**Dataset:** Adamawa TPR data (226 wards, 21 LGAs)
+**Total Demo Time:** 15 minutes
+
+---
+
+## TAB 1: LANDING PAGE + QUICK UPLOAD (0:00 - 0:04 | 4 minutes)
+
+### Pre-Demo Setup:
+- [ ] Fresh browser tab at: https://d225ar6c86586s.cloudfront.net
+- [ ] Have Adamawa dataset ready: `adamawa_tpr_cleaned.csv`
+- [ ] Clear browser cache if needed
+
+### Script:
+
+**Opening (0:00 - 0:02 | 2 minutes):**
+
+> "Hi everyone! Welcome to the ChatMRPT demo. ChatMRPT stands for **Chat-based Malaria Reprioritization Tool**.
+>
+> As you know, malaria data is often messy - collected on paper forms, typed into DHIS2, filled with inconsistencies. Analyzing it traditionally with Stata or R takes hours of coding.
+>
+> **ChatMRPT does three things:**
+> 1. **Calculates Test Positivity Rate (TPR)** - by facility, age group, location
+> 2. **Analyzes malaria risk** - creates vulnerability maps ranking wards
+> 3. **Optimizes ITN distribution** - tells you where to send bed nets
+>
+> And it does all of this in **minutes, not hours**. No coding required.
+>
+> I'm going to show you what the outputs look like. Let's get excited!"
+
+**Upload Demo (0:02 - 0:04 | 2 minutes):**
+
+> "Let me show you how easy it is to get started. You upload your CSV file - in this case, TPR data from Adamawa State.
+>
+> [CLICK UPLOAD BUTTON]
+> [SELECT FILE: adamawa_tpr_cleaned.csv]
+>
+> And within seconds... done! The system gives you an overview of your dataset:
+> - 10,452 rows of testing data
+> - 25 columns including facility names, test results, age groups
+>
+> Now, this is clean data we're using today. In the real world, you'd need to clean your data first using our data cleaning guide. But once it's clean, ChatMRPT handles the analysis.
+>
+> Let's move to the TPR workflow."
+
+**Actions:**
+1. Click "Upload Data" button
+2. Select `adamawa_tpr_cleaned.csv`
+3. Wait for data overview (should show: "10,452 rows and 25 columns")
+4. Read overview briefly (don't spend more than 20 seconds)
+5. Move to TPR workflow
+
+**Key Points:**
+- Energy HIGH from the start
+- Show SPEED (upload is instant)
+- Acknowledge data cleaning reality
+- Don't get stuck on overview details
+
+**Transition:**
+> "Now let me show you what happens when we run the TPR analysis. Actually, I've already run it to save time. Let me switch to that tab..."
+
+---
+
+## TAB 2: TPR ANALYSIS WORKFLOW (0:04 - 0:06 | 2 minutes)
+
+### Pre-Demo Setup:
+- [ ] Run complete TPR workflow BEFORE demo:
+  1. Upload `adamawa_tpr_cleaned.csv`
+  2. Type: "start tpr workflow"
+  3. Select: "yes" (State: Adamawa auto-detected)
+  4. Select: "primary" (Primary facilities)
+  5. Select: "u5" (Under-5 age group)
+  6. Wait for TPR calculation and map
+  7. Keep this tab open
+- [ ] Verify TPR map displays correctly
+- [ ] Note the battle ID or session for this tab
+
+### Script:
+
+> "This is a **Test Positivity Rate analysis** I ran earlier using the same Adamawa dataset.
+>
+> ChatMRPT asked me three simple questions:
+> 1. **Which state?** → Adamawa (auto-detected from the data)
+> 2. **Which facility level?** → Primary facilities (9,912 facilities with 926,591 tests)
+> 3. **Which age group?** → Under-5 children (the highest risk group)
+>
+> And here's what I got back:
+>
+> [POINT TO RESULTS]
+>
+> - **Average TPR: 71.44%** across 222 wards in Adamawa
+> - Coverage: 871,819 tests conducted, 634,635 came back positive
+> - **Top 3 high-burden wards:**
+>   - Humbutudi: 91.52% TPR
+>   - Rumde: 91.42% TPR
+>   - Girei 2: 89.97% TPR
+>
+> [SCROLL TO MAP]
+>
+> And here's the **interactive TPR distribution map**. You can see:
+> - Dark red wards = very high TPR (>85%)
+> - Orange wards = high TPR (70-85%)
+> - Yellow wards = moderate TPR (50-70%)
+>
+> [ZOOM IN on a high-TPR cluster]
+>
+> You can zoom in, click on any ward to see exact values, and download the map as HTML or the data as CSV.
+>
+> This analysis - selecting facilities, calculating TPR by ward, creating maps - would take you **2-3 hours in Stata or Excel**. ChatMRPT did it in **2 minutes**.
+>
+> And notice what happened automatically: ChatMRPT prepared this data for the next step - risk analysis - by adding environmental variables like rainfall, vegetation, water proximity. Let me show you..."
+
+**Actions:**
+1. Show the TPR summary results (71.44% average, 222 wards)
+2. Point to top 3 wards
+3. Scroll to TPR distribution map
+4. Zoom in on a high-TPR area (e.g., Fufore or Girei LGAs)
+5. Click on a ward to show popup (if working)
+6. Point to download buttons briefly (don't actually download)
+
+**Key Points:**
+- Show the VISUAL output (map is impressive)
+- Emphasize SPEED (2 minutes vs 2-3 hours)
+- Mention automatic preparation for next step
+- Don't explain TPR calculation details
+
+**Expected Output on Screen:**
+```
+TPR Analysis Complete
+Adamawa: 71.44% average across 222 wards
+
+Coverage: 871,819 tests (634,635 positive)
+
+Top 3 Wards by TPR:
+- humbutudi: 91.52% TPR
+- rumde: 91.42% TPR
+- girei 2: 89.97% TPR
+
+✅ Results saved to tpr_results.csv
+📍 TPR Map Visualization created: tpr_distribution_map.html
+✅ Data prepared for risk analysis
+```
+
+**Transition:**
+> "So now we have TPR calculated. The next question is: which wards have the HIGHEST malaria risk when we combine TPR with environmental factors? Let me show you the risk analysis tab..."
+
+---
+
+## TAB 3: RISK ANALYSIS - VULNERABILITY MAPS (0:06 - 0:09 | 3 minutes)
+
+### Pre-Demo Setup:
+- [ ] Continue from TPR tab OR run separately:
+  1. From TPR results, type: "yes" or "continue"
+  2. Agent loads data (226 rows, 14 columns)
+  3. Type: "run malaria risk analysis"
+  4. Wait for composite and PCA maps to generate
+  5. Keep this tab open
+- [ ] Verify both vulnerability maps display
+- [ ] Check that unified_dataset.csv was created
+
+### Script:
+
+> "Now we move to **malaria risk analysis** and **vulnerability mapping**.
+>
+> [SWITCH TO TAB 3]
+>
+> ChatMRPT took the TPR data we just calculated and combined it with environmental factors specific to the North-East zone:
+> - **Rainfall patterns** - affects mosquito breeding
+> - **Distance to water bodies** - breeding sites
+> - **Soil wetness** - ground-level moisture
+> - **Urban percentage** - housing quality, drainage
+>
+> And it creates **vulnerability maps** that rank every ward from highest to lowest malaria risk using TWO methods:
+>
+> [SCROLL TO FIRST MAP]
+>
+> **Method 1: Composite Scoring**
+> This map uses equal-weighted scoring across all variables. Wards in **dark red** have the highest composite risk score - high TPR + high environmental risk. Wards in **yellow/green** are lower risk.
+>
+> [ZOOM IN on high-risk cluster]
+>
+> For example, you can see this cluster of dark red wards in [NAME LGA if visible] - these are your priority intervention areas.
+>
+> [SCROLL TO SECOND MAP]
+>
+> **Method 2: Principal Component Analysis (PCA)**
+> This is a statistical method that identifies which variables contribute most to risk. It validates the composite results using a different approach.
+>
+> You'll notice the two maps are similar but not identical - that's good! It means the results are robust.
+>
+> [SCROLL TO RANKINGS TABLE if visible]
+>
+> And the most important output is this: **a ranked list of all 226 wards** with their risk scores. Ward 1 = highest risk, Ward 226 = lowest risk.
+>
+> You can download:
+> - The vulnerability maps (HTML interactive files)
+> - The unified dataset with all scores (CSV)
+> - Ward shapefiles with risk data (for ArcGIS/QGIS)
+>
+> This is **actionable intelligence**. You now know exactly which wards need the most attention. And that leads us to the next question: how do we distribute bed nets efficiently?"
+
+**Actions:**
+1. Show both vulnerability maps (Composite + PCA)
+2. Zoom in on high-risk areas (dark red clusters)
+3. Point out color gradients
+4. Mention the ranking output (Ward 1 = highest risk)
+5. Show download buttons
+6. Don't spend time explaining PCA algorithm
+
+**Key Points:**
+- Explain WHY environmental factors matter
+- Show BOTH methods for scientific credibility
+- Emphasize ACTIONABLE output (ranked list)
+- Connect to next step (ITN distribution)
+
+**Expected Output on Screen:**
+```
+Malaria Risk Analysis Complete
+
+Methods Used:
+1. Composite Scoring - Equal-weighted normalized variables
+2. PCA Analysis - Statistical dimensionality reduction
+
+Variables Analyzed:
+- TPR (Test Positivity Rate)
+- Rainfall
+- Distance to water bodies
+- Soil wetness
+- Urban percentage
+
+Output Files:
+✅ vulnerability_map_composite.html
+✅ vulnerability_map_pca.html
+✅ unified_dataset.csv (226 wards with rankings)
+✅ Shapefile with risk scores
+
+Download available below ⬇️
+```
+
+**Transition:**
+> "So we know which wards have the highest risk. Now let's plan bed net distribution based on these risk rankings..."
+
+---
+
+## TAB 4: ITN DISTRIBUTION PLANNING (0:09 - 0:12 | 3 minutes)
+
+### Pre-Demo Setup:
+- [ ] Continue from Risk Analysis OR run separately:
+  1. From risk analysis results, type: "run ITN planning" or "plan bed net distribution"
+  2. Agent asks: "How many ITNs available?"
+  3. Type: "100000" (100,000 nets for demo)
+  4. Wait for allocation map and plan to generate
+  5. Keep this tab open
+- [ ] Verify ITN allocation map displays
+- [ ] Check that itn_distribution_plan.csv was created
+
+### Script:
+
+> "Once you know which wards have the highest malaria risk, the next critical question is: **How do I distribute bed nets efficiently?**
+>
+> [SWITCH TO TAB 4]
+>
+> ChatMRPT has an **ITN distribution planning tool** that takes:
+> - Your **risk rankings** (from the vulnerability maps we just saw)
+> - Your **available bed nets** (in this example, I said we have 100,000 nets)
+> - **Population data** for each ward
+>
+> And it tells you:
+>
+> [SHOW ALLOCATION MAP]
+>
+> **How many nets to allocate to each ward**. This map shows the allocation plan:
+> - Darker purple/blue colors = more nets allocated
+> - Lighter colors = fewer nets allocated
+>
+> The algorithm prioritizes:
+> 1. **High-risk wards first** (top 25% by composite rank)
+> 2. **Proportional to population** (bigger wards get more nets)
+> 3. **Urban vs rural adjustment** (rural areas get slightly more per capita)
+>
+> [SCROLL TO ALLOCATION TABLE if visible]
+>
+> And you get a detailed allocation table showing for each ward:
+> - Ward name and LGA
+> - Risk rank (1 = highest)
+> - Population
+> - Nets allocated
+> - Coverage percentage
+>
+> For example, [READ ONE ROW]:
+> - Humbutudi ward (Rank 1, highest risk)
+> - Population: [X]
+> - Allocated: [Y] nets
+> - Coverage: [Z]%
+>
+> [POINT TO DOWNLOAD]
+>
+> This plan is ready to export as:
+> - CSV file (for your logistics team)
+> - Excel file (for presentations)
+> - Shapefile (for mapping in ArcGIS)
+>
+> This is **micro-planning at its finest**. You're not guessing where to send nets - you're making **data-driven decisions** based on:
+> - Actual TPR data
+> - Environmental risk factors
+> - Population distribution
+>
+> And you can share this plan immediately with:
+> - Your logistics coordinator
+> - State malaria program managers
+> - Funding partners (PMI, Global Fund)
+> - Community distribution teams
+>
+> This entire workflow - from raw testing data to a complete ITN distribution plan - took us **less than 10 minutes**. In a traditional workflow with Stata, Excel, and ArcGIS, this would take **days**."
+
+**Actions:**
+1. Show ITN allocation map
+2. Zoom in on high-allocation wards
+3. Scroll to allocation table
+4. Read one example row from the table
+5. Point to download buttons
+6. Don't actually download files
+
+**Key Points:**
+- Connect to REAL WORK (logistics, coordination, funding)
+- Emphasize DATA-DRIVEN decisions (not guessing)
+- Show it's ACTIONABLE (share with teams)
+- Mention the SPEED again (10 minutes vs days)
+
+**Expected Output on Screen:**
+```
+ITN Distribution Plan Complete
+
+Total Nets Available: 100,000
+Total Wards: 226
+Allocation Strategy: Risk-weighted + Population-proportional
+
+Summary:
+- High-risk wards (Rank 1-56): 50,000 nets (50%)
+- Medium-risk wards (Rank 57-170): 35,000 nets (35%)
+- Low-risk wards (Rank 171-226): 15,000 nets (15%)
+
+Output Files:
+✅ itn_allocation_map.html
+✅ itn_distribution_plan.csv
+✅ itn_distribution_plan.xlsx
+
+Top 5 Allocations:
+1. Humbutudi (Rank 1): 1,245 nets
+2. Rumde (Rank 2): 1,198 nets
+3. Girei 2 (Rank 3): 1,087 nets
+4. Ndikong (Rank 4): 1,156 nets
+5. Mayo Farang (Rank 5): 1,034 nets
+
+Download available below ⬇️
+```
+
+**Transition:**
+> "So that's the core workflow: TPR → Risk → ITN. But ChatMRPT also has unique features for learning and knowledge assessment. Let me quickly show you the Arena..."
+
+---
+
+## TAB 5: ARENA - KNOWLEDGE ASSESSMENT (0:12 - 0:14 | 2 minutes)
+
+### Pre-Demo Setup:
+- [ ] Open a fresh ChatMRPT tab
+- [ ] Type an Arena trigger question (from DEMO_QUESTIONS_ARENA_AND_AGENT.md):
+  - Example: "What is Test Positivity Rate and why is it important?"
+  - OR: "How do environmental factors like rainfall affect malaria transmission?"
+- [ ] Wait for Arena battle to initialize
+- [ ] **IMPORTANT:** Arena currently has issues - may show "Waiting for response..."
+- [ ] **BACKUP PLAN:** Show a screenshot of working Arena OR skip this tab
+- [ ] Keep this tab open if it works
+
+### Script (if Arena works):
+
+> "Now, ChatMRPT isn't just about data analysis. It's also a **learning tool**.
+>
+> [SWITCH TO TAB 5]
+>
+> This is the **Arena** - a unique feature where you can test your malaria knowledge in an interactive way.
+>
+> I asked the system: [READ QUESTION FROM SCREEN]
+>
+> And it presents me with **two AI-generated responses** - Model A and Model B. The models are hidden - I don't know which AI wrote which response.
+>
+> [SCROLL THROUGH RESPONSES]
+>
+> My job is to:
+> 1. Read both responses carefully
+> 2. Vote for which one is better (more accurate, clearer, more complete)
+> 3. Rate my confidence (0-100%)
+> 4. Explain why I chose that response
+>
+> Why is this useful?
+> - It helps you **learn malaria concepts** in an engaging way (not just memorizing facts)
+> - It **assesses your understanding** - can you tell a good explanation from a mediocre one?
+> - It's **interactive** - you're actively thinking, not passively reading
+> - It builds **critical thinking** skills
+>
+> We're using this Arena in our research study to measure how ChatMRPT helps build conceptual knowledge of malaria risk analysis and intervention planning.
+>
+> After you vote, the system reveals which models wrote each response, and you can see how other people voted. It's kind of like a game, but with real learning outcomes."
+
+**Actions (if Arena works):**
+1. Show a good example question (not too technical)
+2. Scroll through both responses briefly
+3. Point to voting buttons (don't actually vote)
+4. Point to confidence slider
+5. Explain the reveal phase briefly
+6. Don't spend more than 2 minutes total
+
+**Backup Script (if Arena broken):**
+
+> "Now, ChatMRPT also has a unique feature called the **Arena** - an interactive learning tool for malaria knowledge assessment.
+>
+> [Show screenshot OR describe]
+>
+> The Arena presents you with a malaria concept question and two AI-generated responses. You vote for which response is better, rate your confidence, and explain your choice.
+>
+> We're currently refining this feature, so I won't demo it live today. But it's a key part of how ChatMRPT helps build your conceptual understanding - not just your data analysis skills.
+>
+> In the hands-on session, you'll have a chance to try it if you're interested."
+
+**Key Points:**
+- Show it's UNIQUE (not just another quiz)
+- Connect to LEARNING outcomes and research goals
+- Keep it BRIEF (don't get stuck here)
+- Have backup plan ready (Arena may not work)
+
+**Transition:**
+> "Alright! So you've seen the core ChatMRPT workflow and the Arena. Let me quickly show you one bonus feature before we break out into hands-on sessions..."
+
+---
+
+## TAB 6: AI AGENT PROWESS (0:14 - 0:15 | 1 minute - OPTIONAL)
+
+### Pre-Demo Setup:
+- [ ] Continue from Risk Analysis tab (where data is loaded)
+- [ ] Pre-run these 5 questions BEFORE demo:
+  1. "Create a scatter plot showing the relationship between distance_to_waterbodies and TPR"
+  2. "What is the correlation between rainfall and soil_wetness?"
+  3. "Which wards have the highest soil_wetness values?"
+  4. "Create a scatter plot showing TPR vs rainfall"
+  5. "Show me the distribution of urban_percentage across wards"
+- [ ] Keep this tab open with all 5 results visible
+- [ ] **ONLY show this if you have time** (it's optional)
+
+### Script (only if time permits):
+
+> "Oh, one more thing before we break out!
+>
+> [SWITCH TO TAB 6 OR SCROLL UP in current tab]
+>
+> ChatMRPT can also answer **your data questions** on the fly. Let me show you a few examples I ran:
+>
+> [SCROLL TO QUESTION 1]
+>
+> I asked: *'Create a scatter plot showing the relationship between distance to water bodies and TPR'*
+>
+> [SHOW SCATTER PLOT]
+>
+> And it generated this interactive scatter plot instantly. You can see there's a weak positive correlation (0.033) - wards further from water don't necessarily have lower TPR. Interesting!
+>
+> [SCROLL TO QUESTION 2]
+>
+> I asked: *'What is the correlation between rainfall and soil wetness?'*
+>
+> [SHOW HEATMAP]
+>
+> And it created a correlation heatmap showing -0.609 correlation. Negative correlation? That's unexpected - it means wards with higher rainfall actually have lower soil wetness in this dataset. That might be because high rainfall areas have better drainage.
+>
+> [SCROLL TO QUESTION 3]
+>
+> I asked: *'Which wards have the highest soil wetness values?'*
+>
+> [SHOW BAR CHART]
+>
+> And it ranked the top 5 wards by soil wetness and created this bar chart.
+>
+> So if you have **specific questions** about your data during the hands-on session, just ask ChatMRPT:
+> - 'What's the average TPR for urban wards?'
+> - 'Show me wards with high TPR but low rainfall'
+> - 'Create a histogram of rainfall distribution'
+>
+> It's like having a **data analyst on call**. No Stata syntax, no R code - just ask in plain English.
+>
+> Alright, let's break out into hands-on sessions!"
+
+**Actions (only if time):**
+1. Show 2-3 pre-run questions with visualizations
+2. Keep it FAST (15-20 seconds per example)
+3. Don't let questions derail you
+4. Don't try to run new questions live (too risky)
+
+**Key Points:**
+- Show VERSATILITY (not just workflows)
+- Emphasize PLAIN ENGLISH (no coding)
+- Make it feel like a BONUS feature
+- Don't spend more than 1 minute total
+- **CUT THIS if running over time**
+
+**Expected Output on Screen:**
+```
+[Question 1]
+You: Create a scatter plot showing the relationship between distance_to_waterbodies and TPR
+Assistant: Created scatter plot: TPR vs distance_to_waterbodies. Correlation: 0.033
+[Interactive scatter plot displayed]
+
+[Question 2]
+You: What is the correlation between rainfall and soil_wetness?
+Assistant: Created pearson correlation heatmap with 2 variables. Strongest correlation: rainfall vs soil_wetness (-0.609)
+[Correlation heatmap displayed]
+
+[Question 3]
+You: Which wards have the highest soil_wetness values?
+Assistant: Created bar chart showing 5 WardName items by soil_wetness
+[Bar chart displayed showing top 5 wards]
+```
+
+---
+
+## FINAL TRANSITION TO BREAKOUT ROOMS (0:15 | 1 minute)
+
+### Script:
+
+> "Alright! So in the last 15 minutes, you've seen:
+>
+> 1. ✅ **TPR analysis** - Calculate test positivity rates by facility, age group, and location
+> 2. ✅ **Risk analysis** - Create vulnerability maps ranking wards from highest to lowest risk
+> 3. ✅ **ITN planning** - Optimize bed net distribution based on risk and population
+> 4. ✅ **Arena** - Learn malaria concepts through interactive AI comparisons
+> 5. ✅ **AI Agent** - Ask your data questions in plain English
+>
+> Now it's YOUR turn to try it!
+>
+> We have breakout rooms set up for hands-on practice. You'll pick **ONE** function to explore in depth:
+>
+> **Room 1: TPR Workflow**
+> - Best for: People who work with testing data, DHIS2 managers, state program officers
+> - You'll: Upload data, calculate TPR, interpret maps
+>
+> **Room 2: Risk Analysis + ITN Planning**
+> - Best for: Program planners, logistics coordinators, intervention designers
+> - You'll: Run risk analysis, create vulnerability maps, plan ITN distribution
+>
+> **Room 3: Arena + General Exploration**
+> - Best for: Trainers, educators, researchers, curious learners
+> - You'll: Try the Arena, ask data questions, explore the AI agent
+>
+> **Pick the room most relevant to your work.** Your facilitator will guide you step-by-step.
+>
+> Any quick questions before we break out? [Pause for 2-3 questions max, keep it under 1 minute]
+>
+> Great! Let's go to breakout rooms. See you in 30-45 minutes!"
+
+**Actions:**
+1. Summarize all 5 features quickly
+2. Explain breakout room structure clearly
+3. Tell them to pick ONE room
+4. Answer 2-3 quick questions only (don't let it drag)
+5. Send to breakout rooms
+
+**Key Points:**
+- RECAP what they saw (reinforce memory)
+- Make breakout instructions CRYSTAL CLEAR
+- Help them pick the right room
+- Keep energy HIGH until the end
+- Transition quickly (don't let Q&A derail timing)
+
+---
+
+## FACILITATOR NOTES
+
+### Energy & Pacing:
+- ⚡ **Start FAST** - capture attention immediately
+- 🎯 **Focus on OUTPUTS** not process
+- 🚀 **Show SPEED** - emphasize "minutes not hours"
+- 🎬 **Use pre-loaded tabs** - don't waste time waiting
+- ⏱️ **Watch the clock** - stick to timing strictly
+
+### What to Emphasize:
+- ✅ **SPEED** - minutes not hours, no coding required
+- ✅ **ACTIONABLE** - ranked lists, allocation plans, maps
+- ✅ **COMPREHENSIVE** - full workflow (TPR → Risk → ITN)
+- ✅ **REALISTIC** - acknowledge data cleaning, show real use cases
+
+### What NOT to Do:
+- ❌ Don't explain algorithms (PCA, composite scoring math)
+- ❌ Don't show errors or bugs (use pre-loaded tabs!)
+- ❌ Don't let Q&A derail flow (save for breakout)
+- ❌ Don't make it academic/boring (keep energy high)
+- ❌ Don't run over time (cut Tab 6 if needed)
+
+### Backup Plans:
+- **If upload fails** → Immediately switch to pre-loaded Tab 2
+- **If tab doesn't load** → Show screenshot OR skip it
+- **If Arena broken** → Use backup script OR show screenshot
+- **If running over** → Cut Tab 6 (AI Agent)
+- **If internet fails** → Have screenshots ready as fallback
+
+### Technical Checks (1 hour before):
+- [ ] All 6 tabs open and verified
+- [ ] Maps display correctly
+- [ ] Download buttons work
+- [ ] No error messages
+- [ ] Internet stable
+- [ ] Screen sharing tested
+
+---
+
+## SUCCESS METRICS
+
+**You'll know the demo worked if:**
+- ✅ Participants are EXCITED (not bored/confused)
+- ✅ They ask good questions during breakout
+- ✅ They can articulate what ChatMRPT does (TPR → Risk → ITN)
+- ✅ They see themselves using it in their work
+- ✅ They want access to the tool
+
+**Red flags to watch for:**
+- ⚠️ Participants look confused or lost
+- ⚠️ Too many technical questions (means you got too detailed)
+- ⚠️ People on phones/distracted (means you're boring)
+- ⚠️ Questions like "how does PCA work?" (too academic)
+
+**If you see red flags:**
+- 🔧 Speed up, show more outputs
+- 🔧 Simplify language, drop jargon
+- 🔧 Show excitement yourself (it's contagious!)
+
+---
+
+**Status:** Ready for practice run
+**Next Step:** Practice the demo with timer, refine pacing
+**Goal:** Get participants FIRED UP to use ChatMRPT! 🔥

@@ -1,0 +1,151 @@
+TAILORED TEST QUESTIONS FOR ADAMAWA TPR DATA
+==============================================
+Date: 2025-01-18
+Data File: adamawa_tpr_cleaned.csv
+Records: 10,452 | Columns: 22 | LGAs: 21 | Time Period: 2024 (monthly data)
+
+BASIC DATA EXPLORATION
+-----------------------
+1. Show me the shape and basic info about this dataset
+2. List all the column names
+3. How many unique wards are in Adamawa state?
+4. What's the total number of health facilities?
+5. Show the date range covered by this data
+
+TPR CALCULATION QUESTIONS
+--------------------------
+6. Calculate the overall TPR for RDT tests in children under 5 years
+7. What's the TPR for pregnant women using RDT?
+8. Calculate TPR for all age groups combined
+9. Show monthly TPR trends for 2024
+10. Which month had the highest TPR?
+
+LGA-SPECIFIC ANALYSIS
+----------------------
+11. Which LGA in Adamawa has the highest malaria test positivity rate?
+12. Compare TPR between Yola South and Yola North
+13. Show TPR for all 21 LGAs in a bar chart
+14. Which LGAs have TPR above 70%?
+15. Find the LGA with most testing volume
+
+WARD-LEVEL ANALYSIS
+--------------------
+16. List the top 10 wards with highest TPR
+17. Which ward in Yola South has the most cases?
+18. Show wards with zero microscopy tests
+19. Find wards with TPR above 80%
+20. Compare Adarawo ward performance across facilities
+
+FACILITY ANALYSIS
+-----------------
+21. Which health facility has the highest testing volume?
+22. Compare Wuro-Hausa Primary Health Clinic vs Centre performance
+23. Show facilities with TPR above 90%
+24. List all facilities in Mubi North LGA
+25. Which facilities test the most pregnant women?
+
+RDT VS MICROSCOPY COMPARISON
+-----------------------------
+26. How many facilities use RDT only vs Microscopy only?
+27. Calculate TPR difference between RDT and Microscopy
+28. Which method has higher positivity rates?
+29. Show facilities that have both RDT and Microscopy data
+30. Compare testing volumes: RDT vs Microscopy
+
+AGE GROUP ANALYSIS
+------------------
+31. Compare TPR between under-5 and over-5 age groups
+32. Which age group gets tested most frequently?
+33. Calculate the ratio of child to adult testing
+34. Show monthly trends for pediatric cases
+35. What percentage of tests are for pregnant women?
+
+TEMPORAL ANALYSIS
+-----------------
+36. Show malaria seasonality patterns across 2024
+37. Which months have the highest testing volumes?
+38. Plot monthly TPR trends for each LGA
+39. Find facilities with increasing TPR trends
+40. Compare Q1 vs Q4 performance
+
+LLIN DISTRIBUTION ANALYSIS
+--------------------------
+41. How many LLINs were distributed to pregnant women?
+42. Which facilities distributed the most LLINs to children?
+43. Compare LLIN distribution across LGAs
+44. Show correlation between LLIN distribution and TPR
+45. Which months had highest LLIN distribution?
+
+DATA QUALITY CHECKS
+--------------------
+46. Count missing values (NA) in each column
+47. Which facilities have incomplete data?
+48. Show percentage of missing microscopy data
+49. Find duplicate entries if any
+50. Check data consistency across facility levels
+
+VISUALIZATION REQUESTS
+-----------------------
+51. Create a heatmap of TPR by LGA and month
+52. Plot scatter plot of tests vs positive cases
+53. Show pie chart of testing by facility level
+54. Create time series of daily testing volumes
+55. Build a dashboard with key metrics
+
+ADVANCED ANALYTICS
+------------------
+56. Predict TPR for next month using trends
+57. Find statistical correlation between variables
+58. Identify outbreak hotspots (high TPR clusters)
+59. Calculate burden of disease by population
+60. Perform time series decomposition on TPR
+
+SPECIFIC FACILITY QUERIES
+-------------------------
+61. Analyze all Wuro-Hausa facilities performance
+62. Compare Primary Health Clinics vs Primary Health Care Centres
+63. Which facility in Demsa LGA performs best?
+64. Show facilities that only report RDT data
+65. Find facilities with most consistent reporting
+
+ACTIONABLE INSIGHTS
+--------------------
+66. Which wards need urgent intervention (TPR >80%)?
+67. Identify facilities with resource gaps
+68. Where should we increase testing capacity?
+69. Which LGAs need more LLIN distribution?
+70. Generate recommendations for Adamawa state
+
+EXPORT & REPORTING
+------------------
+71. Export top 20 high-risk wards with their TPR
+72. Create a summary report for Adamawa health officials
+73. Generate facility performance scorecards
+74. Export monthly TPR trends as CSV
+75. Create PowerPoint-ready visualizations
+
+EDGE CASES TO TEST
+------------------
+76. Handle facilities with all NA values for microscopy
+77. Calculate TPR when denominator is zero
+78. Process facilities with special characters in names
+79. Handle missing LLIN distribution data
+80. Work with incomplete monthly records
+
+KEY METRICS TO VERIFY
+---------------------
+- Total tests performed: Sum all RDT and Microscopy tests
+- Overall TPR: Total positives / Total tests
+- Under-5 TPR should be calculable from columns 8 & 14
+- Pregnant women TPR from columns 10 & 16
+- 21 LGAs should be present (excluding header)
+- FacilityLevel should show Primary/Secondary distribution
+- Monthly data should span Jan-Dec 2024 (periodcode 202401-202412)
+
+EXPECTED INSIGHTS
+-----------------
+- Higher TPR in certain months (seasonal patterns)
+- Variation between Primary and Secondary facilities
+- Some facilities rely entirely on RDT (no microscopy)
+- LLIN distribution is sporadic (many NA values)
+- Geographic clustering of high TPR areas

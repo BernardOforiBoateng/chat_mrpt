@@ -1,0 +1,821 @@
+================================================================================
+LANGGRAPH AGENT INTEGRATION PLAN
+Convert RequestInterpreter to LangGraph Agent (No Breaking Changes)
+================================================================================
+
+GOAL: Make agent active at all times with access to CSV + Shapefile, while
+      keeping existing tool execution system completely intact.
+
+STRATEGY: Surgical modification of RequestInterpreter - replace only the LLM
+          decision layer with LangGraph agent, keep all 8 layers functioning.
+
+================================================================================
+PART 1: ARCHITECTURE DESIGN
+================================================================================
+
+Current Flow (Lines 144-200):
+───────────────────────────────────────────────────────────────────────────
+User Message
+    ↓
+process_message()
+    ↓
+Special Workflows Check
+    ↓
+Get Session Context
+    ↓
+Route: No data → Conversational | With data → LLMOrchestrator + ToolRunner
+    ↓
+Return Result
+
+
+New Flow (With LangGraph Agent):
+───────────────────────────────────────────────────────────────────────────
+User Message
+    ↓
+process_message()
+    ↓
+Special Workflows Check
+    ↓
+Get Session Context + UnifiedDataState (CSV + Shapefile)
+    ↓
+LangGraph Workflow
+    ├─ Agent Node (conversational analysis)
+    │   ├─ Has access to: df (CSV) + gdf (Shapefile)
+    │   ├─ Uses: Python tool for data analysis
+    │   └─ Returns: Conversational response
+    │
+    └─ Tool Router Node (detect tool requests)
+        ├─ Check: Is this a tool request? (risk analysis, ITN, maps, etc.)
+        ├─ If YES → Use existing LLMOrchestrator + ToolRunner (UNCHANGED)
+        └─ If NO → Return agent's conversational response
+
+
+Key Principle: Agent is ALWAYS active, but only handles conversational analysis.
+               Tool execution stays EXACTLY as it is now.
+
+================================================================================
+PART 2: WHAT CHANGES (Minimal Modifications)
+================================================================================
+
+File: app/core/request_interpreter.py
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 1: Imports (Add LangGraph)                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD after line 26:
+    from typing import TypedDict, Annotated
+    from langgraph.graph import StateGraph, END
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
+    import operator
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 2: State Definition (Add after imports)                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD after line 35 (before class RequestInterpreter):
+
+    class AgentState(TypedDict):
+        """State for LangGraph agent workflow."""
+        messages: Annotated[list, operator.add]
+        session_id: str
+        session_context: Dict[str, Any]
+        data_context: Dict[str, Any]  # CSV + Shapefile paths
+        is_tool_request: bool
+        tool_result: Optional[Dict[str, Any]]
+        final_response: Optional[str]
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 3: Constructor (Add graph building)                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+MODIFY __init__() at line 54:
+
+    def __init__(self, llm_manager, data_service, analysis_service, visualization_service):
+        # ... existing initialization code stays ...
+
+        # NEW: Initialize LangGraph components
+        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+        self.graph = self._build_graph()  # ← ADD THIS LINE
+
+        # ... rest of existing code ...
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 4: Graph Building (Add new method)                               │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD new method after _register_tools() at line 143:
+
+    def _build_graph(self) -> StateGraph:
+        """Build LangGraph workflow for agent."""
+        workflow = StateGraph(AgentState)
+
+        # Add nodes
+        workflow.add_node("load_data", self._load_data_node)
+        workflow.add_node("agent", self._agent_node)
+        workflow.add_node("tool_detector", self._tool_detection_node)
+        workflow.add_node("tool_executor", self._tool_execution_node)
+
+        # Define flow
+        workflow.set_entry_point("load_data")
+        workflow.add_edge("load_data", "agent")
+        workflow.add_edge("agent", "tool_detector")
+
+        # Conditional routing from tool_detector
+        workflow.add_conditional_edges(
+            "tool_detector",
+            self._should_execute_tool,
+            {
+                "execute_tool": "tool_executor",
+                "done": END
+            }
+        )
+        workflow.add_edge("tool_executor", END)
+
+        return workflow.compile()
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 5: Load Data Node (Add new method)                               │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD new method:
+
+    def _load_data_node(self, state: AgentState) -> AgentState:
+        """Load CSV + Shapefile based on current workflow stage."""
+        from .unified_data_state import get_data_state
+
+        session_id = state["session_id"]
+
+        # Get unified data state (handles CSV + Shapefile automatically)
+        data_state = get_data_state(session_id)
+
+        # Extract data context
+        data_context = {
+            'has_data': data_state.has_data(),
+            'has_shapefile': data_state.has_shapefile(),
+            'csv_path': None,
+            'shapefile_path': None,
+            'df': None,
+            'gdf': None
+        }
+
+        # Load CSV (prioritizes: unified_dataset > raw_data > data_analysis)
+        if data_state.has_data():
+            if data_state.has_unified_data():
+                data_context['df'] = data_state.get_unified_data()
+                data_context['csv_path'] = 'unified_dataset.csv'
+            else:
+                data_context['df'] = data_state.get_raw_data()
+                data_context['csv_path'] = 'raw_data.csv'
+
+        # Load Shapefile
+        if data_state.has_shapefile():
+            data_context['gdf'] = data_state.get_shapefile_data()
+            data_context['shapefile_path'] = 'raw_shapefile.shp'
+
+        state["data_context"] = data_context
+        return state
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 6: Agent Node (Add new method)                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD new method:
+
+    def _agent_node(self, state: AgentState) -> AgentState:
+        """Handle conversational analysis with CSV + Shapefile access."""
+        import pandas as pd
+        import geopandas as gpd
+        import numpy as np
+
+        messages = state["messages"]
+        data_context = state["data_context"]
+        session_context = state["session_context"]
+
+        # Build system prompt with data context
+        system_prompt = self._build_agent_system_prompt(session_context, data_context)
+
+        # Build enhanced prompt with data info
+        user_message = messages[-1].content if messages else ""
+
+        # Create execution environment for Python tool
+        exec_globals = {
+            'pd': pd,
+            'np': np,
+            'gpd': gpd
+        }
+
+        # Add df and gdf if available
+        if data_context.get('df') is not None:
+            exec_globals['df'] = data_context['df']
+
+        if data_context.get('gdf') is not None:
+            exec_globals['gdf'] = data_context['gdf']
+
+        # Simple LLM call for conversational analysis
+        # (No tools bound - agent just analyzes and responds)
+        response = self.llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message)
+        ])
+
+        # Store response
+        state["final_response"] = response.content
+        state["messages"].append(AIMessage(content=response.content))
+
+        return state
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 7: Tool Detection Node (Add new method)                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD new method:
+
+    def _tool_detection_node(self, state: AgentState) -> AgentState:
+        """Detect if user message is requesting tool execution."""
+        messages = state["messages"]
+        user_message = messages[0].content if messages else ""
+
+        # Tool request keywords (same as before)
+        tool_keywords = [
+            # Risk analysis
+            'run risk analysis', 'malaria risk analysis', 'vulnerability analysis',
+            'composite scoring', 'pca analysis', 'risk score', 'rank wards',
+
+            # ITN planning
+            'itn distribution', 'itn planning', 'plan itn', 'net allocation',
+            'distribute nets', 'allocate nets',
+
+            # Visualizations (specific tools)
+            'create vulnerability map', 'vulnerability map', 'pca map',
+            'composite map', 'box plot', 'decision tree', 'urban extent map',
+
+            # Data quality
+            'data quality', 'quality check', 'check quality',
+
+            # Settlement
+            'settlement map', 'settlement statistics',
+
+            # Methodology
+            'explain methodology', 'how does the analysis work'
+        ]
+
+        message_lower = user_message.lower().strip()
+        is_tool_request = any(keyword in message_lower for keyword in tool_keywords)
+
+        state["is_tool_request"] = is_tool_request
+        return state
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 8: Tool Execution Node (Add new method)                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD new method:
+
+    def _tool_execution_node(self, state: AgentState) -> AgentState:
+        """Execute tool using existing LLMOrchestrator + ToolRunner (UNCHANGED)."""
+        messages = state["messages"]
+        session_context = state["session_context"]
+        session_id = state["session_id"]
+        user_message = messages[0].content if messages else ""
+
+        # Use EXISTING refactored orchestration (Layer 4 - UNCHANGED)
+        if self.tool_runner and self.orchestrator:
+            system_prompt = self._build_system_prompt_refactored(session_context, session_id)
+            function_schemas = self.tool_runner.get_function_schemas()
+
+            result = self.orchestrator.run_with_tools(
+                self.llm_manager,
+                system_prompt,
+                user_message,
+                function_schemas,
+                session_id,
+                self.tool_runner
+            )
+        else:
+            # Fallback to legacy path (UNCHANGED)
+            result = self._llm_with_tools(user_message, session_context, session_id)
+
+        state["tool_result"] = result
+        state["final_response"] = result.get('response', '')
+        return state
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 9: Routing Logic (Add new method)                                │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD new method:
+
+    def _should_execute_tool(self, state: AgentState) -> str:
+        """Decide whether to execute tool or return agent response."""
+        if state.get("is_tool_request", False):
+            return "execute_tool"
+        else:
+            return "done"
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 10: Agent System Prompt (Add new method)                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+ADD new method:
+
+    def _build_agent_system_prompt(self, session_context: Dict, data_context: Dict) -> str:
+        """Build system prompt for agent with data context."""
+        prompt = "You are ChatMRPT, an AI assistant for malaria risk analysis.\n\n"
+
+        # Add data context
+        if data_context.get('has_data'):
+            df = data_context.get('df')
+            if df is not None:
+                prompt += f"**Data Context:**\n"
+                prompt += f"- Dataset: {data_context.get('csv_path', 'data.csv')}\n"
+                prompt += f"- Rows: {len(df)}\n"
+                prompt += f"- Columns: {len(df.columns)}\n"
+                prompt += f"- Variables: {', '.join(df.columns.tolist()[:10])}"
+                if len(df.columns) > 10:
+                    prompt += f", ... ({len(df.columns)} total)"
+                prompt += "\n\n"
+
+        if data_context.get('has_shapefile'):
+            gdf = data_context.get('gdf')
+            if gdf is not None:
+                prompt += f"**Geospatial Data:**\n"
+                prompt += f"- Shapefile: {data_context.get('shapefile_path', 'shapefile.shp')}\n"
+                prompt += f"- Features: {len(gdf)}\n"
+                prompt += f"- Geometry Type: {gdf.geometry.type.iloc[0] if len(gdf) > 0 else 'Unknown'}\n\n"
+
+        # Add instructions
+        prompt += "**Your Role:**\n"
+        prompt += "- Answer questions about the data\n"
+        prompt += "- Perform analysis using pandas and geopandas\n"
+        prompt += "- Explain patterns and insights\n"
+        prompt += "- Help users understand their malaria risk data\n\n"
+
+        prompt += "**Important:**\n"
+        prompt += "- You have access to 'df' (pandas DataFrame) and 'gdf' (geopandas GeoDataFrame)\n"
+        prompt += "- For tool requests (risk analysis, ITN planning, maps), just acknowledge - the system will route to tools\n"
+        prompt += "- Focus on conversational analysis and exploration\n"
+
+        return prompt
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 11: Modify process_message() (Main Integration Point)            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+MODIFY process_message() at line 144:
+
+    def process_message(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
+        """Process message using LangGraph agent."""
+        start_time = time.time()
+
+        try:
+            # ... existing logging (lines 149-165) stays ...
+
+            # Handle special workflows first (UNCHANGED)
+            special_result = self._handle_special_workflows(user_message, session_id, session_data, **kwargs)
+            if special_result:
+                return special_result
+
+            # Get session context (UNCHANGED)
+            session_context = self._get_session_context(session_id, session_data)
+
+            # Simple routing for no data (UNCHANGED)
+            if not session_context.get('data_loaded', False):
+                return self._simple_conversational_response(user_message, session_context, session_id)
+
+            # NEW: Use LangGraph agent workflow
+            initial_state = {
+                "messages": [HumanMessage(content=user_message)],
+                "session_id": session_id,
+                "session_context": session_context,
+                "data_context": {},
+                "is_tool_request": False,
+                "tool_result": None,
+                "final_response": None
+            }
+
+            # Execute LangGraph workflow
+            final_state = self.graph.invoke(initial_state)
+
+            # Extract result
+            if final_state.get("tool_result"):
+                # Tool was executed
+                result = final_state["tool_result"]
+            else:
+                # Agent handled it conversationally
+                result = {
+                    "response": final_state["final_response"],
+                    "status": "success",
+                    "tools_used": []
+                }
+
+            # Store conversation (UNCHANGED)
+            self._store_conversation(session_id, user_message, result.get('response', ''))
+
+            result['total_time'] = time.time() - start_time
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in process_message: {e}", exc_info=True)
+            return {
+                'status': 'error',
+                'response': f'Error processing request: {str(e)}',
+                'tools_used': []
+            }
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Section 12: Modify process_message_streaming() (Streaming Support)       │
+└─────────────────────────────────────────────────────────────────────────┘
+
+MODIFY process_message_streaming() at line 210:
+
+    def process_message_streaming(self, user_message: str, session_id: str, session_data: Dict[str, Any] = None, **kwargs):
+        """Streaming version using LangGraph agent."""
+
+        try:
+            # Handle special workflows (UNCHANGED)
+            special_result = self._handle_special_workflows(user_message, session_id, session_data, **kwargs)
+            if special_result:
+                yield special_result
+                return
+
+            # Get session context (UNCHANGED)
+            session_context = self._get_session_context(session_id, session_data)
+
+            # No data = simple response (UNCHANGED)
+            if not session_context.get('data_loaded', False):
+                yield self._simple_conversational_response(user_message, session_context, session_id)
+                return
+
+            # NEW: Use LangGraph agent with streaming
+            initial_state = {
+                "messages": [HumanMessage(content=user_message)],
+                "session_id": session_id,
+                "session_context": session_context,
+                "data_context": {},
+                "is_tool_request": False,
+                "tool_result": None,
+                "final_response": None
+            }
+
+            # Execute graph
+            final_state = self.graph.invoke(initial_state)
+
+            # Check if tool was executed
+            if final_state.get("is_tool_request") and final_state.get("tool_result"):
+                # Tool execution - use existing streaming (UNCHANGED)
+                system_prompt = self._build_system_prompt_refactored(session_context, session_id)
+                function_schemas = self.tool_runner.get_function_schemas()
+
+                for chunk in self.orchestrator.stream_with_tools(
+                    self.llm_manager,
+                    system_prompt,
+                    user_message,
+                    function_schemas,
+                    session_id,
+                    self.tool_runner
+                ):
+                    yield chunk
+            else:
+                # Agent response - stream it
+                response = final_state["final_response"]
+                # Simulate streaming (chunk by chunk)
+                words = response.split()
+                for i, word in enumerate(words):
+                    yield {
+                        "content": word + " ",
+                        "status": "success",
+                        "done": i == len(words) - 1
+                    }
+
+        except Exception as e:
+            logger.error(f"Error in streaming: {e}", exc_info=True)
+            yield {
+                "content": f"Error: {str(e)}",
+                "status": "error",
+                "done": True
+            }
+
+================================================================================
+PART 3: WHAT STAYS UNCHANGED (Critical - Don't Touch!)
+================================================================================
+
+✅ Keep EXACTLY as is:
+
+1. All tool implementation methods (Lines 650-1564):
+   - _run_malaria_risk_analysis()
+   - _create_vulnerability_map()
+   - _execute_data_query()
+   - _execute_sql_query()
+   - _run_itn_planning()
+   - All 10+ other tool methods
+
+2. All refactored services:
+   - SessionContextService (session_context_service.py)
+   - DataRepository (data_repository.py)
+   - PromptBuilder (prompt_builder.py)
+   - ToolRunner (tool_runner.py)
+   - LLMOrchestrator (llm_orchestrator.py)
+
+3. All helper methods:
+   - _get_session_context()
+   - _handle_special_workflows()
+   - _simple_conversational_response()
+   - _build_system_prompt_refactored()
+   - _store_conversation()
+   - All 30+ other methods
+
+4. Tool Registry (tool_registry.py)
+   - Keeps discovering tools from app/tools/
+   - Provides function schemas
+   - Executes tools
+
+5. Fallback system:
+   - 7 fallback tools still work
+   - ToolRunner still tries registry → fallbacks
+
+6. All service dependencies:
+   - llm_manager
+   - data_service
+   - analysis_service
+   - visualization_service
+
+================================================================================
+PART 4: DATA ACCESS STRATEGY
+================================================================================
+
+Stage-Aware Data Loading:
+
+Stage 1: Initial Upload
+───────────────────────────────────────────────────────────────────────────
+- UnifiedDataState.get_raw_data() → data_analysis.csv or uploaded file
+- Shapefile: User's uploaded shapefile (if any)
+- Agent has: df (CSV)
+
+Stage 2: Post-TPR
+───────────────────────────────────────────────────────────────────────────
+- UnifiedDataState.get_raw_data() → raw_data.csv (TPR + environmental vars)
+- Shapefile: raw_shapefile.shp (Nigeria wards with matched data)
+- Agent has: df (raw_data.csv) + gdf (raw_shapefile.shp)
+
+Stage 3: Post-Risk Analysis
+───────────────────────────────────────────────────────────────────────────
+- UnifiedDataState.get_unified_data() → unified_dataset.csv (with rankings)
+- Shapefile: raw_shapefile.shp (same as Stage 2)
+- Agent has: df (unified_dataset.csv) + gdf (raw_shapefile.shp)
+
+UnifiedDataState Handles This Automatically:
+    - has_unified_data() → True if unified_dataset.csv exists
+    - get_unified_data() → Returns merged GeoDataFrame with geometry
+    - get_raw_data() → Returns DataFrame from raw_data.csv
+    - get_shapefile_data() → Returns GeoDataFrame from shapefile
+
+Agent gets the right data at the right time with zero manual switching!
+
+================================================================================
+PART 5: WORKFLOW EXAMPLES
+================================================================================
+
+Example 1: Conversational Question (Agent Handles)
+───────────────────────────────────────────────────────────────────────────
+User: "What is the average TPR in my data?"
+
+Flow:
+1. process_message() → LangGraph workflow
+2. Load Data Node → UnifiedDataState gives df (raw_data.csv)
+3. Agent Node → LLM analyzes with df.mean() logic
+4. Tool Detector → Not a tool request
+5. Return agent response: "The average TPR is 12.3%"
+
+Result: Agent handled it, no tool execution
+
+
+Example 2: Tool Request (Existing System Handles)
+───────────────────────────────────────────────────────────────────────────
+User: "run risk analysis"
+
+Flow:
+1. process_message() → LangGraph workflow
+2. Load Data Node → UnifiedDataState gives df + gdf
+3. Agent Node → LLM responds: "I'll run the risk analysis for you"
+4. Tool Detector → Detects "run risk analysis" keyword
+5. Tool Executor → Calls LLMOrchestrator.run_with_tools()
+6. ToolRunner.execute() → Calls registry tool "run_malaria_risk_analysis"
+7. Tool executes (composite + PCA analysis)
+8. Returns: Vulnerability maps + rankings
+
+Result: Existing tool system handled it, agent just acknowledged
+
+
+Example 3: Data Exploration (Agent Handles)
+───────────────────────────────────────────────────────────────────────────
+User: "Show me wards with TPR > 15%"
+
+Flow:
+1. process_message() → LangGraph workflow
+2. Load Data Node → df (raw_data.csv) + gdf (shapefile)
+3. Agent Node → LLM generates: df[df['TPR'] > 15][['Ward', 'TPR']]
+4. Agent returns filtered list
+5. Tool Detector → Not a tool request
+6. Return agent response with ward list
+
+Result: Agent handled it with pandas
+
+
+Example 4: Geospatial Question (Agent Handles)
+───────────────────────────────────────────────────────────────────────────
+User: "What's the total area of high-risk wards?"
+
+Flow:
+1. process_message() → LangGraph workflow
+2. Load Data Node → df (unified_dataset.csv) + gdf (shapefile)
+3. Agent Node → LLM uses gdf with composite_rank
+4. Agent calculates: gdf[gdf['composite_rank'] <= 10]['geometry'].area.sum()
+5. Tool Detector → Not a tool request
+6. Return agent response: "Total area is 1,234 km²"
+
+Result: Agent handled it with geopandas
+
+
+Example 5: ITN Planning (Existing System Handles)
+───────────────────────────────────────────────────────────────────────────
+User: "plan itn distribution with 50000 nets"
+
+Flow:
+1. process_message() → LangGraph workflow
+2. Load Data Node → df (unified_dataset.csv) + gdf
+3. Agent Node → LLM responds: "I'll create an ITN distribution plan"
+4. Tool Detector → Detects "plan itn" keyword
+5. Tool Executor → Calls LLMOrchestrator
+6. ToolRunner → Calls _run_itn_planning(session_id, total_nets=50000)
+7. Tool loads unified_dataset.csv, ranks wards, allocates nets
+8. Returns: Allocation plan + interactive map
+
+Result: Existing tool system handled it
+
+================================================================================
+PART 6: TRANSITION FLOW (TPR → Main ChatMRPT)
+================================================================================
+
+Current Problem:
+───────────────────────────────────────────────────────────────────────────
+TPR completes → exit_data_analysis_mode: True → Frontend exits → Lost agent
+
+New Solution (With This Plan):
+───────────────────────────────────────────────────────────────────────────
+1. TPR workflow completes (DataAnalysisAgent)
+2. User confirms: "yes"
+3. Route changes exit_data_analysis_mode: False (keep agent active)
+4. User asks: "What's in my data?"
+   → RequestInterpreter (now LangGraph agent) handles it
+   → Loads raw_data.csv (226 rows with TPR + env vars)
+   → Agent responds with data summary
+
+5. User asks: "run risk analysis"
+   → Agent detects tool request
+   → Routes to existing ToolRunner
+   → Executes risk analysis
+   → Creates unified_dataset.csv
+
+6. User asks: "Which ward has highest composite score?"
+   → Agent loads unified_dataset.csv
+   → Answers from data
+
+7. User asks: "plan itn distribution"
+   → Agent detects tool request
+   → Routes to existing ITN planning tool
+   → Returns allocation plan
+
+Agent is ALWAYS active, handling conversational + routing to tools!
+
+================================================================================
+PART 7: FILES TO MODIFY
+================================================================================
+
+Only 2 files need changes:
+
+1. app/core/request_interpreter.py
+   - Add LangGraph imports
+   - Add AgentState definition
+   - Add 6 new methods (graph building, nodes)
+   - Modify process_message() and process_message_streaming()
+   - Keep all 30+ existing methods unchanged
+
+2. app/web/routes/data_analysis_v3_routes.py (Optional - for transition)
+   - Line 375: Change exit_data_analysis_mode to False
+   - Remove trigger_risk_analysis call (lines 365-371)
+
+That's it! Just 2 files.
+
+================================================================================
+PART 8: TESTING CHECKLIST
+================================================================================
+
+Test 1: Agent Active Without Data
+───────────────────────────────────────────────────────────────────────────
+Action: Fresh session, ask "Hello"
+Expected: Simple conversational response (existing _simple_conversational_response)
+
+Test 2: Agent With Data (Conversational)
+───────────────────────────────────────────────────────────────────────────
+Action: Upload CSV, ask "What variables are in my data?"
+Expected: Agent lists columns from df
+
+Test 3: Tool Execution (Risk Analysis)
+───────────────────────────────────────────────────────────────────────────
+Action: Say "run risk analysis"
+Expected: Existing tool system executes, returns vulnerability maps
+
+Test 4: Agent After Tool Execution
+───────────────────────────────────────────────────────────────────────────
+Action: After risk analysis, ask "Which ward has highest risk?"
+Expected: Agent queries unified_dataset.csv, returns answer
+
+Test 5: Geospatial Analysis
+───────────────────────────────────────────────────────────────────────────
+Action: Ask "What's the area of ward X?"
+Expected: Agent uses gdf.geometry.area
+
+Test 6: ITN Planning Tool
+───────────────────────────────────────────────────────────────────────────
+Action: Say "plan itn distribution"
+Expected: Existing ITN tool executes, returns map
+
+Test 7: TPR Transition
+───────────────────────────────────────────────────────────────────────────
+Action: Complete TPR, confirm "yes"
+Expected: No exit, agent active, responds to questions about raw_data.csv
+
+Test 8: Streaming Support
+───────────────────────────────────────────────────────────────────────────
+Action: Use streaming endpoint, ask conversational question
+Expected: Response streams word by word
+
+================================================================================
+PART 9: DEPLOYMENT STEPS
+================================================================================
+
+Step 1: Backup Current Version
+───────────────────────────────────────────────────────────────────────────
+ssh -i /tmp/chatmrpt-key2.pem ec2-user@3.21.167.170
+cd /home/ec2-user
+tar -czf ChatMRPT_before_langgraph_$(date +%Y%m%d_%H%M%S).tar.gz ChatMRPT/
+
+Step 2: Deploy to Instance 1
+───────────────────────────────────────────────────────────────────────────
+scp -i /tmp/chatmrpt-key2.pem \
+    app/core/request_interpreter.py \
+    app/web/routes/data_analysis_v3_routes.py \
+    ec2-user@3.21.167.170:/home/ec2-user/ChatMRPT/app/...
+
+ssh -i /tmp/chatmrpt-key2.pem ec2-user@3.21.167.170 \
+    'sudo systemctl restart chatmrpt'
+
+Step 3: Deploy to Instance 2
+───────────────────────────────────────────────────────────────────────────
+Same as Step 2, but to 18.220.103.20
+
+Step 4: Verify Deployment
+───────────────────────────────────────────────────────────────────────────
+- Check logs: sudo journalctl -u chatmrpt -f
+- Test via CloudFront: https://d225ar6c86586s.cloudfront.net
+- Run all 8 test scenarios
+
+Step 5: Rollback Plan (If Issues)
+───────────────────────────────────────────────────────────────────────────
+ssh -i /tmp/chatmrpt-key2.pem ec2-user@3.21.167.170
+tar -xzf ChatMRPT_before_langgraph_*.tar.gz
+sudo systemctl restart chatmrpt
+
+================================================================================
+PART 10: SUCCESS CRITERIA
+================================================================================
+
+✅ Agent is active at all times (no exit after TPR)
+✅ Agent has access to CSV + Shapefile at each stage
+✅ Agent handles conversational questions
+✅ Existing tool system works unchanged (risk analysis, ITN, maps)
+✅ Smart routing: Conversational → Agent, Tools → Existing system
+✅ Streaming support works
+✅ No breaking changes to any existing functionality
+✅ All 15 tools still execute correctly
+✅ Session state management intact
+✅ UnifiedDataState provides correct data at each stage
+
+================================================================================
+SUMMARY
+================================================================================
+
+This plan:
+1. Converts RequestInterpreter to LangGraph agent (surgical modification)
+2. Keeps ALL tool execution layers intact (Layers 4-7 unchanged)
+3. Adds CSV + Shapefile access via UnifiedDataState
+4. Agent handles conversational, routes tools to existing system
+5. No breaking changes - all functionality preserved
+6. Only 2 files modified
+7. Agent active throughout entire workflow
+
+The architecture is clean, maintainable, and preserves all existing investments
+in the tool system while adding powerful conversational capabilities with
+geospatial data access.

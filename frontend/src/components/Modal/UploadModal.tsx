@@ -1,0 +1,514 @@
+import React, { useState } from 'react';
+import { useChatStore } from '@/stores/chatStore';
+import { useAnalysisStore } from '@/stores/analysisStore';
+import useMessageStreaming from '@/hooks/useMessageStreaming';
+import api from '@/services/api';
+import toast from 'react-hot-toast';
+
+interface UploadModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
+  const [activeTab, setActiveTab] = useState<'standard' | 'analysis' | 'download'>('standard');
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedOption, setSelectedOption] = useState('');
+  const [analysisType, setAnalysisType] = useState('');
+  const [availableDownloads, setAvailableDownloads] = useState<any[]>([]);
+  const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
+  const session = useChatStore((state) => state.session);
+  const setUploadedFiles = useChatStore((state) => state.setUploadedFiles);
+  const addMessage = useChatStore((state) => state.addMessage);
+  const updateSession = useChatStore((state) => state.updateSession);
+  const { setCsvFile, setShapeFile, setDataAnalysisMode } = useAnalysisStore();
+  const { sendMessage } = useMessageStreaming();
+  
+  // Fetch available downloads when Download tab is selected
+  React.useEffect(() => {
+    if (activeTab === 'download' && session.sessionId) {
+      setIsLoadingDownloads(true);
+      fetch(`/export/list/${session.sessionId}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setAvailableDownloads(data.files || []);
+          }
+          setIsLoadingDownloads(false);
+        })
+        .catch(err => {
+          console.error('Error fetching downloads:', err);
+          setIsLoadingDownloads(false);
+        });
+    }
+  }, [activeTab, session.sessionId]);
+  
+  if (!isOpen) return null;
+  
+  return (
+    <>
+      {/* Background overlay */}
+      <div 
+        className="fixed inset-0 bg-gray-500 bg-opacity-75 z-[9998]" 
+        onClick={onClose}
+      />
+      
+      {/* Modal container */}
+      <div className="fixed inset-0 z-[9999] overflow-y-auto">
+        <div className="flex min-h-full items-center justify-center p-4">
+          {/* Modal panel */}
+          <div className="relative bg-white rounded-lg shadow-xl w-full max-w-2xl">
+            <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Upload Files</h3>
+              <button
+                onClick={onClose}
+                className="text-gray-400 hover:text-gray-500 focus:outline-none"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            {/* Tabs */}
+            <div className="border-b border-gray-200 mb-4">
+              <nav className="-mb-px flex space-x-8">
+                <button
+                  onClick={() => setActiveTab('standard')}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === 'standard'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  I Have Complete Data
+                </button>
+                <button
+                  onClick={() => setActiveTab('analysis')}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === 'analysis'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  I Have TPR Data Only
+                </button>
+                <button
+                  onClick={() => setActiveTab('download')}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === 'download'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Download Results
+                </button>
+              </nav>
+            </div>
+            
+            {/* Tab Content */}
+            <div className="mt-4">
+              {/* Standard Upload Tab */}
+              {activeTab === 'standard' && (
+                <div>
+                  <p className="text-sm text-gray-600 mb-4">
+                    CSV with environmental variables + Shapefile
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* CSV/Excel Upload */}
+                    <div className="border border-gray-200 rounded-lg p-4">
+                      <div className="text-center">
+                        <svg className="mx-auto h-10 w-10 text-green-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <h5 className="font-medium text-gray-900 mb-1">CSV / Excel Data</h5>
+                        <p className="text-xs text-gray-500 mb-3">Ward-level data (e.g., environmental factors, demographics)</p>
+                        <input 
+                          type="file" 
+                          className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                          id="csv-upload" 
+                          accept=".csv,.xlsx,.xls"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setCsvFile(file);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Shapefile Upload */}
+                    <div className="border border-gray-200 rounded-lg p-4">
+                      <div className="text-center">
+                        <svg className="mx-auto h-10 w-10 text-blue-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                        </svg>
+                        <h5 className="font-medium text-gray-900 mb-1">Shapefile (ZIP)</h5>
+                        <p className="text-xs text-gray-500 mb-3">Geographical boundaries of wards (must be a .zip archive)</p>
+                        <input 
+                          type="file" 
+                          className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                          id="shapefile-upload" 
+                          accept=".zip"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setShapeFile(file);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Upload Button */}
+                  <div className="mt-4 text-center">
+                    <button
+                      onClick={async () => {
+                        const csvInput = document.getElementById('csv-upload') as HTMLInputElement;
+                        const shapeInput = document.getElementById('shapefile-upload') as HTMLInputElement;
+                        const csvFile = csvInput?.files?.[0];
+                        const shapeFile = shapeInput?.files?.[0];
+                        
+                        if (!csvFile || !shapeFile) {
+                          toast.error('Please select both CSV/Excel and Shapefile');
+                          return;
+                        }
+                        
+                        setIsUploading(true);
+                        const formData = new FormData();
+                        formData.append('csv_file', csvFile);
+                        formData.append('shapefile', shapeFile);
+                        // DON'T send session_id - backend will generate a fresh one
+                        // formData.append('session_id', session.sessionId); // REMOVED to fix concurrent user data bleed
+                        
+                        try {
+                          console.log('Starting upload with formData:', formData);
+                          const response = await api.upload.uploadBothFiles(formData);
+                          console.log('Upload response:', response);
+                          
+                          if (response.data.status === 'success') {
+                            toast.success('Files uploaded successfully!');
+                            
+                            // Use the backend's session ID from the response if provided
+                            const backendSessionId = response.data.session_id || session.sessionId;
+                            if (response.data.session_id) {
+                              console.log('Using backend session ID for standard upload:', backendSessionId);
+                              updateSession({ sessionId: backendSessionId });
+                            }
+                            
+                            setUploadedFiles(csvFile.name, shapeFile.name);
+                            
+                            // Add system message
+                            const systemMessage = {
+                              id: `msg_${Date.now()}`,
+                              type: 'system' as const,
+                              content: `Files uploaded successfully: ${csvFile.name} and ${shapeFile.name}`,
+                              timestamp: new Date(),
+                              sessionId: backendSessionId
+                            };
+                            addMessage(systemMessage);
+                            
+                            // Close modal
+                            onClose();
+                            
+                            // Send the special trigger message silently (not shown to user)
+                            setTimeout(() => {
+                              sendMessage('__DATA_UPLOADED__', { silent: true });
+                            }, 500);
+                          } else {
+                            console.error('Upload response not successful:', response.data);
+                            toast.error(response.data.message || 'Upload did not return success status');
+                          }
+                        } catch (error) {
+                          console.error('Upload error:', error);
+                          const err: any = error as any;
+                          const message = err?.response?.data?.message || err?.message || 'Failed to upload files';
+                          toast.error(message);
+                        } finally {
+                          setIsUploading(false);
+                        }
+                      }}
+                      disabled={isUploading}
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                    >
+                      {isUploading ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                          </svg>
+                          Upload Files
+                        </>
+                      )}
+                    </button>
+                    <div id="files-upload-status" className="mt-2"></div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Data Analysis Tab */}
+              {activeTab === 'analysis' && (
+                <div>
+                  <div className="mb-4">
+                    <h4 className="text-lg font-bold text-gray-900">Upload Facility Testing Data</h4>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Facility testing data only - We'll guide you through TPR calculation and add environmental data
+                    </p>
+                  </div>
+                  
+                  <div className="max-w-md mx-auto">
+                    <div className="text-center">
+                      <div className="mb-4">
+                        <svg className="mx-auto h-16 w-16 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      
+                      <h5 className="text-base font-medium text-gray-900 mb-2">Select Data File</h5>
+                      <p className="text-sm text-gray-500 mb-4">CSV, Excel, or JSON format</p>
+                      
+                      <div className="mb-4">
+                        <input 
+                          type="file" 
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          id="data-analysis-file" 
+                          accept=".csv,.xlsx,.xls,.json"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setAnalysisType(file.name);
+                            }
+                          }}
+                        />
+                      </div>
+                      
+                      <button
+                        onClick={async () => {
+                          const fileInput = document.getElementById('data-analysis-file') as HTMLInputElement;
+                          const file = fileInput?.files?.[0];
+                          
+                          if (file) {
+                            setIsUploading(true);
+                            const formData = new FormData();
+                            formData.append('file', file);
+                            // DON'T send session_id - backend will generate a fresh one
+                            // formData.append('session_id', session?.sessionId || ''); // REMOVED to fix concurrent user data bleed
+                            
+                            try {
+                              console.log('Starting data analysis upload with formData:', formData);
+                              const response = await api.analysis.uploadFiles(formData);
+                              console.log('Data analysis upload response:', response);
+                              console.log('Response data:', response.data);
+                              console.log('Response data status:', response.data?.status);
+                              
+                              if (response.data.status === 'success') {
+                                toast.success('File uploaded successfully for analysis!');
+                                
+                                // Use the backend's session ID from the response
+                                const backendSessionId = response.data.session_id;
+                                console.log('Using backend session ID:', backendSessionId);
+                                
+                                // Store file info for the chat to know we're in data analysis mode
+                                setUploadedFiles(file.name, undefined);
+                                
+                                // Update session with backend's ID
+                                updateSession({ sessionId: backendSessionId });
+                                
+                                // Activate data analysis mode with backend session
+                                await api.analysis.activateMode(backendSessionId);
+                                
+                                // Add system message for user feedback
+                                const systemMessage = {
+                                  id: `msg_${Date.now()}`,
+                                  type: 'system' as const,
+                                  content: `Data file uploaded: ${file.name}. Starting analysis...`,
+                                  timestamp: new Date(),
+                                  sessionId: backendSessionId
+                                };
+                                addMessage(systemMessage);
+                                
+                                // Close modal first
+                                onClose();
+                                
+                                // Automatically trigger Data Analysis V3 agent after a short delay
+                                setTimeout(async () => {
+                                  console.log('Triggering data analysis chat API with session:', backendSessionId);
+                                  try {
+                                    const chatResponse = await fetch('/api/v1/data-analysis/chat', {
+                                      method: 'POST',
+                                      headers: {
+                                        'Content-Type': 'application/json'
+                                      },
+                                      body: JSON.stringify({
+                                        message: 'analyze uploaded data',
+                                        session_id: backendSessionId
+                                      })
+                                    });
+
+                                    console.log('Data analysis chat response:', chatResponse.status);
+
+                                    if (!chatResponse.ok) {
+                                      console.error('Failed to trigger data analysis:', chatResponse.status);
+                                      const errorText = await chatResponse.text();
+                                      console.error('Error response:', errorText);
+                                    } else {
+                                      const responseData = await chatResponse.json();
+                                      console.log('Data analysis triggered successfully:', responseData);
+
+                                      // Add the analysis results to the chat
+                                      if (responseData.success && responseData.message) {
+                                        const analysisMessage = {
+                                          id: `msg_${Date.now() + 2}`,
+                                          type: 'regular' as const,
+                                          sender: 'assistant' as const,
+                                          content: responseData.message,
+                                          timestamp: new Date(),
+                                          sessionId: backendSessionId,
+                                          visualizations: responseData.visualizations
+                                        };
+                                        addMessage(analysisMessage);
+
+                                        // Set data analysis mode so subsequent messages go to the right endpoint
+                                        setDataAnalysisMode(true);
+                                        console.log('Data analysis mode activated');
+                                      }
+                                    }
+                                  } catch (error) {
+                                    console.error('Error triggering data analysis:', error);
+                                  }
+                                }, 500);
+                                
+
+                              } else {
+                                console.error("Data analysis upload not successful. Status:", response.data?.status);
+                                console.error("Full response data:", response.data);
+                                toast.error(response.data.message || "Upload failed");
+                              }
+                            } catch (error: any) {
+                              console.error('Upload error:', error);
+                              toast.error(error.response?.data?.message || 'Failed to upload file');
+                            } finally {
+                              setIsUploading(false);
+                            }
+                          } else {
+                            toast.error('Please select a file first');
+                          }
+                        }}
+                        disabled={isUploading}
+                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isUploading ? (
+                          <>
+                            <svg className="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                            Upload for Analysis
+                          </>
+                        )}
+                      </button>
+                      
+                      <div id="data-analysis-upload-status" className="mt-3"></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Download Processed Data Tab */}
+              {activeTab === 'download' && (
+                <div>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Download your processed data and analysis results
+                  </p>
+                  
+                  {isLoadingDownloads ? (
+                    <div className="flex justify-center py-8">
+                      <svg className="animate-spin h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    </div>
+                  ) : availableDownloads.length > 0 ? (
+                    <div className="space-y-3">
+                      {/* Group downloads by category */}
+                      {['tpr', 'itn', 'analysis'].map(category => {
+                        const categoryFiles = availableDownloads.filter(f => f.category === category);
+                        if (categoryFiles.length === 0) return null;
+                        
+                        const categoryLabels = {
+                          tpr: '📊 TPR Analysis',
+                          itn: '🛏️ ITN Distribution',
+                          analysis: '📈 Risk Analysis'
+                        };
+                        
+                        return (
+                          <div key={category} className="mb-4">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                              {categoryLabels[category as keyof typeof categoryLabels]}
+                            </h3>
+                            {categoryFiles.map((file, index) => (
+                              <div 
+                                key={index}
+                                className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 mb-2"
+                              >
+                                <div className="flex-1">
+                                  <p className="font-medium text-gray-900">{file.name}</p>
+                                  <p className="text-sm text-gray-500">{file.description}</p>
+                                </div>
+                                <a
+                                  href={file.url}
+                                  download={file.filename}
+                                  className="ml-4 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toast.success(`Downloading ${file.name}...`);
+                                  }}
+                                >
+                                  Download
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <svg className="mx-auto h-12 w-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                      <p className="text-sm">No processed data available yet</p>
+                      <p className="text-xs mt-1">Complete TPR analysis or ITN planning to generate downloadable files</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </>
+  );
+};
+
+export default UploadModal;

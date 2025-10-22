@@ -1,0 +1,97 @@
+{
+  "summary": {
+    "total": 14,
+    "passed": 2,
+    "failed": 12,
+    "percentage": 14.285714285714285,
+    "duration": 32.702229,
+    "session_id": "35da0559-f550-4909-b9c9-0093f8bff334",
+    "base_url": "https://d225ar6c86586s.cloudfront.net"
+  },
+  "results": [
+    {
+      "test": "Session Initialization",
+      "passed": true,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:36.542488"
+    },
+    {
+      "test": "File Upload",
+      "passed": true,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:41.523885"
+    },
+    {
+      "test": "TPR Auto-detection & Contextual Welcome",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:43.574981"
+    },
+    {
+      "test": "Deviation: Data Summary",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:45.618487"
+    },
+    {
+      "test": "Gentle Reminder After Deviation",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:47.621411"
+    },
+    {
+      "test": "Deviation: Visualization",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:49.658836"
+    },
+    {
+      "test": "Facility Selection: Exact Match (primary)",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:51.697519"
+    },
+    {
+      "test": "Deviation: Column Info Request",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:53.737532"
+    },
+    {
+      "test": "Age Selection: Fuzzy Match",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:55.780329"
+    },
+    {
+      "test": "Age Selection: Natural Language",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T15:59:57.819615"
+    },
+    {
+      "test": "Multiple Deviations: Persistent Reminders",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T16:00:03.005553"
+    },
+    {
+      "test": "Fuzzy Facility Matching",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T16:00:05.050857"
+    },
+    {
+      "test": "TPR Workflow Completion",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T16:00:07.095285"
+    },
+    {
+      "test": "Post-Workflow Transition",
+      "passed": false,
+      "details": "",
+      "timestamp": "2025-09-30T16:00:09.149169"
+    }
+  ]
+}

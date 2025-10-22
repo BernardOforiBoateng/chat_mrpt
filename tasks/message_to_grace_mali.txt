@@ -1,0 +1,42 @@
+Hi Grace,
+
+I looked at your Mali maps and code. Before I can diagnose the issue, I need to understand what we're seeing.
+
+**CODE ISSUES TO FIX FIRST:**
+
+1. GHSL is missing multiply(100) - line 309:
+```javascript
+// Change:
+var ghslValue = safeGetNumber(ghslDict, 'ghsl');
+
+// To:
+var ghslValue = safeGetNumber(ghslDict, 'ghsl').multiply(100);
+```
+
+2. GHSL scale is too coarse - line 306:
+```javascript
+// Change:
+scale: 1000,
+
+// To:
+scale: 30,  // Match DBI resolution
+```
+
+**TO DIAGNOSE THE LOW DBI VALUES:**
+
+Can you share a sample of your exported CSV with the actual values? Specifically for 5-10 cluster points in/around Bamako area, I need to see:
+- Latitude, Longitude
+- MODIS_urban_percent
+- GHSL_pct (after fixing the multiply)
+- DBI_pct
+- arid_flag
+
+**KEY QUESTIONS:**
+
+1. Are your agricultural cluster points actually IN Bamako city center, or are they in the broader southwest Mali region (which includes rural areas)?
+
+2. After fixing GHSL, do MODIS and GHSL show high values (40-60%) for those Bamako points but DBI shows low (10-20%)? Or do all three methods show low values?
+
+If all three methods show low values after the fixes, then your cluster points might be in peri-urban/rural areas, not the urban core, and the results would be correct.
+
+— Bernard

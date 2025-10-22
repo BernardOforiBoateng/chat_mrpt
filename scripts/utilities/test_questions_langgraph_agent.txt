@@ -1,0 +1,124 @@
+TEST QUESTIONS FOR LANGGRAPH DATA ANALYSIS AGENT
+================================================
+Date: 2025-01-18
+Data File: adamawa_tpr_cleaned.csv (10,452 records, 22 columns)
+Testing Option 1: Data Analysis Workflow
+
+BASIC DATA EXPLORATION QUESTIONS
+---------------------------------
+1. Show me a summary of the data
+2. What columns are in this dataset?
+3. How many unique LGAs are in Adamawa state?
+4. How many health facilities are in the dataset?
+5. What is the date range of the data?
+
+ADAMAWA-SPECIFIC ANALYSIS QUESTIONS
+------------------------------------
+6. Calculate the overall TPR for RDT tests in children under 5
+7. Which LGA has the highest malaria test positivity rate?
+8. Compare TPR between Yola South and Mubi North LGAs
+9. What's the average number of tests per facility per month?
+10. Show me the top 10 facilities with highest testing volume
+
+RDT VS MICROSCOPY ANALYSIS
+---------------------------
+11. How many facilities use RDT vs Microscopy testing?
+12. Compare TPR between RDT and Microscopy methods
+13. Which test method detects more positive cases?
+14. Show facilities that use both testing methods
+15. Calculate testing method preference by LGA
+
+AGE GROUP & DEMOGRAPHIC ANALYSIS
+---------------------------------
+16. Compare TPR between under-5 and over-5 age groups
+17. What's the TPR for pregnant women?
+18. Which age group has the highest testing volume?
+19. Calculate monthly average tests for each age group
+20. Show trends in pediatric malaria cases over 2024
+
+FACILITY-LEVEL ANALYSIS
+-----------------------
+21. Compare Primary vs Secondary facility performance
+22. Which facilities have TPR above 50%?
+23. Find facilities with unusual testing patterns
+24. Show average monthly tests by facility level
+25. Identify facilities with declining test volumes
+
+EXPORT & REPORTING QUESTIONS
+-----------------------------
+26. Generate a comprehensive analysis report
+27. Export the top 10 high-risk wards to a table
+28. Create a summary table of key metrics
+29. Export visualizations as images
+30. Generate actionable insights from the analysis
+
+EDGE CASES TO TEST
+------------------
+31. What insights can you derive from this data?
+32. Help me understand the patterns in this data
+33. What would you recommend based on this analysis?
+34. Predict future trends based on current data
+35. Identify the most important factors affecting TPR
+
+ERROR HANDLING TESTS
+--------------------
+36. Calculate TPR for non-existent column XYZ
+37. Create a chart with invalid parameters
+38. Analyze data with null values
+39. Request analysis on empty dataset
+40. Ask for impossible calculations
+
+SPECIFIC FOR ADAMAWA TPR DATA
+------------------------------
+41. What's the overall TPR for Adamawa state?
+42. Which LGA in Adamawa has the most concerning malaria situation?
+43. Compare urban vs rural wards if that data exists
+44. Analyze the effectiveness of different health facilities
+45. What's the TPR trend across different months?
+46. Which age group is most affected by malaria in Adamawa?
+47. Are there any geographic clusters of high TPR?
+48. What's the testing capacity across different LGAs?
+49. Compare Primary vs Secondary facility performance
+50. Identify wards that need immediate intervention
+
+TESTING CHECKLIST
+-----------------
+[ ] Response Quality - Clear, formatted responses?
+[ ] Visualizations - Charts appear correctly in UI?
+[ ] Performance - Processing speed acceptable?
+[ ] Context Retention - Remembers previous analysis?
+[ ] Error Messages - Handled gracefully?
+[ ] Data Accuracy - Calculations are correct?
+[ ] Tool Usage - Proper use of Python tools?
+[ ] Memory Management - Handles large datasets?
+[ ] Export Functions - Can export results?
+[ ] Interactive Features - Can drill down into data?
+
+PROGRESSIVE TESTING APPROACH
+----------------------------
+Step 1: Start with questions 1-5 (Basic exploration)
+Step 2: Try questions 6-10 (Simple visualizations)
+Step 3: Test questions 11-20 (Analysis & quality)
+Step 4: Attempt questions 21-30 (Complex & export)
+Step 5: Test edge cases 31-40 (Robustness)
+Step 6: Focus on Adamawa-specific 41-50
+
+EXPECTED BEHAVIORS
+------------------
+- Agent should use Python code execution for analysis
+- Visualizations should be generated with Plotly
+- Errors should provide helpful guidance
+- Complex questions should be broken into steps
+- Results should be accurate and verifiable
+- Context from previous questions should be maintained
+
+NOTES
+-----
+- Record any failures or unexpected behaviors
+- Note response times for complex queries
+- Check if visualizations are interactive
+- Verify data calculations manually when possible
+- Test both valid and invalid inputs
+- Observe how the agent handles ambiguous requests
+
+END OF TEST QUESTIONS

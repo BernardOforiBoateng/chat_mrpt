@@ -1,0 +1,26 @@
+# Commands to resize Instance 2 disk (requires AWS admin access)
+
+# 1. Stop the instance
+aws ec2 stop-instances --instance-ids i-0f3b25b72f18a5037 --region us-east-2
+
+# 2. Wait for it to stop
+aws ec2 wait instance-stopped --instance-ids i-0f3b25b72f18a5037 --region us-east-2
+
+# 3. Get the volume ID
+VOLUME_ID=$(aws ec2 describe-instances --instance-ids i-0f3b25b72f18a5037 --region us-east-2 --query "Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId" --output text)
+echo "Volume ID: $VOLUME_ID"
+
+# 4. Modify the volume to 100GB
+aws ec2 modify-volume --volume-id $VOLUME_ID --size 100 --region us-east-2
+
+# 5. Start the instance
+aws ec2 start-instances --instance-ids i-0f3b25b72f18a5037 --region us-east-2
+
+# 6. Wait for it to start
+aws ec2 wait instance-running --instance-ids i-0f3b25b72f18a5037 --region us-east-2
+
+# 7. After instance is running, SSH in and extend filesystem:
+ssh -i <your-key.pem> ec2-user@18.220.103.20
+sudo growpart /dev/nvme0n1 1
+sudo xfs_growfs /
+df -h /

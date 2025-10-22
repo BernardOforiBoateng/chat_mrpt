@@ -1,0 +1,30 @@
+Recent Updates (Memory & EDA Enhancements)
+-----------------------------------------
+
+1. Session Context & Schema Briefs
+   - Location: app/core/session_context_service.py
+   - Added automatic dataset profiling (dtype, non-null, uniques, sample values) and persisted summaries via MemoryService.
+
+2. Prompt Enrichment
+   - Locations: app/core/prompt_builder.py, app/data_analysis_v3/core/agent.py
+   - Injected conversation memory and dataset schema summaries into both main-flow and LangGraph prompts.
+
+3. Column Exploration Tool
+   - Location: app/core/request_interpreter.py
+   - Registered `list_dataset_columns` with pagination for schema browsing without code dumps.
+
+4. Memory Helpers
+   - Location: app/services/memory_service.py
+   - Exposed `get_fact`/`get_all_facts` for structured memory retrieval.
+
+5. Table Rendering Pipeline
+   - Locations: app/data_analysis_v3/core/executor_simple.py, app/data_analysis_v3/tools/python_tool.py
+   - Captured DataFrame outputs, converted them to Markdown tables, and generated CSV download links for cleaner EDA results.
+
+Test Recommendations
+--------------------
+1. Manual (main flow): run analysis, then use pronoun-based follow-ups to confirm memory/context recall.
+2. Manual (column tool): call `list dataset columns` with multiple pages to verify pagination.
+3. Manual (EDA output): execute analysis that returns a DataFrame; confirm Markdown table + CSV link formatting.
+4. Automated (if available): `pytest test_context_persistence.py test_context_recall.py` for regression coverage.
+5. Monitoring: inspect `instance/memory/<session>.json` and `instance/uploads/<session>/visualizations/` for stored schema facts and generated CSVs.

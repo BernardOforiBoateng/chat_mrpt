@@ -1,0 +1,42 @@
+# ChatMRPT Complete Workflow Prompts
+# Use these exact prompts after uploading your data file to go through the entire analysis workflow
+
+## Phase 1: TPR Analysis
+# Prompt 1: Initiate TPR analysis
+tpr
+
+# Prompt 2: Confirm to continue (after seeing TPR options)
+yes
+
+# Prompt 3: Select facility level
+primary
+
+# Prompt 4: Select age group
+u5
+
+## Phase 2: Risk Analysis
+# Prompt 5: Run malaria risk analysis (after TPR completion)
+run malaria risk analysis
+
+# Prompt 6: Visualize variable distribution (optional - example with rainfall)
+Plot the map distribution for the 'rainfall' variable
+
+## Phase 3: ITN Planning
+# Prompt 7: Plan bed net distribution with parameters
+I want to plan bed net distribution
+
+I have 2 million nets, and an average household size is 4 and use the urban threshold of 75% and composite
+
+---
+
+## Notes:
+- This workflow goes through all three phases: TPR → Risk Analysis → ITN Planning
+- Each prompt should be entered after the previous step completes
+- The workflow assumes you've uploaded a CSV file with health facility data
+- Parameters in Prompt 7:
+  * Total nets: 2,000,000
+  * Household size: 4
+  * Urban threshold: 75%
+  * Risk method: composite
+- You can modify the variable name in Prompt 6 (e.g., 'EVI', 'NDWI', 'elevation')
+- You can skip Prompt 6 if you don't need variable distribution visualization

@@ -1,0 +1,211 @@
+{
+  "timestamp": "2025-09-11 16:06:43",
+  "base_url": "https://d225ar6c86586s.cloudfront.net",
+  "session_id": "e40c9947-0518-423e-8eea-34a268690d13",
+  "summary": {
+    "total": 33,
+    "passed": 0,
+    "failed": 33,
+    "pass_rate": "0.0%"
+  },
+  "results": [
+    {
+      "test": "Run the malaria risk analysis",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "run risk analysis",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "perform the analysis",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "start analysis",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "Check data quality",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "check the data quality",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "validate data quality",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "assess data completeness",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "plot vulnerability map",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "create vulnerability map",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "show me the vulnerability map",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "generate PCA map",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "create a box plot",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "show scatter plot",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "create histogram",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "show ward rankings",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "get top 10 wards",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "rank wards by risk",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "which wards are highest risk",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "recommend interventions",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "plan interventions",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "suggest intervention strategies",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "where should we target ITNs",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "calculate correlation",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "show variable distribution",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "statistical summary",
+      "expected": "tools",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "What is malaria?",
+      "expected": "arena",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "How does climate affect mosquitoes?",
+      "expected": "arena",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "Explain vector control",
+      "expected": "arena",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "What are ITNs?",
+      "expected": "arena",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "Compare different philosophical approaches to public health",
+      "expected": "arena",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "What would Socrates think about malaria control?",
+      "expected": "arena",
+      "actual": "error",
+      "passed": false
+    },
+    {
+      "test": "Explain quantum computing applications in epidemiology",
+      "expected": "arena",
+      "actual": "error",
+      "passed": false
+    }
+  ]
+}

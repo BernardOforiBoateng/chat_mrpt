@@ -1,0 +1,823 @@
+"""
+LangGraph Agent for Data Analysis - CLEAN VERSION
+Based on AgenticDataAnalysis backend.py and nodes.py
+Pure agent pattern - NO TPR workflow logic
+"""
+
+import os
+import logging
+from typing import Literal, List, Dict, Any
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph
+from langgraph.prebuilt import ToolNode
+
+from .state import DataAnalysisState
+from ..tools.python_tool import analyze_data
+from ..prompts.system_prompt import MAIN_SYSTEM_PROMPT
+from .encoding_handler import EncodingHandler
+
+logger = logging.getLogger(__name__)
+
+# Optional memory service - graceful degradation if not available
+try:
+    from app.services.memory_service import get_memory_service
+    HAS_MEMORY_SERVICE = True
+except ImportError:
+    HAS_MEMORY_SERVICE = False
+    def get_memory_service():
+        return None
+
+
+class DataAnalysisAgent:
+    """
+    Main agent for data analysis using LangGraph.
+    Follows AgenticDataAnalysis two-node pattern exactly.
+    Uses OpenAI gpt-4o for high-quality analysis.
+
+    NO TPR workflow logic - agent is pure.
+    """
+
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+
+        # Initialize LLM
+        openai_key = os.environ.get('OPENAI_API_KEY')
+        if not openai_key:
+            logger.error("OPENAI_API_KEY not found in environment!")
+            raise ValueError("OpenAI API key required for Data Analysis V3")
+
+        logger.info("Initializing Clean Data Analysis Agent with OpenAI gpt-4o")
+
+        self.llm = ChatOpenAI(
+            model="gpt-4o",
+            api_key=openai_key,
+            temperature=0.7,
+            max_tokens=2000,
+            timeout=50
+        )
+
+        # Set up tools - Just Python analysis tool
+        self.tools = [analyze_data]
+
+        # Follow AgenticDataAnalysis pattern exactly
+        # 1. Bind tools to LLM
+        model_with_tools = self.llm.bind_tools(
+            self.tools,
+            tool_choice="auto"
+        )
+
+        # 2. Create prompt template
+        self.chat_template = ChatPromptTemplate.from_messages([
+            ("system", MAIN_SYSTEM_PROMPT),
+            ("placeholder", "{messages}"),
+        ])
+
+        # 3. Chain template with tool-bound model
+        self.model = self.chat_template | model_with_tools
+
+        # Create tool node
+        self.tool_node = ToolNode(self.tools)
+
+        # Build the graph
+        self.graph = self._build_graph()
+
+        # Track conversation history
+        self.chat_history: List[BaseMessage] = []
+        # Load persisted history for cross-worker continuity
+        try:
+            self._load_persisted_history()
+        except Exception:
+            pass
+
+    def _load_persisted_history(self) -> None:
+        """Load persisted chat messages into chat_history."""
+        try:
+            mem = get_memory_service()
+            msgs = mem.get_messages(self.session_id)
+            history: List[BaseMessage] = []
+            for m in msgs:
+                role = (m.get('role') or 'user').lower()
+                content = m.get('content') or ''
+                if not content:
+                    continue
+                if role == 'assistant':
+                    history.append(AIMessage(content=content))
+                else:
+                    history.append(HumanMessage(content=content))
+            if history:
+                self.chat_history = history
+        except Exception:
+            # Non-fatal
+            pass
+
+    def _build_graph(self):
+        """Build the LangGraph workflow - SIMPLIFIED to match original."""
+        workflow = StateGraph(DataAnalysisState)
+
+        # Add nodes - just 2 like original (agent, tools)
+        workflow.add_node('agent', self._agent_node)
+        workflow.add_node('tools', self._tools_node)
+
+        # Routing - simplified like original
+        workflow.add_conditional_edges('agent', self._route_from_agent)
+        workflow.add_edge('tools', 'agent')  # Hardcoded edge back to agent
+
+        workflow.set_entry_point('agent')  # Start at agent, not planner
+
+        return workflow.compile()
+
+    def _planner_node(self, state: DataAnalysisState):
+        """Lightweight planner that decomposes compound requests and feeds subtasks sequentially."""
+        # Copy messages so we can modify without side effects
+        messages = list(state.get('messages', []))
+        pending = list(state.get('pending_subtasks', []))
+
+        # If there are queued subtasks, push the next one as a HumanMessage
+        if pending:
+            next_task = pending[0]
+            remaining = pending[1:]
+            # Avoid duplicating if the next task is already the most recent human message
+            if not messages or not isinstance(messages[-1], HumanMessage) or messages[-1].content != next_task:
+                messages.append(HumanMessage(content=next_task))
+            return {
+                'messages': messages,
+                'pending_subtasks': remaining
+            }
+
+        # No pending queue: analyze latest user message for compound instructions
+        latest_user = None
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                latest_user = msg
+                break
+        if not latest_user:
+            return {'messages': messages, 'pending_subtasks': pending}
+
+        subtasks = self._split_into_subtasks(latest_user.content)
+        if len(subtasks) <= 1:
+            return {'messages': messages, 'pending_subtasks': pending}
+
+        # Replace the latest message with the first subtask and queue the rest
+        base_messages = messages[:-1]
+        base_messages.append(HumanMessage(content=subtasks[0]))
+        return {
+            'messages': base_messages,
+            'pending_subtasks': subtasks[1:]
+        }
+
+    def _split_into_subtasks(self, text: str) -> List[str]:
+        """Naive splitter for compound sentences using coordinating conjunctions."""
+        if not text:
+            return []
+        lowered = text.lower()
+        # Use markers that commonly separate sequential instructions
+        separators = [' then ', ' afterwards ', ' after that ', ';', ' and then ']
+        temp = text
+        for sep in separators:
+            temp = temp.replace(sep, '|')
+        # Final fallback: split on ' and ' only if text seems to contain multiple verbs
+        if '|' not in temp and lowered.count(' and ') >= 1:
+            temp = temp.replace(' and ', '|')
+        parts = [part.strip() for part in temp.split('|')]
+        # Filter out empty or duplicate segments
+        cleaned = []
+        for part in parts:
+            if not part or part.lower() in {'then', 'after that'}:
+                continue
+            if cleaned and part == cleaned[-1]:
+                continue
+            cleaned.append(part)
+        return cleaned if cleaned else [text]
+
+    def _smart_truncate_messages(self, messages: List[BaseMessage], keep: int) -> List[BaseMessage]:
+        """
+        Smart message truncation that preserves tool_calls/tool message pairs.
+
+        OpenAI requires:
+        - If message has role='tool', it MUST be preceded by role='assistant' with tool_calls
+        - We cannot truncate in a way that breaks this pairing
+
+        Strategy:
+        - Work backwards from end
+        - Keep last N messages
+        - If truncation would split a tool_calls/tool pair, include the pair
+        """
+        if len(messages) <= keep:
+            return messages
+
+        # Take last N messages
+        result = messages[-keep:]
+
+        # Check if first message in result is a ToolMessage
+        # If so, we need to include the preceding AIMessage with tool_calls
+        if result and isinstance(result[0], ToolMessage):
+            # Find the corresponding AI message with tool_calls
+            for i in range(len(messages) - keep - 1, -1, -1):
+                msg = messages[i]
+                if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    # Found it - include this message
+                    result = [msg] + result
+                    logger.info(f"[SMART TRUNCATION] Added AIMessage with tool_calls to preserve pair")
+                    break
+
+        return result
+
+    def _create_data_summary(self, state: DataAnalysisState) -> str:
+        """Create summary of available data - enhanced for data-aware responses."""
+        summary = ""
+        variables = []
+
+        for data_obj in state.get("input_data", []):
+            var_name = data_obj.get('variable_name', 'df')
+            variables.append(var_name)
+
+            summary += f"\n\nVariable: {var_name}\n"
+            summary += f"Description: {data_obj.get('data_description', 'Dataset loaded')}\n"
+
+            # Add column preview if available
+            if 'columns' in data_obj and data_obj['columns']:
+                cols = data_obj['columns']
+                if len(cols) <= 10:
+                    summary += f"Columns: {', '.join(cols)}"
+                else:
+                    summary += f"Columns ({len(cols)} total): {', '.join(cols[:10])}..."
+
+        # Include any remaining variables from state
+        if "current_variables" in state:
+            remaining = [v for v in state["current_variables"] if v not in variables]
+            for v in remaining:
+                summary += f"\n\nVariable: {v}"
+
+        # Add note about data availability (system prompt now controls when to use tool)
+        if summary:
+            summary += "\n\n**This data is loaded and ready for analysis.**"
+
+        return summary
+
+    def _agent_node(self, state: DataAnalysisState):
+        """Agent node - calls GPT-4o with tools."""
+        logger.info(f"[_AGENT_NODE] 🧠 Agent node called")
+        logger.info(f"[_AGENT_NODE] State keys: {list(state.keys())}")
+        logger.info(f"[_AGENT_NODE] Incoming messages count: {len(state.get('messages', []))}")
+
+        # Create data context message
+        logger.info(f"[_AGENT_NODE STEP 1] Creating data summary...")
+        current_data_template = "The following data is available:\n{data_summary}"
+        data_summary = self._create_data_summary(state)
+        logger.info(f"[_AGENT_NODE STEP 1] Data summary length: {len(data_summary)} characters")
+
+        current_data_message = HumanMessage(
+            content=current_data_template.format(data_summary=data_summary)
+        )
+        logger.info(f"[_AGENT_NODE STEP 1] ✅ Data context message created")
+
+        # FIX #2: Message truncation to prevent context overflow
+        # Keep only last 10 messages to avoid exceeding GPT-4's 128k token limit
+        # CRITICAL: Must preserve tool_calls/tool message pairs for OpenAI API
+        # CRITICAL: Don't modify state in place - create a copy for the model
+        messages = list(state.get("messages", []))  # Create a copy!
+        if len(messages) > 10:
+            logger.warning(f"[_AGENT_NODE MESSAGE TRUNCATION] Message history too long: {len(messages)} messages")
+
+            # Check if we have workflow context
+            first_msg = messages[0]
+            is_workflow_context = isinstance(first_msg, HumanMessage) and '[WORKFLOW CONTEXT]' in first_msg.content
+
+            # Smart truncation: preserve tool_calls/tool pairs
+            if is_workflow_context:
+                # Keep first message + last N messages (preserving pairs)
+                truncated = self._smart_truncate_messages(messages[1:], keep=9)
+                messages = [messages[0]] + truncated
+                logger.info(f"[_AGENT_NODE MESSAGE TRUNCATION] Kept workflow context + last 9 messages (smart)")
+            else:
+                # Keep last N messages (preserving pairs)
+                messages = self._smart_truncate_messages(messages, keep=10)
+                logger.info(f"[_AGENT_NODE MESSAGE TRUNCATION] Kept last 10 messages (smart)")
+
+            logger.info(f"[_AGENT_NODE MESSAGE TRUNCATION] Truncated: {len(state.get('messages', []))} → {len(messages)} messages")
+
+        # Prepend data context to messages (for the model only - don't modify state!)
+        logger.info(f"[_AGENT_NODE STEP 2] Prepending data context to messages...")
+        messages_for_model = [current_data_message] + messages
+        logger.info(f"[_AGENT_NODE STEP 2] ✅ Messages for model: {len(messages_for_model)}")
+
+        # Call the model with modified messages (not the state!)
+        logger.info(f"[_AGENT_NODE STEP 3] 🤖 Calling self.model.invoke()...")
+        logger.info(f"[_AGENT_NODE STEP 3] ⚠️  THIS CALLS THE LLM - WATCH FOR ERRORS")
+        try:
+            import time
+            start = time.time()
+            # Create a copy of state with modified messages for the model
+            state_for_model = dict(state)
+            state_for_model["messages"] = messages_for_model
+            llm_outputs = self.model.invoke(state_for_model)
+            elapsed = time.time() - start
+            logger.info(f"[_AGENT_NODE STEP 3] ✅ Model invoked successfully in {elapsed:.2f}s")
+            logger.info(f"[_AGENT_NODE STEP 3] Response type: {type(llm_outputs).__name__}")
+        except Exception as e:
+            logger.error(f"[_AGENT_NODE STEP 3] ❌ Model invoke failed: {e}", exc_info=True)
+            raise
+
+        logger.info(f"[_AGENT_NODE STEP 4] Returning node result")
+        return {
+            "messages": [llm_outputs],
+            "intermediate_outputs": [current_data_message.content]
+        }
+
+    def _tools_node(self, state: DataAnalysisState):
+        """
+        Tools node - executes tool calls.
+        SIMPLIFIED to match original - just invoke tools.
+        """
+        # Add session_id to state for tools to access
+        state_with_session = {**state, "session_id": self.session_id}
+
+        # Execute tools and return result
+        return self.tool_node.invoke(state_with_session)
+
+    def _route_from_planner(self, state: DataAnalysisState) -> Literal['agent']:
+        """Planner always hands off to agent after preparing messages."""
+        return 'agent'
+
+    def _route_from_tools(
+        self,
+        state: DataAnalysisState,
+    ) -> Literal['agent', '__end__']:
+        """
+        Decide next hop after tools execute.
+        FIX: Check guardrails BEFORE routing back to agent to prevent infinite loops.
+        """
+        tool_call_count = state.get('tool_call_count', 0)
+        consecutive_error_count = state.get('consecutive_error_count', 0)
+
+        # Check tool call limit
+        if tool_call_count >= 5:
+            logger.warning(f"[ROUTE_FROM_TOOLS] Tool call limit reached ({tool_call_count}/5)")
+            # Add fallback message explaining the issue
+            fallback_msg = (
+                "I've tried multiple approaches but haven't been able to complete this analysis. "
+                "This might be due to:\n\n"
+                "- Missing data columns or incorrect column names\n"
+                "- Data type incompatibilities\n"
+                "- Complex operations that need to be broken down\n\n"
+                "Could you please:\n"
+                "1. Verify the data structure matches what's expected\n"
+                "2. Try a simpler version of the analysis\n"
+                "3. Break the request into smaller steps"
+            )
+            state["messages"] = state.get("messages", []) + [AIMessage(content=fallback_msg)]
+            return '__end__'
+
+        # Check consecutive error limit (same error 3+ times = stuck loop)
+        if consecutive_error_count >= 3:
+            logger.warning(f"[ROUTE_FROM_TOOLS] Consecutive error limit reached ({consecutive_error_count}/3) - stuck loop detected")
+            # Get the last error for context
+            last_errors = [msg.content for msg in reversed(state.get("messages", []))
+                          if isinstance(msg, ToolMessage) and "⚠️ **Execution Error:**" in msg.content]
+            error_detail = last_errors[0] if last_errors else "Unknown error"
+
+            fallback_msg = (
+                "I'm encountering the same error repeatedly, which suggests this approach isn't working. "
+                f"The error is:\n\n{error_detail}\n\n"
+                "To resolve this, you could try:\n"
+                "- Using different column names or checking available columns\n"
+                "- Simplifying the analysis\n"
+                "- Providing more specific details about what you want to analyze"
+            )
+            state["messages"] = state.get("messages", []) + [AIMessage(content=fallback_msg)]
+            return '__end__'
+
+        # Guardrails passed - continue to agent
+        return 'agent'
+
+    def _route_from_agent(
+        self,
+        state: DataAnalysisState,
+    ) -> Literal['tools', '__end__']:
+        """
+        Decide next hop after agent responds.
+        SIMPLIFIED to match original - just check for tool calls.
+        """
+        messages = state.get('messages', [])
+        if not messages:
+            raise ValueError('No messages found in state')
+
+        ai_message = messages[-1]
+
+        # If agent wants to use tools, route to tools node
+        if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
+            return 'tools'
+
+        # Otherwise, we're done
+        return '__end__'
+
+    def _get_input_data(self) -> List[Dict[str, Any]]:
+        """Load most comprehensive dataset available for data-aware responses."""
+        logger.info(f"=" * 100)
+        logger.info(f"[_GET_INPUT_DATA] 📂 LOADING MOST COMPREHENSIVE DATA")
+        logger.info(f"[_GET_INPUT_DATA] Session: {self.session_id}")
+        logger.info(f"=" * 100)
+
+        input_data_list = []
+
+        session_folder = f"instance/uploads/{self.session_id}"
+        logger.info(f"[_GET_INPUT_DATA STEP 1] Session folder: {session_folder}")
+        logger.info(f"[_GET_INPUT_DATA STEP 1] Absolute path: {os.path.abspath(session_folder)}")
+        logger.info(f"[_GET_INPUT_DATA STEP 1] Folder exists: {os.path.exists(session_folder)}")
+
+        if os.path.exists(session_folder):
+            files_in_folder = os.listdir(session_folder)
+            logger.info(f"[_GET_INPUT_DATA STEP 1] Files in folder: {files_in_folder}")
+        else:
+            logger.error(f"[_GET_INPUT_DATA STEP 1] ❌ Session folder does not exist!")
+
+        # 🔧 FIX: Check if risk analysis is complete before loading unified dataset
+        # This prevents loading incomplete unified_dataset.csv without rankings
+        analysis_complete_flag = os.path.join(session_folder, '.analysis_complete')
+        analysis_complete = os.path.exists(analysis_complete_flag)
+        
+        logger.info(f"[_GET_INPUT_DATA STEP 2] Analysis complete flag exists: {analysis_complete}")
+        
+        # SMART DATA LOADING: Load most comprehensive dataset in priority order
+        # This ensures agent always has best available context for data-aware responses
+        if analysis_complete:
+            # After risk analysis: prioritize unified dataset with rankings
+            file_patterns = [
+                'unified_dataset.csv',      # After risk analysis (MOST COMPLETE: TPR + env + rankings)
+                'raw_data.csv',             # After TPR workflow (TPR + environmental variables)
+                'tpr_results.csv',          # After TPR calculation (ward-level TPR)
+                'data_analysis.csv',        # Alternative data file
+                'uploaded_data.csv'         # Initial upload (raw facility-level data)
+            ]
+            logger.info(f"[_GET_INPUT_DATA STEP 2] Mode: POST-ANALYSIS (prioritize unified_dataset.csv)")
+        else:
+            # Before risk analysis: use raw_data.csv with TPR + environmental
+            file_patterns = [
+                'raw_data.csv',             # After TPR workflow (TPR + environmental variables) ← PRIORITY
+                'tpr_results.csv',          # After TPR calculation (ward-level TPR)
+                'data_analysis.csv',        # Alternative data file
+                'uploaded_data.csv'         # Initial upload (raw facility-level data)
+                # NOTE: unified_dataset.csv excluded - will be created after risk analysis
+            ]
+            logger.info(f"[_GET_INPUT_DATA STEP 2] Mode: PRE-ANALYSIS (use raw_data.csv, skip unified_dataset)")
+
+        logger.info(f"[_GET_INPUT_DATA STEP 2] Smart loading - priority order: {file_patterns}")
+        logger.info(f"[_GET_INPUT_DATA STEP 2] Strategy: Load MOST comprehensive dataset available")
+
+        import pandas as pd
+
+        for idx, pattern in enumerate(file_patterns, 1):
+            csv_path = os.path.join(session_folder, pattern)
+            logger.info(f"[_GET_INPUT_DATA STEP 2.{idx}] Checking: {pattern}")
+            logger.info(f"[_GET_INPUT_DATA STEP 2.{idx}] Full path: {csv_path}")
+            logger.info(f"[_GET_INPUT_DATA STEP 2.{idx}] Exists: {os.path.exists(csv_path)}")
+
+            if os.path.exists(csv_path):
+                logger.info(f"[_GET_INPUT_DATA STEP 2.{idx}] ✅ File found: {pattern}")
+                logger.info(f"[_GET_INPUT_DATA STEP 2.{idx}] File size: {os.path.getsize(csv_path)} bytes")
+
+                try:
+                    logger.info(f"[_GET_INPUT_DATA STEP 3] 📊 Loading CSV with EncodingHandler...")
+                    import time
+                    load_start = time.time()
+                    df = EncodingHandler.read_csv_with_encoding(csv_path)
+                    load_time = time.time() - load_start
+                    logger.info(f"[_GET_INPUT_DATA STEP 3] ✅ CSV loaded in {load_time:.2f}s")
+                    logger.info(f"[_GET_INPUT_DATA STEP 3] DataFrame shape: {df.shape}")
+                    logger.info(f"[_GET_INPUT_DATA STEP 3] DataFrame columns: {df.columns.tolist()[:10]}")
+
+                    # Prepare data object (use 'data' key to match python_tool expectations)
+                    logger.info(f"[_GET_INPUT_DATA STEP 4] Creating data object...")
+                    logger.info(f"[_GET_INPUT_DATA STEP 4] ⚠️  CRITICAL: Storing DataFrame in 'data' key")
+                    data_obj = {
+                        'variable_name': 'df',
+                        'data_description': f"Dataset with {len(df)} rows and {len(df.columns)} columns",
+                        'data': df,  # CRITICAL: This stores the actual DataFrame!
+                        'columns': df.columns.tolist()
+                    }
+                    logger.info(f"[_GET_INPUT_DATA STEP 4] ✅ Data object created")
+                    logger.info(f"[_GET_INPUT_DATA STEP 4] Data object keys: {list(data_obj.keys())}")
+                    logger.info(f"[_GET_INPUT_DATA STEP 4] Data object 'data' type: {type(data_obj['data'])}")
+
+                    input_data_list.append(data_obj)
+                    logger.info(f"[_GET_INPUT_DATA STEP 5] ✅ Loaded {pattern}: {len(df)} rows, {len(df.columns)} columns")
+
+                    # Log which dataset was chosen and why
+                    dataset_context = {
+                        'unified_dataset.csv': 'COMPREHENSIVE (TPR + environmental + risk rankings)',
+                        'raw_data.csv': 'TPR + ENVIRONMENTAL (prepared for risk analysis)',
+                        'tpr_results.csv': 'WARD-LEVEL TPR (after TPR workflow)',
+                        'data_analysis.csv': 'ANALYSIS DATA',
+                        'uploaded_data.csv': 'RAW FACILITY DATA (initial upload)'
+                    }
+                    context_desc = dataset_context.get(pattern, 'UNKNOWN')
+                    logger.info(f"[_GET_INPUT_DATA STEP 5] 📊 Dataset context: {context_desc}")
+                    logger.info(f"[_GET_INPUT_DATA STEP 5] 🎯 Agent now has access to this data for ALL questions")
+
+                    logger.info(f"=" * 100)
+                    logger.info(f"[_GET_INPUT_DATA] 📂 DATA LOADING COMPLETE - SUCCESS")
+                    logger.info(f"=" * 100)
+                    break
+
+                except Exception as e:
+                    logger.error(f"[_GET_INPUT_DATA STEP 3] ❌ Error loading {pattern}: {e}", exc_info=True)
+                    continue
+
+        if not input_data_list:
+            logger.warning(f"[_GET_INPUT_DATA] ⚠️  No datasets loaded!")
+
+        logger.info(f"[_GET_INPUT_DATA FINAL] Total datasets loaded: {len(input_data_list)}")
+        return input_data_list
+
+    def _process_visualizations(self, output_plots: List) -> List[Dict[str, Any]]:
+        """Process output plots (pickle files) into visualization objects."""
+        visualizations = []
+
+        # Create static visualizations directory if it doesn't exist
+        static_viz_dir = "app/static/visualizations"
+        os.makedirs(static_viz_dir, exist_ok=True)
+
+        import pickle
+        import uuid
+
+        for plot_path in output_plots:
+            if isinstance(plot_path, str) and os.path.exists(plot_path):
+                try:
+                    # Load pickle file
+                    with open(plot_path, 'rb') as f:
+                        fig = pickle.load(f)
+
+                    # Generate unique HTML filename
+                    viz_id = str(uuid.uuid4())
+                    html_filename = f"data_analysis_{viz_id}.html"
+                    html_path = os.path.join(static_viz_dir, html_filename)
+
+                    # Save as HTML
+                    # Embed Plotly JS locally to avoid CDN dependency in offline/locked-down environments
+                    viz_html = fig.to_html(include_plotlyjs=True)
+                    with open(html_path, 'w') as html_file:
+                        html_file.write(viz_html)
+
+                    # Create web-accessible URL
+                    web_url = f"/static/visualizations/{html_filename}"
+
+                    visualizations.append({
+                        'type': 'iframe',
+                        'url': web_url,
+                        'title': 'Data Analysis Visualization',
+                        'height': 600
+                    })
+                    logger.info(f"Converted visualization: {plot_path} → {web_url}")
+                except Exception as e:
+                    logger.error(f"Error processing visualization {plot_path}: {e}")
+
+        return visualizations
+
+    async def analyze(self, user_query: str, workflow_context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Main entry point for data analysis.
+
+        CLEAN AND SIMPLE - like AgenticDataAnalysis user_sent_message()
+
+        NO TPR workflow logic here.
+        NO hardcoded responses.
+        NO keyword extraction.
+
+        Args:
+            user_query: User's question/request
+            workflow_context: Optional context about active workflow (stage, options, etc.)
+
+        Just pass query to LangGraph and let GPT-4o handle everything.
+        """
+        logger.info(f"=" * 100)
+        logger.info(f"[AGENT] 🤖 AGENT.ANALYZE() CALLED")
+        logger.info(f"[AGENT] Session: {self.session_id}")
+        logger.info(f"[AGENT] Query: '{user_query[:200]}...'")
+        logger.info(f"[AGENT] Workflow context present: {workflow_context is not None}")
+        logger.info(f"=" * 100)
+
+        if workflow_context:
+            logger.info(f"[AGENT] Workflow context details: {workflow_context}")
+
+        # PHASE 4: Pre-process large analysis requests to prevent timeout
+        # Check if user is asking to "plot all variables" or similar large requests
+        large_request_phrases = [
+            'all variables', 'all columns', 'everything', 'all data',
+            'plot all', 'visualize all', 'show all', 'analyze all'
+        ]
+
+        is_large_request = any(phrase in user_query.lower() for phrase in large_request_phrases)
+
+        if is_large_request and workflow_context:
+            # Check dataset size from workflow context
+            data_shape = workflow_context.get('data_shape')
+            data_columns = workflow_context.get('data_columns', [])
+
+            if data_shape and data_shape.get('cols', 0) > 10:
+                logger.info(f"[AGENT PHASE 4] Large request detected with {data_shape['cols']} columns - suggesting subset")
+
+                # Filter out non-numeric/administrative columns
+                excluded_keywords = ['name', 'id', 'state', 'lga', 'ward', 'code', 'geom', 'geometry']
+                numeric_cols = [
+                    col for col in data_columns
+                    if not any(keyword in col.lower() for keyword in excluded_keywords)
+                ]
+
+                suggestion = f"""Your dataset has **{data_shape['cols']} columns** ({data_shape['rows']} rows). Plotting all at once would take too long and might timeout (CloudFront has a 60-second limit).
+
+**I can help you visualize**:
+
+- **Specific variables** - Tell me which ones (e.g., "TPR", "test results", "environmental factors")
+- **Variable groups** - Like "all test variables" or "all geographic columns"
+- **Missing data patterns** - Show which columns have missing values
+- **Key numeric variables** - Here are some available: {', '.join(numeric_cols[:8])}
+
+**What aspect would you like to explore?**"""
+
+                return {
+                    "success": True,
+                    "message": suggestion,
+                    "session_id": self.session_id
+                }
+
+        # Load input data
+        logger.info(f"[AGENT STEP 1] Loading input data via _get_input_data()...")
+        try:
+            input_data_list = self._get_input_data()
+            logger.info(f"[AGENT STEP 1] ✅ Input data loaded: {len(input_data_list)} datasets")
+            if input_data_list:
+                logger.info(f"[AGENT STEP 1] First dataset keys: {list(input_data_list[0].keys())}")
+        except Exception as e:
+            logger.error(f"[AGENT STEP 1] ❌ Failed to load input data: {e}", exc_info=True)
+            raise
+
+        # DEBUG: Add debug info to response
+        debug_info = {
+            "session_folder": f"instance/uploads/{self.session_id}",
+            "session_folder_exists": os.path.exists(f"instance/uploads/{self.session_id}"),
+            "datasets_loaded": len(input_data_list),
+            "cwd": os.getcwd()
+        }
+
+        if input_data_list:
+            debug_info["first_dataset"] = {
+                "name": input_data_list[0].get('variable_name'),
+                "rows": len(input_data_list[0].get('data', [])) if 'data' in input_data_list[0] else 0,
+                "columns": len(input_data_list[0].get('columns', []))
+            }
+
+        if not input_data_list:
+            return {
+                "success": False,
+                "message": "No data found. Please upload a dataset first.",
+                "session_id": self.session_id
+            }
+
+        # Add workflow context to system prompt if provided
+        context_message = None
+        memory_message = None
+        if workflow_context:
+            stage = workflow_context.get('stage', 'unknown')
+            options = workflow_context.get('valid_options', [])
+            data_columns = workflow_context.get('data_columns', [])
+            data_shape = workflow_context.get('data_shape', {})
+
+            # ULTRA-FIX #3: Make data context EXPLICIT and PROMINENT
+            context_parts = [
+                f"[WORKFLOW CONTEXT]",
+                f"User is in TPR workflow at '{stage}' stage.",
+                f"Valid options: {', '.join(options)}.",
+            ]
+
+            # Add explicit data context if available
+            if data_columns:
+                context_parts.append(f"\n⚠️  IMPORTANT - USER'S DATASET INFORMATION:")
+                context_parts.append(f"Total columns: {len(data_columns)}")
+                context_parts.append(f"Total rows: {data_shape.get('rows', 'unknown')}")
+                context_parts.append(f"\nColumn names:")
+                if len(data_columns) <= 20:
+                    # List all columns if 20 or fewer
+                    context_parts.append(f"{', '.join(data_columns)}")
+                else:
+                    # List first 15 and indicate more
+                    context_parts.append(f"{', '.join(data_columns[:15])}")
+                    context_parts.append(f"...and {len(data_columns) - 15} more columns")
+
+                context_parts.append(f"\n🎯 CRITICAL: When user asks 'what variables/columns do I have?', LIST THESE SPECIFIC COLUMN NAMES!")
+                context_parts.append(f"Do NOT give generic answers. Use the actual column names listed above.")
+
+            context_parts.append(f"\nIf they ask questions, answer them FULLY using the data context above, then gently remind them where they are in the workflow.")
+
+            context_message = HumanMessage(content='\n'.join(context_parts))
+
+            # Log what we're sending
+            logger.info(f"[AGENT] Workflow context message created:")
+            logger.info(f"   - Stage: {stage}")
+            logger.info(f"   - Data columns: {len(data_columns)}")
+            logger.info(f"   - First 5 columns: {data_columns[:5] if data_columns else 'None'}")
+
+        if HAS_MEMORY_SERVICE:
+            try:
+                mem = get_memory_service()
+                summary = mem.get_fact(self.session_id, 'conversation_summary')
+                dataset_schema = mem.get_fact(self.session_id, 'dataset_schema_summary')
+                mem_messages = mem.get_messages(self.session_id)
+                memory_sections: List[str] = []
+                if dataset_schema:
+                    memory_sections.append("## Dataset Schema\n" + dataset_schema)
+                if summary:
+                    memory_sections.append("## Conversation Memory\n" + summary)
+                if mem_messages:
+                    snippets = []
+                    for msg in mem_messages[-4:]:
+                        role = (msg.get('role') or 'user').title()
+                        content = (msg.get('content') or '').strip()
+                        if content:
+                            snippets.append(f"{role}: {content}")
+                    if snippets:
+                        memory_sections.append("## Recent Turns\n" + "\n".join(snippets))
+                if memory_sections:
+                    memory_message = HumanMessage(content='\n\n'.join(memory_sections))
+            except Exception as exc:
+                logger.warning(f"[AGENT] Unable to prepare memory message: {exc}")
+
+        # Persist the user message and refresh in-memory history
+        try:
+            mem = get_memory_service()
+            _msgs = mem.get_messages(self.session_id)
+            if not _msgs or _msgs[-1].get('role') != 'user' or (_msgs[-1].get('content') or '') != (user_query or ''):
+                mem.append_message(self.session_id, 'user', user_query)
+            self._load_persisted_history()
+        except Exception:
+            pass
+
+        # Create input state (like AgenticDataAnalysis)
+        messages = self.chat_history.copy()
+        if context_message:
+            messages.insert(0, context_message)  # Add context at the beginning
+        if memory_message:
+            messages.insert(0, memory_message)
+        messages.append(HumanMessage(content=user_query))
+
+        input_state = {
+            "messages": messages,
+            "session_id": self.session_id,
+            "input_data": input_data_list,
+            "intermediate_outputs": [],
+            "current_variables": {},
+            "output_plots": [],
+            "insights": [],
+            "errors": [],
+        }
+
+        try:
+            # Invoke graph - SIMPLIFIED like original
+            logger.info(f"[AGENT] Invoking graph with {len(messages)} messages")
+
+            import time
+            start_time = time.time()
+
+            # Use original's recursion limit
+            result = self.graph.invoke(input_state, {"recursion_limit": 25})
+
+            elapsed = time.time() - start_time
+            logger.info(f"[AGENT] Graph completed in {elapsed:.2f} seconds")
+
+            # Update chat history
+            self.chat_history = result.get("messages", [])
+
+            # Extract final response
+            final_message = self.chat_history[-1] if self.chat_history else None
+
+            # Process visualizations
+            visualizations = self._process_visualizations(result.get("output_plots", []))
+
+            logger.info(f"[AGENT] Analysis complete, {len(visualizations)} visualizations")
+
+            # Persist assistant message
+            try:
+                mem.append_message(self.session_id, 'assistant', (final_message.content if final_message else 'Analysis complete.'))
+            except Exception:
+                pass
+
+            return {
+                "success": True,
+                "message": final_message.content if final_message else "Analysis complete.",
+                "visualizations": visualizations,
+                "session_id": self.session_id
+            }
+
+        except Exception as e:
+            logger.error(f"[CLEAN AGENT] Error during analysis: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": f"Error during analysis: {str(e)}",
+                "session_id": self.session_id
+            }
+
+    def reset_chat(self):
+        """Reset conversation history."""
+        self.chat_history = []
+        logger.info(f"[CLEAN AGENT] Chat history reset for session {self.session_id}")

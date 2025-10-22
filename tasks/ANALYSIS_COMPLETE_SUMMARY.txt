@@ -1,0 +1,95 @@
+================================================================================
+MALI URBAN ANALYSIS - COMPLETE
+Date: October 8, 2025
+Analyst: Bernard Boateng
+================================================================================
+
+ROOT CAUSE IDENTIFIED AND VALIDATED WITH EVIDENCE
+--------------------------------------------------
+
+Grace used NIGERIA rasters for MALI analysis:
+  - Line 239 (context.md): Nigeria_GHSL_2018 → Should be Mali_GHSL_2018
+  - Line 240 (context.md): Nigeria_DBI_2018 → Should be Mali_DBI_2018
+
+EVIDENCE: GHSL capped at 30.0% for ALL 345 Mali points
+
+VALIDATION TEST RESULTS
+-----------------------
+
+Urban Bamako (45 points, MODIS > 50%):
+  Grace (Wrong):   MODIS=85.3%, GHSL=29.7% ❌, DBI=35.5%
+  Bernard (Fixed): MODIS=86.7%, GHSL=99.3% ✓, DBI=35.6%
+
+GHSL Improvement: +69.6%
+DBI Change: 0.1% (essentially unchanged)
+
+CONCLUSION: DBI methodology is CORRECT, geography was WRONG
+
+FILES CREATED
+-------------
+
+Evidence:
+  ✓ Bernard_Mali_Test.csv - Corrected results (345 points)
+  ✓ mali_comparison_charts.png - 4-panel statistical comparison
+  ✓ mali_comparison_map.html - Interactive overlay map
+  ✓ mali_comparison_sidebyside.html - Side-by-side comparison
+
+Scripts:
+  ✓ bernard_test_mali.js - Full GEE test script with corrections
+  ✓ grace_code_CORRECTED.js - Fixed version of Grace's buffer script
+  ✓ mali_comparison_analysis.py - Statistical analysis script
+  ✓ mali_map_visualization.py - Map generation script
+
+Documentation:
+  ✓ MALI_FINAL_REPORT.md - Comprehensive technical report
+  ✓ message_to_grace_FINAL.txt - Concise Slack message
+  ✓ grace_code_issues_documented.md - Detailed issue documentation
+  ✓ TESTING_PLAN.md - Step-by-step validation approach
+
+MESSAGE TO GRACE
+----------------
+
+See: message_to_grace_FINAL.txt
+
+Key points:
+1. Wrong geography: Using Nigeria rasters for Mali points
+2. GHSL capped at 30% proves geography mismatch
+3. DBI methodology is correct (values unchanged in corrected analysis)
+4. Need to verify if Mali_GHSL_2018 and Mali_DBI_2018 exist
+5. Use corrected script (grace_code_CORRECTED.js)
+
+NEXT STEPS FOR GRACE
+---------------------
+
+1. Check if Mali rasters exist in assets
+2. If not, create them using DBI creation script (contxt.md lines 10-204)
+3. Run corrected buffer script
+4. Export new CSV: Mali_points_CORRECTED
+5. Verify GHSL max > 30%
+
+ALTERNATIVE: Use global GHSL dataset (JRC/GHSL/P2023A/GHS_SMOD/2020)
+  - No geography mismatch risk
+  - Native 30m resolution
+  - See bernard_test_mali.js for implementation
+
+QUICK STATS FOR REFERENCE
+--------------------------
+
+All 345 Points:
+  Bernard: MODIS=16.0%, GHSL=26.6%, DBI=25.4%, GHSL_max=100.0%
+  Grace:   MODIS=15.8%, GHSL=15.1%, DBI=25.3%, GHSL_max=30.0% ❌
+
+Urban Bamako (45 points):
+  Bernard: MODIS=86.7%, GHSL=99.3%, DBI=35.6%
+  Grace:   MODIS=85.3%, GHSL=29.7% ❌, DBI=35.5%
+
+Correlation with MODIS:
+  Bernard: GHSL r=0.867, DBI r=0.189
+  Grace:   GHSL r=0.865, DBI r=0.190
+
+ALL EVIDENCE SUPPORTS:
+  ✓ DBI methodology is correct
+  ✓ Geography mismatch is the issue
+  ✓ Fix validated with 345 Mali points
+
+================================================================================
