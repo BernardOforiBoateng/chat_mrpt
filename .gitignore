@@ -201,3 +201,6 @@ infrastructure/*.tfstate.backup
 !README.md
 !LICENSE
 CLAUDE.md
+
+# Old/backup directories
+app/core/request_interpreter.OLD_WITH_DEBUG_BLOB/
