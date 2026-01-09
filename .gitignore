@@ -48,9 +48,16 @@ archive/
 *.zip
 *.bak
 *.backup
+*.backup_*
+*.backup.*
+*.broken
+*.broken_*
+*.OLD/
 *.old
 *_backup_*
 *_archive_*
+*.py.backup*
+*.py.broken*
 
 # Data Files
 # ==========================================
@@ -94,6 +101,8 @@ app/static/react-stable/
 !app/static/react/README.md
 !app/static/react-stable/.gitkeep
 !app/static/react-stable/README.md
+frontend/src/generated/
+/.build/
 
 # Node modules
 frontend/node_modules/
@@ -148,6 +157,37 @@ coverage/
 *.tmp
 *.temp
 .cache/
+interactions.db
+simulated_users.csv.*
+
+# Images (screenshots, diagrams)
+# ==========================================
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+!frontend/public/**/*.png
+!frontend/public/**/*.svg
+!app/static/**/*.png
+!app/static/**/*.svg
+
+# Presentations & Documents (personal)
+# ==========================================
+*.pptx
+*.ppt
+
+# Generated Visualizations
+# ==========================================
+app/static/visualizations/
+
+# Geospatial Database
+# ==========================================
+*.gpkg
+
+# SSH Keys (security)
+# ==========================================
+aws_ssh*.txt
 
 # Production-specific
 # ==========================================

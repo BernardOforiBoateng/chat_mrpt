@@ -68,11 +68,10 @@ class RedisConfig:
             
         except redis.ConnectionError as e:
             app.logger.error(f"❌ Failed to connect to Redis: {e}")
-            app.logger.warning("⚠️ Falling back to filesystem sessions")
-            return False
+            raise RuntimeError('Redis session store is required for ChatMRPT') from e
         except Exception as e:
             app.logger.error(f"❌ Redis session initialization error: {e}")
-            return False
+            raise
     
     @classmethod
     def get_redis_info(cls, app):

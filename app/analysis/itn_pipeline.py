@@ -12,6 +12,17 @@ import plotly.graph_objects as go
 from pandas.api.types import is_datetime64_any_dtype
 from shapely.geometry import LineString, MultiLineString, Polygon, MultiPolygon
 from app.data.population_data.itn_population_loader import get_population_loader
+from app.utils.geospatial_levels import (
+    apply_lga_highlight,
+    collect_lga_options,
+    dissolve_to_lga,
+    normalize_lga_code,
+)
+from app.utils.lga_boundaries import (
+    annotate_with_lga_names,
+    get_reference_lga_geometries,
+)
+from app.utils.visualization_controls import inject_geographic_controls
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 
@@ -822,20 +833,36 @@ def calculate_itn_distribution(data_handler, session_id: str, total_nets: int = 
         'map_path': map_path
     }
 
-def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, reprioritized: pd.DataFrame, rankings: pd.DataFrame,
-                     session_id: str, urban_threshold: float = 75.0, total_nets: int = 10000,
-                     avg_household_size: float = 5.0, method: str = 'composite', stats: Dict[str, Any] = None) -> str:
+def generate_itn_map(
+    shp_data: gpd.GeoDataFrame,
+    prioritized: pd.DataFrame,
+    reprioritized: pd.DataFrame,
+    rankings: pd.DataFrame,
+    session_id: str,
+    urban_threshold: float = 75.0,
+    total_nets: int = 10000,
+    avg_household_size: float = 5.0,
+    method: str = 'composite',
+    stats: Dict[str, Any] = None,
+    geographic_level: str = 'ward',
+    selected_lgas: Optional[List[str]] = None,
+) -> str:
     """Generate interactive Plotly map for ITN distribution with threshold info."""
     # Ensure we have the visualization directory
     os.makedirs('app/static/visualizations', exist_ok=True)
     
     # Merge allocation data with shapefile for visualization - deep copy to avoid modifying original
     shp_data = shp_data.copy(deep=True)
-    
+
     # Ensure shp_data is a proper GeoDataFrame
     if not isinstance(shp_data, gpd.GeoDataFrame):
         logger.error("shp_data is not a GeoDataFrame!")
         return None
+
+    try:
+        shp_data = annotate_with_lga_names(shp_data)
+    except Exception as exc:
+        logger.warning(f"Failed to annotate LGA names on shapefile: {exc}")
     
     # Add lowercase column for merging
     shp_data['WardName_lower'] = shp_data['WardName'].str.lower()
@@ -970,10 +997,50 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         logger.error("No valid geometries found in shapefile data!")
         return None
     
+    # Determine available LGA metadata for overlays
+    requested_level = (geographic_level or 'ward').lower()
+    if requested_level not in {'ward', 'lga'}:
+        requested_level = 'ward'
+    available_lgas = collect_lga_options(shp_data)
+    lga_label_map = {
+        normalize_lga_code(item['code']): item['label']
+        for item in available_lgas
+        if item.get('code') and item.get('label')
+    }
+    normalized_selected_lgas = _normalize_selected_lgas(selected_lgas, available_lgas)
+
     # Get map center from shapefile bounds
     bounds = shp_data.total_bounds
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
+
+    # Early exit for requested LGA-level visualization
+    if requested_level == 'lga':
+        lga_fig = _build_lga_allocation_figure(
+            shp_data.copy(deep=True),
+            center_lat=center_lat,
+            center_lon=center_lon,
+            stats=stats,
+            selected_lgas=normalized_selected_lgas,
+            total_nets=total_nets,
+            urban_threshold=urban_threshold,
+            label_map=lga_label_map,
+        )
+        if lga_fig is not None:
+            return _save_itn_map_html(
+                lga_fig,
+                session_id,
+                total_nets,
+                avg_household_size,
+                method,
+                urban_threshold,
+                stats,
+                normalized_selected_lgas,
+                available_lgas,
+                current_level='lga'
+            )
+        else:
+            logger.warning("LGA-level ITN map generation failed; falling back to ward view")
     
     # Log some debugging info
     logger.info(f"Creating ITN map with {len(shp_data)} wards")
@@ -1332,23 +1399,234 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
         showlegend=False
     )
     
-    # Save map in session folder for better organization
-    # Create visualizations directory if it doesn't exist
+    return _save_itn_map_html(
+        fig,
+        session_id,
+        total_nets,
+        avg_household_size,
+        method,
+        urban_threshold,
+        stats,
+        normalized_selected_lgas,
+        available_lgas,
+        current_level='ward'
+    )
+
+
+def _normalize_selected_lgas(selected: Optional[List[str]], available: List[Dict[str, str]]) -> List[str]:
+    if not selected:
+        return []
+    available_codes = {normalize_lga_code(item.get('code')) for item in available}
+    normalized: List[str] = []
+    for code in selected:
+        normalized_code = normalize_lga_code(code)
+        if not normalized_code:
+            continue
+        if available_codes and normalized_code not in available_codes:
+            continue
+        normalized.append(normalized_code)
+    return normalized
+
+
+def _deduplicate_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Drop duplicated column labels while keeping the first instance."""
+    if frame is None or not hasattr(frame, 'columns'):
+        return frame
+    duplicated_mask = frame.columns.duplicated()
+    if duplicated_mask.any():
+        frame = frame.loc[:, ~duplicated_mask]
+    return frame
+
+
+def _build_lga_allocation_figure(
+    shp_data: gpd.GeoDataFrame,
+    center_lat: Optional[float],
+    center_lon: Optional[float],
+    stats: Optional[Dict[str, Any]],
+    selected_lgas: List[str],
+    total_nets: int,
+    urban_threshold: float,
+    label_map: Dict[str, str],
+) -> Optional[go.Figure]:
+    aggregated = (
+        shp_data.groupby('LGACode', dropna=True)
+        .agg({
+            'nets_allocated': 'sum',
+            'nets_needed': 'sum',
+            'Population': 'sum',
+            'coverage_percent': 'mean',
+            'urban_pct_display': 'mean',
+            'StateName': 'first',
+            'LGAName': 'first',
+        })
+        .reset_index()
+    )
+
+    reference_shapes = get_reference_lga_geometries(aggregated[['LGACode', 'StateName', 'LGAName']])
+    if reference_shapes is None or reference_shapes.empty:
+        try:
+            fallback = dissolve_to_lga(
+                shp_data,
+                value_columns=[],
+                sum_columns=['nets_allocated', 'nets_needed', 'Population'],
+                mean_columns=['coverage_percent', 'urban_pct_display'],
+            )
+        except Exception as exc:
+            logger.error(f"Failed to generate fallback LGA dissolve: {exc}")
+            return None
+        reference_shapes = fallback
+    else:
+        reference_shapes = _deduplicate_columns(reference_shapes)
+        reference_shapes = reference_shapes.drop(columns=['StateName', 'LGAName'], errors='ignore')
+        reference_shapes = reference_shapes.rename(
+            columns={'state_name': 'StateName', 'lga_name': 'LGAName'}
+        )
+    reference_shapes = _deduplicate_columns(reference_shapes)
+
+    aggregated['nets_allocated'] = aggregated['nets_allocated'].fillna(0)
+    aggregated['nets_needed'] = aggregated['nets_needed'].fillna(0)
+    aggregated['Population'] = aggregated['Population'].fillna(0)
+    aggregated['coverage_percent'] = aggregated['coverage_percent'].fillna(0)
+    aggregated['urban_pct_display'] = aggregated['urban_pct_display'].fillna(0)
+    aggregated['LGACode_norm'] = aggregated['LGACode'].apply(normalize_lga_code)
+    aggregated['LGAName'] = aggregated['LGAName'].fillna(
+        aggregated['LGACode_norm'].map(label_map)
+    )
+
+    metrics = aggregated.drop(columns=['StateName', 'LGAName'])
+    merged = reference_shapes.merge(metrics, on='LGACode', how='left')
+    merged = _deduplicate_columns(merged)
+    if 'LGAName' not in merged.columns:
+        merged['LGAName'] = ''
+    lga_name_values = merged['LGAName']
+    if isinstance(lga_name_values, pd.DataFrame):
+        # Pandas returns a DataFrame when duplicate column labels survive the merge
+        lga_name_values = lga_name_values.iloc[:, 0]
+    merged['display_name'] = lga_name_values.astype(str)
+    if 'LGACode' in merged.columns:
+        empty_mask = merged['display_name'].str.strip().eq('')
+        merged.loc[empty_mask, 'display_name'] = merged.loc[empty_mask, 'LGACode'].astype(str)
+
+    aggregated = apply_lga_highlight(merged, selected_lgas, 'LGACode')
+
+    bounds = aggregated.total_bounds
+    local_center_lat = (bounds[1] + bounds[3]) / 2
+    local_center_lon = (bounds[0] + bounds[2]) / 2
+    center_lat = center_lat if center_lat is not None else local_center_lat
+    center_lon = center_lon if center_lon is not None else local_center_lon
+
+    fig = go.Figure()
+
+    def _add_trace(data: gpd.GeoDataFrame, show_scale: bool, opacity: float, colorscale):
+        if data is None or data.empty:
+            return
+        geojson = data.geometry.__geo_interface__
+        fig.add_trace(
+            go.Choroplethmapbox(
+                geojson=geojson,
+                locations=data.index.astype(str),
+                z=data['nets_allocated'],
+                colorscale=colorscale,
+                text=data['display_name'],
+                hovertemplate='<b>%{text}</b><br>' +
+                              '─────────────────<br>' +
+                              '<b>Nets Allocated:</b> %{z:,.0f}<br>' +
+                              '<b>Nets Needed:</b> %{customdata[0]:,.0f}<br>' +
+                              '<b>Population:</b> %{customdata[1]:,.0f}<br>' +
+                              '<b>Coverage:</b> %{customdata[2]:.1f}%<br>' +
+                              '<b>Urban %:</b> %{customdata[3]:.1f}%<br>' +
+                              '<extra></extra>',
+                customdata=np.column_stack((
+                    data['nets_needed'],
+                    data['Population'],
+                    data['coverage_percent'],
+                    data['urban_pct_display'],
+                )),
+                marker_opacity=opacity,
+                marker_line_width=1.5,
+                marker_line_color='#ffffff',
+                showscale=show_scale,
+                colorbar=dict(
+                    title=dict(text="Nets", font=dict(size=11)),
+                    thickness=14,
+                    len=0.5,
+                ) if show_scale else None,
+            )
+        )
+
+    if selected_lgas:
+        faded = aggregated[~aggregated['_is_selected_lga']]
+        highlighted = aggregated[aggregated['_is_selected_lga']]
+        _add_trace(faded, show_scale=False, opacity=0.25, colorscale=[[0, '#e5e7eb'], [1, '#9ca3af']])
+        _add_trace(
+            highlighted,
+            show_scale=True,
+            opacity=0.85,
+            colorscale='YlOrRd',
+        )
+    else:
+        _add_trace(aggregated, show_scale=True, opacity=0.85, colorscale='YlOrRd')
+
+    summary_text = ''
+    if stats:
+        summary_text = (
+            f"<b>Total Nets:</b> {stats.get('total_nets', total_nets):,}<br>"
+            f"<b>Allocated:</b> {stats.get('allocated', 0):,}<br>"
+            f"<b>Coverage:</b> {stats.get('coverage_percent', 0)}%"
+        )
+
+    fig.update_layout(
+        mapbox=dict(
+            style='open-street-map',
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=7.2,
+        ),
+        margin={"r": 0, "t": 60, "l": 0, "b": 0},
+        title=dict(
+            text="ITN Distribution by LGA",
+            x=0.5,
+            xanchor='center',
+            font=dict(size=18)
+        ),
+        showlegend=False,
+        annotations=[
+            dict(
+                text=summary_text,
+                showarrow=False,
+                xref='paper', yref='paper',
+                x=0.02, y=0.98,
+                xanchor='left', yanchor='top',
+                bgcolor='rgba(255,255,255,0.95)',
+                bordercolor='#000',
+                borderwidth=1,
+                font=dict(size=11)
+            )
+        ] if summary_text else []
+    )
+    return fig
+
+
+def _save_itn_map_html(
+    fig: go.Figure,
+    session_id: str,
+    total_nets: int,
+    avg_household_size: float,
+    method: str,
+    urban_threshold: float,
+    stats: Optional[Dict[str, Any]],
+    selected_lgas: List[str],
+    available_lgas: List[Dict[str, str]],
+    current_level: str,
+) -> str:
     viz_dir = f'instance/uploads/{session_id}/visualizations'
     os.makedirs(viz_dir, exist_ok=True)
-    
-    # Save map in session visualizations folder
     filename = f'itn_distribution_map_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html'
     path = os.path.join(viz_dir, filename)
-    
-    # First save the figure normally
     fig.write_html(path, include_plotlyjs=True)
-    
-    # Then add the threshold control by modifying the saved HTML
-    with open(path, 'r') as f:
-        html_content = f.read()
-    
-    # Add custom CSS for threshold control
+
+    with open(path, 'r') as handle:
+        html_content = handle.read()
+
     custom_css = """
         <style>
             .threshold-control {
@@ -1379,8 +1657,7 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
             }
         </style>
     """
-    
-    # Add threshold control HTML
+
     threshold_control = f"""
         <div class="threshold-control">
             <label><b>Urban Threshold:</b></label>
@@ -1388,31 +1665,24 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
             <button onclick="updateThreshold()">Update</button>
         </div>
     """
-    
-    # Add update function with proper parameters and dynamic loading
+
     update_script = f"""
         <script>
-            // Store original ITN parameters
             window.itnParams = {{
                 total_nets: {total_nets},
                 avg_household_size: {avg_household_size},
                 method: '{method}',
                 session_id: '{session_id}'
             }};
-            
             function updateThreshold() {{
                 var newThreshold = document.getElementById('thresholdInput').value;
                 var button = event.target;
                 button.disabled = true;
                 button.textContent = 'Updating...';
-                
-                // Call backend API to update distribution with stored parameters
                 fetch('/api/itn/update-distribution', {{
                     method: 'POST',
-                    headers: {{
-                        'Content-Type': 'application/json',
-                    }},
-                    credentials: 'same-origin',  // Include session cookies
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    credentials: 'same-origin',
                     body: JSON.stringify({{
                         urban_threshold: parseFloat(newThreshold),
                         total_nets: window.itnParams.total_nets,
@@ -1424,15 +1694,9 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
                 .then(response => response.json())
                 .then(data => {{
                     if (data.status === 'success' && data.map_path) {{
-                        // For iframe context, update parent iframe src
                         if (window.parent !== window) {{
-                            // We're in an iframe - notify parent to update
-                            window.parent.postMessage({{
-                                type: 'updateITNMap',
-                                mapPath: data.map_path
-                            }}, '*');
+                            window.parent.postMessage({{ type: 'updateITNMap', mapPath: data.map_path }}, '*');
                         }} else {{
-                            // Direct access - redirect to new map
                             window.location.href = data.map_path;
                         }}
                     }} else {{
@@ -1448,20 +1712,32 @@ def generate_itn_map(shp_data: gpd.GeoDataFrame, prioritized: pd.DataFrame, repr
                     button.textContent = 'Update';
                 }});
             }}
-            
-            // Log that ITN map is ready
-            console.log('ITN map loaded with parameters:', window.itnParams);
         </script>
     """
-    
-    # Insert custom elements into the HTML
+
     html_content = html_content.replace('</head>', custom_css + '</head>')
     html_content = html_content.replace('<body>', '<body>' + threshold_control)
     html_content = html_content.replace('</body>', update_script + '</body>')
-    
-    # Write the modified HTML back
-    with open(path, 'w') as f:
-        f.write(html_content)
-    
-    # Return path to serve the file
+
+    with open(path, 'w') as handle:
+        handle.write(html_content)
+
+    controls_config = {
+        'viz_type': 'itn_distribution',
+        'session_id': session_id,
+        'current_level': current_level,
+        'selected_lgas': selected_lgas,
+        'available_lgas': available_lgas,
+        'viz_params': {
+            'method': method,
+            'total_nets': total_nets,
+            'avg_household_size': avg_household_size,
+            'urban_threshold': urban_threshold,
+        },
+    }
+    try:
+        inject_geographic_controls(path, controls_config)
+    except Exception as exc:
+        logger.warning(f"Failed to inject geographic controls into ITN map: {exc}")
+
     return f'/serve_viz_file/{session_id}/visualizations/{filename}'

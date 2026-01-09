@@ -122,7 +122,7 @@ class InstanceSync:
             
             try:
                 # Use rsync to sync the directory
-                dest = f'ec2-user@{instance_ip}:/home/ec2-user/ChatMRPT/instance/uploads/'
+                dest = f'ec2-user@{instance_ip}:/home/ec2-user/ChatMRPT/instance/uploads/{session_id}/'
                 
                 # Create directory on remote first
                 mkdir_cmd = [

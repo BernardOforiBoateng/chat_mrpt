@@ -385,6 +385,204 @@ class PrePostQuestions:
         }
     ]
 
+    # Usability Assessment Questions (Post-Test Only)
+    USABILITY_QUESTIONS = [
+        # Section Header
+        {
+            'id': 'usability_header',
+            'text': 'System Usability Assessment',
+            'instruction': 'Now that you have used ChatMRPT, please help us understand your experience with the system. Rate your agreement with each statement on a scale from 1 (Strongly disagree) to 5 (Strongly agree).',
+            'type': 'section_header',
+            'required': False,
+            'section': 'usability'
+        },
+
+        # Subsection: Understanding and Interaction
+        {
+            'id': 'usability_subsection_understanding',
+            'text': 'Understanding and Interaction',
+            'type': 'section_header',
+            'required': False,
+            'section': 'usability'
+        },
+        {
+            'id': 'usability_system_understood_me',
+            'text': 'ChatMRPT understood what I was asking',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Understanding and Interaction',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree']
+        },
+        {
+            'id': 'usability_i_understood_system',
+            'text': 'I understood ChatMRPT\'s responses',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Understanding and Interaction',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree']
+        },
+        {
+            'id': 'usability_learned_about_malaria',
+            'text': 'I learned more about urban malaria risk analysis through ChatMRPT',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Understanding and Interaction',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree']
+        },
+
+        # Subsection: Ease of Use
+        {
+            'id': 'usability_subsection_ease',
+            'text': 'Ease of Use',
+            'type': 'section_header',
+            'required': False,
+            'section': 'usability'
+        },
+        {
+            'id': 'usability_learned_quickly',
+            'text': 'I learned to use ChatMRPT quickly',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Ease of Use',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree']
+        },
+
+        # Subsection: Recommendation and Engagement
+        {
+            'id': 'usability_subsection_recommendation',
+            'text': 'Recommendation and Engagement',
+            'type': 'section_header',
+            'required': False,
+            'section': 'usability'
+        },
+        {
+            'id': 'usability_recommend_colleague',
+            'text': 'I would recommend ChatMRPT to a colleague',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Recommendation and Engagement',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree']
+        },
+        {
+            'id': 'usability_use_frequently',
+            'text': 'I would like to use ChatMRPT frequently in my work',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Recommendation and Engagement',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree']
+        },
+
+        # Subsection: System Complexity and Support
+        {
+            'id': 'usability_subsection_complexity',
+            'text': 'System Complexity and Support',
+            'type': 'section_header',
+            'required': False,
+            'section': 'usability'
+        },
+        {
+            'id': 'usability_unnecessarily_complex',
+            'text': 'I found ChatMRPT unnecessarily complex',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'System Complexity and Support',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'],
+            'reverse_scored': True  # Negative question
+        },
+        {
+            'id': 'usability_cumbersome',
+            'text': 'I found ChatMRPT cumbersome to use',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'System Complexity and Support',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'],
+            'reverse_scored': True  # Negative question
+        },
+
+        # Subsection: Confidence and Learning Curve
+        {
+            'id': 'usability_subsection_confidence',
+            'text': 'Confidence and Learning Curve',
+            'type': 'section_header',
+            'required': False,
+            'section': 'usability'
+        },
+        {
+            'id': 'usability_felt_confident',
+            'text': 'I felt confident using ChatMRPT',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Confidence and Learning Curve',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree']
+        },
+        {
+            'id': 'usability_learning_requirements',
+            'text': 'I needed to learn many things before I could use ChatMRPT effectively',
+            'type': 'scale',
+            'required': True,
+            'section': 'usability',
+            'subsection': 'Confidence and Learning Curve',
+            'min': 1,
+            'max': 5,
+            'labels': ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'],
+            'reverse_scored': True  # Negative question
+        },
+
+        # Subsection: Open Feedback
+        {
+            'id': 'usability_subsection_feedback',
+            'text': 'Open Feedback',
+            'type': 'section_header',
+            'required': False,
+            'section': 'usability'
+        },
+        {
+            'id': 'usability_general_thoughts',
+            'text': 'Please share your thoughts about ChatMRPT. What did you like? What could be improved?',
+            'type': 'textarea',
+            'required': False,
+            'section': 'usability',
+            'subsection': 'Open Feedback',
+            'placeholder': 'Your feedback helps us improve ChatMRPT for future users...'
+        },
+        {
+            'id': 'usability_response_clarity',
+            'text': 'What did you think of ChatMRPT\'s responses? Were they clear and helpful, or confusing?',
+            'type': 'textarea',
+            'required': False,
+            'section': 'usability',
+            'subsection': 'Open Feedback',
+            'placeholder': 'Please describe your experience with the clarity of ChatMRPT\'s responses...'
+        }
+    ]
+
     @classmethod
     def get_background_questions(cls) -> List[Dict[str, Any]]:
         """Return background questions (pre-test only)."""
@@ -402,13 +600,13 @@ class PrePostQuestions:
 
     @classmethod
     def get_post_test_questions(cls) -> List[Dict[str, Any]]:
-        """Return questions for post-test (concepts only, no background)."""
-        return cls.CONCEPT_QUESTIONS
+        """Return questions for post-test (concepts + usability, no background)."""
+        return cls.CONCEPT_QUESTIONS + cls.USABILITY_QUESTIONS
 
     @classmethod
     def get_question_by_id(cls, question_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific question by its ID."""
-        all_questions = cls.BACKGROUND_QUESTIONS + cls.CONCEPT_QUESTIONS
+        all_questions = cls.BACKGROUND_QUESTIONS + cls.CONCEPT_QUESTIONS + cls.USABILITY_QUESTIONS
         for question in all_questions:
             if question['id'] == question_id:
                 return question
@@ -492,7 +690,7 @@ class PrePostQuestions:
         if test_type == 'pre':
             return len(cls.BACKGROUND_QUESTIONS) + len(cls.CONCEPT_QUESTIONS)
         else:  # post
-            return len(cls.CONCEPT_QUESTIONS)
+            return len(cls.CONCEPT_QUESTIONS) + len(cls.USABILITY_QUESTIONS)
 
     @classmethod
     def calculate_score(cls, responses: List[Dict[str, Any]]) -> Dict[str, Any]:

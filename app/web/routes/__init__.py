@@ -16,7 +16,7 @@ import logging
 
 from .core_routes import core_bp
 from .upload_routes import upload_bp
-from app.core.analysis_routes import analysis_bp
+from .analysis_routes import analysis_bp
 from .visualization_routes import viz_bp
 from .reports_api_routes import reports_bp
 from .debug_routes import debug_bp

@@ -7,12 +7,14 @@ import os
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 from flask import Blueprint, request, jsonify, session, current_app
 from werkzeug.utils import secure_filename
 from app.data_analysis_v3.core.metadata_cache import MetadataCache
 from app.data_analysis_v3.core.tpr_language_interface import TPRLanguageInterface
 from app.auth.decorators import require_auth
 from app.interaction.core import InteractionCore
+from app.runtime.upload_service import UploadService
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,115 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _select_metadata_entry(cache: dict) -> tuple[dict, str] | tuple[None, None]:
+    """Pick the most relevant metadata entry from the cache."""
+    files = (cache or {}).get('files', {})
+    if not files:
+        return None, None
+
+    priority = [
+        'unified_dataset.csv',
+        'data_analysis.csv',
+        'raw_data.csv',
+        'uploaded_data.csv',
+    ]
+
+    for name in priority:
+        if name in files:
+            return files[name], name
+
+    # Fallback to first available entry
+    name, meta = next(iter(files.items()))
+    return meta, name
+
+
+def _build_general_workflow_context(session_id: str) -> dict:
+    """Construct workflow context for general (non-TPR) data analysis."""
+    context: dict = {
+        'workflow': 'data_analysis_v3',
+        'stage': 'no_data',
+        'valid_options': [],
+        'data_loaded': False,
+        'session_id': session_id,
+    }
+
+    columns: list[str] = []
+    rows: int | None = None
+    dataset_name: str | None = None
+
+    try:
+        cache = MetadataCache.load_cache(session_id) or {}
+        metadata, dataset_name = _select_metadata_entry(cache)
+
+        if metadata:
+            columns = metadata.get('column_names') or []
+            rows = metadata.get('rows') if isinstance(metadata.get('rows'), (int, float)) else None
+            profile = metadata.get('profile', {}) or {}
+            metrics = profile.get('metrics', {}) or {}
+
+            if not columns:
+                columns = metrics.get('column_examples', [])
+
+            dtype_summary = metrics.get('dtype_summary', {})
+
+            context.update({
+                'data_loaded': True,
+                'data_columns': columns,
+                'columns_total': len(columns),
+                'data_shape': {
+                    'rows': rows,
+                    'cols': len(columns),
+                },
+                'data_types': dtype_summary,
+                'dataset_name': dataset_name,
+            })
+
+            if metrics.get('numeric_columns'):
+                context['numeric_samples'] = metrics['numeric_columns']
+            if metrics.get('categorical_columns'):
+                context['categorical_samples'] = metrics['categorical_columns']
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"[WORKFLOW CONTEXT] Failed to load metadata cache for {session_id}: {exc}")
+
+    session_path = Path('instance/uploads') / session_id
+
+    if not columns:
+        # Fallback: load a tiny sample directly
+        for candidate in ['unified_dataset.csv', 'data_analysis.csv', 'raw_data.csv', 'uploaded_data.csv']:
+            candidate_path = session_path / candidate
+            if candidate_path.exists():
+                try:
+                    from app.data_analysis_v3.core.encoding_handler import EncodingHandler
+
+                    sample = EncodingHandler.read_csv_with_encoding(candidate_path, nrows=5)
+                    columns = sample.columns.tolist()
+                    rows = rows or sample.shape[0]
+                    context.update({
+                        'data_loaded': True,
+                        'data_columns': columns,
+                        'columns_total': len(columns),
+                        'data_shape': {
+                            'rows': rows,
+                            'cols': len(columns),
+                        },
+                        'dataset_name': dataset_name or candidate,
+                    })
+                    break
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(f"[WORKFLOW CONTEXT] Failed to sample {candidate_path}: {exc}")
+
+    if session_path.joinpath('unified_dataset.csv').exists():
+        context['stage'] = 'post_analysis'
+    elif context['data_loaded']:
+        context['stage'] = 'data_exploring'
+
+    # Limit columns to avoid overwhelming the prompt
+    if context.get('data_columns') and len(context['data_columns']) > 120:
+        context['data_columns_preview'] = context['data_columns'][:120]
+    
+    return context
+
+
 @data_analysis_v3_bp.route('/api/data-analysis/upload', methods=['POST'])
 @require_auth
 def upload_for_analysis():
@@ -37,11 +148,19 @@ def upload_for_analysis():
     This is specifically for general data exploration, not malaria risk analysis.
     """
     try:
+        previous_session_id = session.get('session_id')
+        base_session_id = session.get('base_session_id') or previous_session_id
+
         # ALWAYS generate a new session ID for each upload to prevent session reuse
         # This fixes the concurrent user data bleed issue
         import uuid
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
+        if base_session_id:
+            session['base_session_id'] = base_session_id
+        else:
+            base_session_id = session_id
+            session['base_session_id'] = base_session_id
 
         # Log for debugging
         logger.info(f"📊 Generated new session ID for upload: {session_id}")
@@ -93,7 +212,7 @@ def upload_for_analysis():
         # Extract and cache metadata for quick access
         logger.info(f"📊 Extracting metadata for {filename}...")
         metadata = MetadataCache.update_file_metadata(session_id, filepath, filename)
-        
+
         # Also cache metadata for the standard file
         if standard_path != filepath:
             standard_filename = os.path.basename(standard_path)
@@ -153,7 +272,22 @@ def upload_for_analysis():
             logger.info(f"🔄 Initiated sync for session {session_id}")
         except Exception as e:
             logger.warning(f"Could not sync to other instances: {e}")
-        
+
+        if base_session_id and base_session_id != session_id:
+            try:
+                upload_service = UploadService(current_app.config.get('UPLOAD_FOLDER', 'instance/uploads'))
+                upload_service.mirror_artifacts(
+                    source_session_id=session_id,
+                    target_session_id=base_session_id,
+                )
+                logger.info(
+                    f"🗂️ Mirrored upload artefacts from {session_id} to base session {base_session_id}"
+                )
+            except Exception as mirror_exc:
+                logger.warning(
+                    f"Could not mirror artefacts to base session {base_session_id}: {mirror_exc}"
+                )
+
         # Prepare response with metadata info
         response_data = {
             'status': 'success',
@@ -349,6 +483,25 @@ def data_analysis_chat():
         data = request.get_json() or {}
         message = data.get('message', '')
         session_id = data.get('session_id') or session.get('session_id')
+
+        # Ensure the server-side session matches the client-provided identifier.
+        # In multi-instance deployments the Flask session cookie may map to a
+        # different worker than the one that generated the upload, so we treat
+        # the client's session_id as the source of truth to keep state files in sync.
+        existing_session_id = session.get('session_id')
+        if session_id and existing_session_id and existing_session_id != session_id:
+            logger.info(
+                "[DATA-ANALYSIS] Realigning session context from %s to client session %s",
+                existing_session_id,
+                session_id,
+            )
+            session['session_id'] = session_id
+            session['base_session_id'] = session.get('base_session_id') or session_id
+            session.modified = True
+        elif session_id and not existing_session_id:
+            session['session_id'] = session_id
+            session['base_session_id'] = session.get('base_session_id') or session_id
+            session.modified = True
 
         if not session_id:
             return jsonify({
@@ -701,7 +854,15 @@ def data_analysis_chat():
 
             return jsonify(tpr_handler.start_workflow())
 
-        result = run_agent_sync(message)
+        workflow_context = _build_general_workflow_context(session_id)
+        logger.info(
+            "[AGENT CONTEXT] Session %s → stage=%s columns=%d",
+            session_id,
+            workflow_context.get('stage'),
+            len(workflow_context.get('data_columns') or [])
+        )
+
+        result = run_agent_sync(message, workflow_context=workflow_context)
 
         # 🎯 LOG ASSISTANT RESPONSE (agent path) - CRITICAL FOR COMPLETE INTERACTION CAPTURE
         response_time = time.time() - request_start_time
@@ -751,4 +912,3 @@ def data_analysis_chat():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
-

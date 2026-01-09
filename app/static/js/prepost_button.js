@@ -67,7 +67,11 @@
                     navBar = exportButton.parentElement;
                 }
 
-                // If still no nav bar found and we've tried enough times, create our own
+                const actionGroup = document.getElementById('toolbar-action-group');
+                if (actionGroup) {
+                    navBar = actionGroup;
+                }
+
                 if (!navBar && attempts >= maxAttempts) {
                     navBar = document.createElement('div');
                     navBar.style.cssText = `
@@ -82,13 +86,14 @@
                         align-items: center;
                         justify-content: flex-end;
                         padding: 0 20px;
+                        gap: 12px;
                         z-index: 9998;
                         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
                     `;
+                    navBar.id = 'toolbar-action-group';
                     document.body.appendChild(navBar);
                     document.body.style.paddingTop = '60px';
                 } else if (!navBar) {
-                    // Try again in 500ms if we haven't reached max attempts
                     setTimeout(tryCreateButton, 500);
                     return;
                 }
@@ -106,84 +111,25 @@
         }
 
         insertPrePostButton(navBar) {
-            // Create button container for top nav
-            const buttonContainer = document.createElement('div');
-            buttonContainer.id = 'prepost-button-container';
-            buttonContainer.style.cssText = `
-                display: inline-flex;
-                align-items: center;
-                margin-left: 20px;
-                margin-right: 10px;
-            `;
+            if (navBar && navBar.classList) {
+                navBar.classList.add('flex');
+                navBar.classList.add('items-center');
+                navBar.classList.add('gap-3');
+            }
 
-            // Create button with a design that fits in the nav bar
             const button = document.createElement('button');
             button.id = 'prepost-button';
-            button.className = 'prepost-btn';
-            button.style.cssText = `
-                background: transparent;
-                color: #374151;
-                border: 2px solid #e5e7eb;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-size: 14px;
-                font-weight: 500;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                transition: all 0.2s ease;
-            `;
+            button.type = 'button';
+            button.className = 'toolbar-button toolbar-button--prepost';
 
             button.innerHTML = `
-                <span style="font-size: 16px;">📝</span>
-                <span>Pre/Post Test</span>
+                <span class="toolbar-button-icon">📝</span>
+                <span class="toolbar-button-label">Pre/Post Test</span>
             `;
-
-            button.onmouseover = () => {
-                button.style.background = '#10b981';
-                button.style.color = 'white';
-                button.style.borderColor = '#10b981';
-            };
-
-            button.onmouseout = () => {
-                button.style.background = 'transparent';
-                button.style.color = '#374151';
-                button.style.borderColor = '#e5e7eb';
-            };
 
             button.onclick = () => this.openPrePostTest();
 
-            // Add a subtle separator before the button
-            const separator = document.createElement('span');
-            separator.style.cssText = `
-                display: inline-block;
-                width: 1px;
-                height: 24px;
-                background: #e5e7eb;
-                margin-right: 15px;
-                vertical-align: middle;
-            `;
-            buttonContainer.appendChild(separator);
-            buttonContainer.appendChild(button);
-
-            // Add to nav bar - insert at the END after all existing buttons
-            const allButtons = Array.from(navBar.querySelectorAll('button'));
-
-            if (allButtons.length > 0) {
-                // Get the last button
-                const lastButton = allButtons[allButtons.length - 1];
-
-                // Insert after the last button
-                if (lastButton.nextSibling) {
-                    lastButton.parentElement.insertBefore(buttonContainer, lastButton.nextSibling);
-                } else {
-                    lastButton.parentElement.appendChild(buttonContainer);
-                }
-            } else {
-                // No buttons found, just append to nav bar
-                navBar.appendChild(buttonContainer);
-            }
+            navBar.appendChild(button);
 
             console.log('🟢 PrePostButton: Button inserted successfully');
         }

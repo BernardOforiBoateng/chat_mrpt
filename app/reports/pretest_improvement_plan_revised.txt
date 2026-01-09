@@ -1,0 +1,114 @@
+ChatMRPT Pretest Improvement Plan
+====================================================
+
+Executive Summary
+-----------------
+Following the pretest evaluation, participants provided valuable feedback highlighting areas for enhancement. Key requests include LGA-level visualization capabilities, support for pre-analyzed TPR data from DHIS2, and improved session management. This plan outlines the implementation strategy to address these priorities within a 12-day development cycle.
+
+Pretest Feedback Overview
+--------------------------
+The pretest yielded constructive insights across three main areas:
+
+1. Visualization Granularity: Users requested the ability to drill down to LGA-level analysis rather than only viewing state-level aggregations with ward details.
+
+2. TPR Workflow Flexibility: Participants indicated a need to support pre-calculated TPR data from DHIS2 alongside the existing raw data recalculation pathway.
+
+3. Session Persistence: Users expressed the need for better session handling, allowing them to clear the interface when overwhelmed while maintaining access to their data and analysis history.
+
+Implementation Priorities
+-------------------------
+
+Priority 1: Multi-Level Visualization System
+Implementation of dynamic geographic aggregation controls enabling users to toggle between state, LGA, and ward levels within existing visualizations.
+
+Key Features:
+- Backend aggregation engine for state, LGA, and ward-level metrics
+- Interactive dropdown controls embedded in visualization outputs
+- Highlight-on-select functionality with background fade for non-selected regions
+- Responsive HTML chart components with embedded level-switching controls
+
+Technical Scope:
+- Modify visualization tools to generate multi-level aggregations
+- Extend HTML rendering to include Plotly updatemenus for level selection
+- Update frontend visualization frame to support level metadata display
+
+Timeline: Days 3-4
+
+Priority 2: Dual TPR Workflow Support
+Implementation of parallel pathways for TPR data processing, supporting both raw NMEP calculations and pre-analyzed DHIS2 imports.
+
+Key Features:
+- Automated detection of TPR data format upon upload
+- User selection interface for workflow path (recalculate vs. use existing)
+- Schema validation and ward-name reconciliation for DHIS2 imports
+- Standardized output format ensuring downstream tool compatibility
+
+Technical Scope:
+- Extend upload type detection logic
+- Implement DHIS2 schema validation and cleaning pipeline
+- Maintain existing conversational TPR module for raw data path
+- Ensure both pathways produce identical output structures
+
+Timeline: Day 6
+
+Priority 3: Session Continuity Framework
+Development of persistent session management allowing users to maintain conversation context and data access across interface clearing and file uploads.
+
+Key Features:
+- Stable conversation identifier independent of upload session IDs
+- Chat history migration during new upload sessions
+- Interface clearing without session termination
+- Preservation of generated files and analysis artifacts
+
+Technical Scope:
+- Implement conversation_id persistence layer
+- Build chat history migration logic for upload events
+- Develop clear function maintaining backend state while refreshing UI
+- Extend regression testing to cover session continuity scenarios
+
+Timeline: Day 5
+
+Priority 4: Unified Data Access Architecture
+Consolidation of data access patterns across all system components to eliminate redundant pipelines and ensure consistency.
+
+Key Features:
+- Single canonical data source (UnifiedDataState) for all agents and tools
+- Synchronized session state flags derived from actual data markers
+- Elimination of duplicate data loading and transformation logic
+- Documented data service contract for future extensibility
+
+Technical Scope:
+- Refactor Request Interpreter, LangGraph agent, and visualization services
+- Centralize Flask session flag management
+- Remove redundant data access implementations
+- Update architectural documentation
+
+Timeline: Days 7-8
+
+Development Timeline
+--------------------
+Days 1-2: Architecture review and technical planning (Completed)
+Days 3-4: Multi-level visualization implementation
+Day 5: Session continuity framework development
+Day 6: Dual TPR workflow implementation
+Days 7-8: Unified data access refactoring and integration testing
+Days 9-10: System integration testing and bug resolution
+Days 11: Documentation and code review
+Day 12: Stakeholder demonstration and validation
+
+Success Metrics
+---------------
+1. Users can seamlessly toggle between state, LGA, and ward visualization levels without re-executing analysis workflows.
+
+2. System successfully processes both raw NMEP TPR data and pre-calculated DHIS2 TPR formats, producing consistent downstream outputs.
+
+3. Chat history and data artifacts persist across upload events and interface clearing operations.
+
+4. All system components access data through a unified interface, eliminating inconsistencies and redundant processing.
+
+Technical Dependencies
+----------------------
+- Coordination between backend aggregation services and frontend visualization components
+- Migration of existing data access patterns to unified architecture
+- Validation of TPR workflow outputs against existing downstream tool requirements
+- Comprehensive regression testing across affected modules

@@ -16,6 +16,7 @@ import traceback
 import json
 from datetime import datetime
 from flask import Blueprint, session, request, current_app, jsonify, Response, stream_with_context
+from app.auth.decorators import require_auth
 from pathlib import Path
 
 from ...core.decorators import handle_errors, log_execution_time, validate_session
@@ -48,23 +49,51 @@ async def route_with_mistral(message: str, session_context: dict) -> str:
     # Fast-track common small talk
     if message_lower in ['thanks', 'thank you', 'bye', 'goodbye', 'ok', 'okay', 'sure', 'yes', 'no']:
         return "can_answer"
-    
+
+    # CRITICAL: Data Analysis V3 mode ALWAYS routes to agent with tools
+    # This ensures uploaded data via Data Analysis tab gets proper agent handling
+    if session_context.get('use_data_analysis_v3', False) or session_context.get('data_analysis_active', False):
+        logger.info(f"🎯 Data Analysis V3 mode detected - routing to agent with tools")
+        return "needs_tools"
+
     # CRITICAL: Tool-specific detection BEFORE Mistral routing
+    # Always honor explicit analysis requests, even if flags haven't synced yet
+    explicit_analysis_triggers = [
+        'run the malaria risk analysis',
+        'run malaria risk analysis',
+        'malaria risk analysis',
+        'run risk analysis',
+        'risk analysis',
+        'run complete analysis'
+    ]
+    if any(t in message_lower for t in explicit_analysis_triggers):
+        logger.info("Tool detection: Explicit analysis trigger found (ungated) - routing to tools")
+        return "needs_tools"
+
     # This ensures tool requests go to tools, not Arena
     if session_context.get('has_uploaded_files', False):
-        # Check for analysis tool triggers
+        # Check for analysis tool triggers (broadened to catch more natural phrasing)
         analysis_triggers = [
             'run the malaria risk analysis',
-            'run risk analysis',
+            'run malaria risk analysis',
+            'malaria risk analysis',
+            'risk analysis',
+            'malaria analysis',
+            'run malaria analysis',
+            'run vulnerability analysis',
+            'run complete analysis',
             'run analysis',
             'perform analysis',
             'analyze the data',
             'analyze my data',
             'start analysis',
             'complete analysis',
-            'run the analysis'
+            'run the analysis',
+            'rank wards'
         ]
-        if any(trigger in message_lower for trigger in analysis_triggers):
+        if any(trigger in message_lower for trigger in analysis_triggers) or (
+            ('risk' in message_lower and 'analysis' in message_lower)
+        ):
             logger.info(f"Tool detection: Analysis trigger found - routing to tools")
             return "needs_tools"
         
@@ -291,6 +320,7 @@ Reply ONLY: NEEDS_TOOLS, CAN_ANSWER, or NEEDS_CLARIFICATION"""
 
 
 @analysis_bp.route('/run_analysis', methods=['POST'])
+@require_auth
 @validate_session
 @handle_errors
 @log_execution_time
@@ -309,6 +339,51 @@ def run_analysis():
             has_df = hasattr(data_handler, 'df') and data_handler.df is not None
             logger.info(f"[DEBUG] run_analysis: data_handler.df exists: {has_df}")
         
+        # Ensure session data is available locally (multi-instance safety)
+        try:
+            from app.core.instance_sync import ensure_session_available
+            ensured = ensure_session_available(session_id)
+            if ensured:
+                logger.info(f"[DEBUG] run_analysis: ensured session files locally for {session_id}")
+        except Exception as e:
+            logger.warning(f"[DEBUG] run_analysis: ensure_session_available failed: {e}")
+
+        # Rescan local session folder to sync flags with actual files
+        try:
+            session_folder = os.path.join('instance', 'uploads', session_id)
+            has_csv_local = False
+            has_shp_local = False
+            has_unified = False
+            if os.path.exists(session_folder):
+                # Walk recursively to find assets in nested dirs
+                for root, dirs, files in os.walk(session_folder):
+                    for f in files:
+                        if f.startswith('.'):
+                            continue
+                        lf = f.lower()
+                        if lf.endswith(('.csv', '.xlsx', '.xls')):
+                            has_csv_local = True
+                            if lf.startswith('unified_dataset'):
+                                has_unified = True
+                        elif lf.endswith('.geoparquet') and 'unified_dataset' in lf:
+                            has_unified = True
+                        elif lf.endswith('.zip') and f == 'raw_shapefile.zip':
+                            has_shp_local = True
+                        elif lf.endswith('.shp'):
+                            has_shp_local = True
+            # Sync flags to reality
+            if has_csv_local and not session.get('csv_loaded', False):
+                session['csv_loaded'] = True
+            if has_shp_local and not session.get('shapefile_loaded', False):
+                session['shapefile_loaded'] = True
+            if has_unified and not session.get('analysis_complete', False):
+                session['analysis_complete'] = True
+            if has_csv_local or has_shp_local or has_unified:
+                session['data_loaded'] = True
+            session.modified = True
+        except Exception as e:
+            logger.warning(f"[DEBUG] run_analysis: rescan flags failed: {e}")
+
         # Get custom parameters from the request
         data = request.json or {}
         selected_variables = data.get('selected_variables', None)
@@ -320,9 +395,14 @@ def run_analysis():
         if not data_handler:
             raise ValidationError('Data handler not initialized. Please upload data files first.')
         
-        # Check if both files are loaded
-        if not session.get('csv_loaded', False) or not session.get('shapefile_loaded', False):
-            raise ValidationError('Please upload both CSV and shapefile data before running analysis')
+        # Check if both files are loaded (after ensuring availability)
+        # Prefer DataHandler availability; enforce shapefile only if still missing
+        if not session.get('csv_loaded', False):
+            raise ValidationError('Please upload CSV data before running analysis')
+        if not session.get('shapefile_loaded', False):
+            # Last-chance: allow tool to provide precise error if handler can find geometry
+            # If DataHandler cannot load geometry, the analysis service will report appropriately
+            logger.info("[DEBUG] run_analysis: shapefile flag not set; proceeding based on DataHandler")
         
         # Run the analysis using the service
         if selected_variables:
@@ -396,6 +476,7 @@ def run_analysis():
 
 
 @analysis_bp.route('/explain_variable_selection', methods=['GET'])
+@require_auth
 @validate_session
 @handle_errors
 @log_execution_time
@@ -458,6 +539,7 @@ def explain_variable_selection():
 
 
 @analysis_bp.route('/send_message', methods=['POST'])
+@require_auth
 @validate_session
 @handle_errors
 @log_execution_time
@@ -485,7 +567,7 @@ def send_message():
         
         # Get session ID
         session_id = session.get('session_id')
-        
+
         # 🎯 COMPREHENSIVE RESPONSE TIME TRACKING - CRITICAL FOR DEMO ANALYTICS
         request_start_time = time.time()
         message_start_time = time.time()
@@ -522,87 +604,62 @@ def send_message():
             # Update session message counter
             session['message_count'] = session.get('message_count', 0) + 1
         
-        # Check for active TPR workflow FIRST
-        if session.get('tpr_workflow_active', False):
-            logger.info(f"TPR workflow active for session {session_id}, routing to TPR handler")
-            
-            # Import TPR workflow router
-            try:
-                from ...tpr_module.integration.tpr_workflow_router import TPRWorkflowRouter
-                
-                # Get LLM manager for intent classification
-                llm_manager = None
-                if hasattr(current_app, 'services') and hasattr(current_app.services, 'llm_manager'):
-                    llm_manager = current_app.services.llm_manager
-                
-                # Create router and route the message
-                router = TPRWorkflowRouter(session_id, llm_manager)
-                tpr_result = router.route_message(user_message, dict(session))
-                
-                # Check if TPR router wants to transition to main interpreter
-                if tpr_result.get('response') == '__DATA_UPLOADED__':
-                    logger.info(f"TPR router requesting transition to main interpreter for __DATA_UPLOADED__")
-                    # Clear TPR flags and fall through to main request interpreter
-                    session.pop('tpr_workflow_active', None)
-                    session.pop('tpr_session_id', None)
-                    # Ensure proper flags for main workflow
-                    session['csv_loaded'] = True
-                    session['has_uploaded_files'] = True
-                    session['analysis_complete'] = True
-                    session.modified = True
-                    # Set the message to trigger exploration menu
-                    user_message = '__DATA_UPLOADED__'
-                    # Let it fall through to normal processing
-                elif tpr_result.get('status') == 'tpr_to_main_transition':
-                    logger.info(f"TPR router requesting transition to main interpreter for __DATA_UPLOADED__")
-                    # Clear TPR flags and fall through to main request interpreter
-                    session.pop('tpr_workflow_active', None)
-                    session.pop('tpr_session_id', None)
-                    # Ensure proper flags for main workflow
-                    session['csv_loaded'] = True
-                    session['has_uploaded_files'] = True
-                    session['analysis_complete'] = True
-                    session.modified = True
-                    # Set the message to trigger exploration menu
-                    user_message = '__DATA_UPLOADED__'
-                    # Let it fall through to normal processing
-                else:
-                    # Format response for frontend
-                    formatted_response = {
-                        'status': tpr_result.get('status', 'success'),
-                        'message': tpr_result.get('response', ''),
-                        'response': tpr_result.get('response', ''),  # Frontend expects this field
-                        'tools_used': tpr_result.get('tools_used', []),
-                        'workflow': tpr_result.get('workflow', 'tpr'),
-                        'stage': tpr_result.get('stage'),
-                        'processing_time': f"{time.time() - request_start_time:.2f}s",
-                        'total_response_time': f"{time.time() - request_start_time:.2f}s",
-                        'trigger_data_uploaded': tpr_result.get('trigger_data_uploaded', False)
-                    }
-                    
-                    # Add visualizations if present
-                    if tpr_result.get('visualizations'):
-                        formatted_response['visualizations'] = tpr_result['visualizations']
-                    
-                    # Add download links if present
-                    if tpr_result.get('download_links'):
-                        formatted_response['download_links'] = tpr_result['download_links']
-                    
-                    logger.info(f"TPR response sent: status={formatted_response.get('status')}, stage={tpr_result.get('stage')}")
-                    return jsonify(formatted_response)
-                
-            except Exception as e:
-                logger.error(f"Error routing to TPR handler: {e}")
-                # Fall through to normal processing if TPR routing fails
-        
+        # ========== TPR BYPASS REMOVED ==========
+        # All messages now go through Mistral routing → agent (no more TPR router bypass)
+        # TPR workflow is handled by LangGraph agent with tpr_workflow_step tool
+
+        # Ensure session files are available locally (multi-instance safety)
+        try:
+            from app.core.instance_sync import ensure_session_available
+            ensure_session_available(session_id)
+        except Exception:
+            pass
+
+        # Rescan local session folder and sync flags with actual files
+        try:
+            session_folder = f"instance/uploads/{session_id}"
+            has_csv = False
+            has_shapefile = False
+            has_unified = False
+            if os.path.exists(session_folder):
+                for root, dirs, files in os.walk(session_folder):
+                    for f in files:
+                        if f.startswith('.'):
+                            continue
+                        lf = f.lower()
+                        if lf.endswith(('.csv', '.xlsx', '.xls')):
+                            has_csv = True
+                            if lf.startswith('unified_dataset'):
+                                has_unified = True
+                        elif lf.endswith('.geoparquet') and 'unified_dataset' in lf:
+                            has_unified = True
+                        elif f == 'raw_shapefile.zip' or lf.endswith('.shp'):
+                            has_shapefile = True
+            if has_csv and not session.get('csv_loaded', False):
+                session['csv_loaded'] = True
+            if has_shapefile and not session.get('shapefile_loaded', False):
+                session['shapefile_loaded'] = True
+            if has_unified and not session.get('analysis_complete', False):
+                session['analysis_complete'] = True
+            if has_csv or has_shapefile or has_unified:
+                session['data_loaded'] = True
+            session.modified = True
+        except Exception as e:
+            logger.warning(f"[DEBUG] streaming: rescan session flags failed: {e}")
+
         # Check if user has uploaded files
         session_folder = f"instance/uploads/{session_id}"
         has_uploaded_files = False
         if os.path.exists(session_folder):
-            # Check for actual data files (not just folders)
-            for f in os.listdir(session_folder):
-                if f.endswith(('.csv', '.xlsx', '.xls', '.shp', '.zip')) and not f.startswith('.'):
-                    has_uploaded_files = True
+            for root, dirs, files in os.walk(session_folder):
+                for f in files:
+                    if f.startswith('.'):
+                        continue
+                    lf = f.lower()
+                    if lf.endswith(('.csv', '.xlsx', '.xls', '.shp', '.zip', '.geoparquet')):
+                        has_uploaded_files = True
+                        break
+                if has_uploaded_files:
                     break
         
         # CRITICAL: Trust session flags after TPR transition or when analysis is complete
@@ -616,7 +673,10 @@ def send_message():
             'session_id': session_id,
             'csv_loaded': session.get('csv_loaded', False),
             'shapefile_loaded': session.get('shapefile_loaded', False),
-            'analysis_complete': session.get('analysis_complete', False)
+            'analysis_complete': session.get('analysis_complete', False),
+            # Data Analysis V3 mode flags
+            'use_data_analysis_v3': session.get('use_data_analysis_v3', False),
+            'data_analysis_active': session.get('data_analysis_active', False)
         }
         
         # Check if this is a response to a clarification prompt
@@ -705,11 +765,12 @@ def send_message():
             # Use Arena mode - get responses from 2 models for comparison
             # Using Arena mode
             
-            # Import Arena manager, system prompt, and context manager
-            from app.core.arena_manager import ArenaManager
-            from app.core.arena_system_prompt import get_arena_system_prompt
-            from app.core.arena_context_manager import get_arena_context_manager
-            arena_manager = ArenaManager()
+            # Use the shared Arena manager configured with GPT-4o (Model D)
+            from flask import current_app as _cur_app
+            from app.web.routes.arena_routes import arena_manager as _shared_arena_manager, init_arena_system as _init_arena
+            if _shared_arena_manager is None:
+                _init_arena(_cur_app)
+            arena_manager = _shared_arena_manager
             
             # Get base Arena system prompt
             base_arena_prompt = get_arena_system_prompt()
@@ -732,181 +793,81 @@ def send_message():
                 # Get current view index from session or default to 0
                 view_index = session.get('arena_view_index', 0)
                 
-                # Start battle with specific view
-                battle_result = loop.run_until_complete(
-                    arena_manager.start_battle(user_message, session_id, view_index)
+                # Start full progressive tournament with Model D (GPT-4o)
+                battle_info = loop.run_until_complete(
+                    arena_manager.start_progressive_battle(
+                        user_message,
+                        num_models=4,
+                        session_id=session_id
+                    )
                 )
-                battle_id = battle_result['battle_id']
-                
-                # Get model pair for this view
-                model_a, model_b = arena_manager.get_model_pair_for_view(view_index)
-                
-                # Call both models via vLLM
-                import requests
-                responses = {}
-                latencies = {}
-                
-                # Model A response using Ollama API
-                try:
-                    start = time.time()
-                    # Map model names to Ollama model names
-                    # FIXED: These must match exactly what ArenaManager returns
-                    ollama_model_map = {
-                        'llama3.1:8b': 'llama3.1:8b',
-                        'mistral:7b': 'mistral:7b',
-                        'phi3:mini': 'phi3:mini',
-                        'gemma2:9b': 'gemma2:9b',
-                        'qwen2.5:7b': 'qwen2.5:7b'
-                    }
-                    
-                    if model_a in ollama_model_map:
-                        # Use environment variable or fallback to localhost
-                        ollama_host = current_app.config.get('OLLAMA_HOST', 'localhost')
-                        ollama_port = current_app.config.get('OLLAMA_PORT', '11434')
-                        ollama_url = f"http://{ollama_host}:{ollama_port}/v1/chat/completions"
-                        
-                        # Use the comprehensive system prompt
-                        ollama_payload = {
-                            "model": ollama_model_map[model_a],
-                            "messages": [
-                                {"role": "system", "content": arena_system_prompt},
-                                {"role": "user", "content": user_message}
-                            ],
-                            "max_tokens": 500
-                        }
-                        logger.info(f"Arena Model A - URL: {ollama_url}, Model: {ollama_model_map[model_a]}")
-                        ollama_response = requests.post(ollama_url, json=ollama_payload, timeout=60)
-                        logger.info(f"Arena Model A - Status: {ollama_response.status_code}")
-                        if ollama_response.status_code == 200:
-                            responses['a'] = ollama_response.json()['choices'][0]['message']['content']
-                        else:
-                            logger.error(f"Arena Model A - Error: {ollama_response.text[:200]}")
-                            responses['a'] = f"Error from Ollama: {ollama_response.status_code}"
-                    else:
-                        responses['a'] = f"Model {model_a} not available in Ollama"
-                    
-                    latencies['a'] = (time.time() - start) * 1000
-                except Exception as e:
-                    logger.error(f"Error calling model A: {e}")
-                    responses['a'] = f"Error: {str(e)}"
-                    latencies['a'] = 0
-                
-                # Model B response using Ollama API
-                try:
-                    start = time.time()
-                    # Use same model map
-                    # FIXED: These must match exactly what ArenaManager returns
-                    ollama_model_map = {
-                        'llama3.1:8b': 'llama3.1:8b',
-                        'mistral:7b': 'mistral:7b',
-                        'phi3:mini': 'phi3:mini',
-                        'gemma2:9b': 'gemma2:9b',
-                        'qwen2.5:7b': 'qwen2.5:7b'
-                    }
-                    
-                    if model_b in ollama_model_map:
-                        # Use environment variable or fallback to localhost
-                        ollama_host = current_app.config.get('OLLAMA_HOST', 'localhost')
-                        ollama_port = current_app.config.get('OLLAMA_PORT', '11434')
-                        ollama_url = f"http://{ollama_host}:{ollama_port}/v1/chat/completions"
-                        
-                        # Use the comprehensive system prompt
-                        ollama_payload = {
-                            "model": ollama_model_map[model_b],
-                            "messages": [
-                                {"role": "system", "content": arena_system_prompt},
-                                {"role": "user", "content": user_message}
-                            ],
-                            "max_tokens": 500
-                        }
-                        logger.info(f"Arena Model B - URL: {ollama_url}, Model: {ollama_model_map[model_b]}")
-                        ollama_response = requests.post(ollama_url, json=ollama_payload, timeout=60)
-                        logger.info(f"Arena Model B - Status: {ollama_response.status_code}")
-                        if ollama_response.status_code == 200:
-                            responses['b'] = ollama_response.json()['choices'][0]['message']['content']
-                        else:
-                            logger.error(f"Arena Model B - Error: {ollama_response.text[:200]}")
-                            responses['b'] = f"Error from Ollama: {ollama_response.status_code}"
-                    else:
-                        responses['b'] = f"Model {model_b} not available in Ollama"
-                    
-                    latencies['b'] = (time.time() - start) * 1000
-                except Exception as e:
-                    logger.error(f"Error calling model B: {e}")
-                    responses['b'] = f"Error: {str(e)}"
-                    latencies['b'] = 0
-                
-                # Check if Arena models indicate they need tools
-                # This avoids hardcoding - let models self-identify!
-                tool_need_indicators = [
-                    "i need to see", "upload", "provide the", "i would need",
-                    "cannot analyze without", "don't have access", "no data available",
-                    "please share", "i require", "unable to access", "can't see your"
-                ]
-                
-                response_a_lower = responses.get('a', '').lower()
-                response_b_lower = responses.get('b', '').lower()
-                
-                model_a_needs_tools = any(indicator in response_a_lower for indicator in tool_need_indicators)
-                model_b_needs_tools = any(indicator in response_b_lower for indicator in tool_need_indicators)
-                
-                # If BOTH models say they need tools, fallback to GPT-4o
-                if model_a_needs_tools and model_b_needs_tools:
-                    # Arena models need tools - falling back to GPT-4o
-                    
-                    # Close the Arena loop
-                    loop.close()
-                    
-                    # Mark that we need to use tools for this session
-                    session['last_tool_used'] = True
-                    session.modified = True
-                    
-                    # Use Request Interpreter with GPT-4o (it has tool access)
-                    from app.core.request_interpreter import RequestInterpreter
-                    interpreter = RequestInterpreter()
-                    result = interpreter.interpret(user_message, session, is_data_analysis=is_data_analysis)
-                    
-                    processing_time = time.time() - processing_start_time
-                    response = {
-                        'status': 'success',
-                        'response': result.get('message', result.get('response', '')),
-                        'message': result.get('message', result.get('response', '')),
-                        'processing_time': processing_time
-                    }
-                    
-                    # Return the GPT-4o response
-                    return jsonify(response)
-                
-                # Only submit to arena if we're still using Arena
-                if use_arena:
-                    # Submit responses to arena
-                    loop.run_until_complete(
-                        arena_manager.submit_response(battle_id, 'a', responses['a'], latencies['a'])
-                    )
-                    loop.run_until_complete(
-                        arena_manager.submit_response(battle_id, 'b', responses['b'], latencies['b'])
-                    )
-                    
-                    # Return Arena-style response
-                    response = {
+                battle_id = battle_info['battle_id']
+
+                # Preload all model responses; return first matchup to frontend
+                all_responses = loop.run_until_complete(
+                    arena_manager.get_all_model_responses(battle_id)
+                )
+
+                model_a = all_responses.get('model_a')
+                model_b = all_responses.get('model_b')
+                resp_a = all_responses.get('response_a', '')
+                resp_b = all_responses.get('response_b', '')
+
+                response = {
                     'status': 'success',
                     'arena_mode': True,
                     'battle_id': battle_id,
-                    'response_a': responses['a'],
-                    'response_b': responses['b'],
-                    'latency_a': latencies['a'],
-                    'latency_b': latencies['b'],
-                    'view_index': view_index,
-                    'model_a': model_a,  # Don't reveal until after voting
-                    'model_b': model_b,  # Don't reveal until after voting
-                    'response': f"Arena comparison ready. View {view_index + 1} of 3."
+                    'response_a': resp_a,
+                    'response_b': resp_b,
+                    'model_a': model_a,
+                    'model_b': model_b,
+                    'round': 1,
+                    'total_rounds': 3
                 }
                 
             finally:
                 loop.close()
                 
+        elif use_tools and (session.get('use_data_analysis_v3', False) or session.get('data_analysis_active', False)):
+            # CRITICAL: Route Data Analysis V3 sessions to Data Analysis V3 agent (LangGraph)
+            logger.info(f"🎯 Routing to Data Analysis V3 agent (LangGraph) for session {session_id}")
+
+            try:
+                import asyncio
+                from app.data_analysis_v3.core.agent import DataAnalysisAgent
+
+                # Initialize the Data Analysis V3 agent
+                agent = DataAnalysisAgent(session_id=session_id)
+
+                # Process the message through the LangGraph agent (async method)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(agent.analyze(user_message))
+                finally:
+                    loop.close()
+
+                # Format response (agent returns 'message' not 'response')
+                response = {
+                    'status': 'success',
+                    'response': result.get('message', ''),
+                    'message': result.get('message', ''),
+                    'visualizations': result.get('visualizations', []),
+                    'insights': result.get('insights', []),
+                    'success': result.get('success', True)
+                }
+
+            except Exception as e:
+                logger.error(f"Error with Data Analysis V3 agent: {str(e)}", exc_info=True)
+                # Fallback error response
+                response = {
+                    'status': 'error',
+                    'response': f"I encountered an issue: {str(e)}",
+                    'message': f"I encountered an issue: {str(e)}"
+                }
+
         else:
-            # Use GPT-4o for tool-based requests
+            # Use GPT-4o for tool-based requests (RequestInterpreter fallback)
             # Get Request Interpreter service
             try:
                 request_interpreter = current_app.services.request_interpreter
@@ -1145,6 +1106,7 @@ def send_message():
 
 
 @analysis_bp.route('/api/vote_arena', methods=['POST'])
+@require_auth
 @validate_session
 @handle_errors
 def vote_arena():
@@ -1208,53 +1170,76 @@ def vote_arena():
         if more_rounds and battle.current_pair:
             # Get next matchup
             next_model_a, next_model_b = battle.current_pair
-            
-            # Get responses for next round
-            import requests
-            import time
-            
-            responses = {}
-            latencies = {}
-            
-            ollama_host = current_app.config.get('OLLAMA_HOST', 'localhost')
-            ollama_port = current_app.config.get('OLLAMA_PORT', '11434')
-            ollama_url = f"http://{ollama_host}:{ollama_port}/v1/chat/completions"
-            
-            for model_key, model_name in [('a', next_model_a), ('b', next_model_b)]:
-                try:
-                    start = time.time()
-                    ollama_response = requests.post(
-                        ollama_url,
-                        json={
-                            "model": model_name,
-                            "messages": [
-                                {"role": "system", "content": arena_system_prompt},
-                                {"role": "user", "content": battle.user_message}
-                            ],
-                            "max_tokens": 500
-                        },
-                        timeout=60
-                    )
-                    
-                    if ollama_response.status_code == 200:
-                        responses[model_key] = ollama_response.json()['choices'][0]['message']['content']
+
+            # RESPONSES ARE ALREADY PRE-LOADED! Just get from cache
+            logger.info(f"Getting pre-loaded responses for: {next_model_a} vs {next_model_b}")
+
+            # Check if responses are cached (they should be!)
+            if next_model_a in battle.all_responses and next_model_b in battle.all_responses:
+                responses = {
+                    'a': battle.all_responses[next_model_a],
+                    'b': battle.all_responses[next_model_b]
+                }
+                latencies = {
+                    'a': battle.all_latencies.get(next_model_a, 0),
+                    'b': battle.all_latencies.get(next_model_b, 0)
+                }
+                logger.info(f"✅ Using pre-loaded responses - no waiting needed!")
+            else:
+                # Fallback: Only fetch missing responses (shouldn't happen with pre-loading)
+                logger.warning(f"⚠️ Responses not pre-loaded for {next_model_a} or {next_model_b}")
+
+                responses = {}
+                latencies = {}
+
+                # Only fetch if not cached
+                for model_key, model_name in [('a', next_model_a), ('b', next_model_b)]:
+                    if model_name in battle.all_responses:
+                        responses[model_key] = battle.all_responses[model_name]
+                        latencies[model_key] = battle.all_latencies.get(model_name, 0)
+                        logger.info(f"Using cached response for {model_name}")
                     else:
-                        responses[model_key] = f"Error from model: {ollama_response.status_code}"
-                    
-                    latencies[model_key] = (time.time() - start) * 1000
-                except Exception as e:
-                    logger.error(f"Error calling model {model_key}: {e}")
-                    responses[model_key] = f"Error: {str(e)}"
-                    latencies[model_key] = 0
-            
-            # Store responses in battle
-            battle.all_responses[next_model_a] = responses['a']
-            battle.all_responses[next_model_b] = responses['b']
-            battle.all_latencies[next_model_a] = latencies['a']
-            battle.all_latencies[next_model_b] = latencies['b']
-            
-            # Save updated battle
-            arena_manager.storage.update_progressive_battle(battle)
+                        # Fetch missing response
+                        logger.info(f"Fetching missing response for {model_name}")
+                        try:
+                            import requests
+                            ollama_host = current_app.config.get('OLLAMA_HOST', 'localhost')
+                            ollama_port = current_app.config.get('OLLAMA_PORT', '11434')
+                            ollama_url = f"http://{ollama_host}:{ollama_port}/v1/chat/completions"
+
+                            start = time.time()
+                            ollama_response = requests.post(
+                                ollama_url,
+                                json={
+                                    "model": model_name,
+                                    "messages": [
+                                        {"role": "system", "content": arena_system_prompt},
+                                        {"role": "user", "content": battle.user_message}
+                                    ],
+                                    "max_tokens": 500
+                                },
+                                timeout=30
+                            )
+
+                            if ollama_response.status_code == 200:
+                                response_text = ollama_response.json()['choices'][0]['message']['content']
+                            else:
+                                response_text = f"Error from model: {ollama_response.status_code}"
+
+                            responses[model_key] = response_text
+                            latencies[model_key] = (time.time() - start) * 1000
+
+                            # Cache for future use
+                            battle.all_responses[model_name] = response_text
+                            battle.all_latencies[model_name] = latencies[model_key]
+
+                        except Exception as e:
+                            logger.error(f"Error calling model {model_name}: {e}")
+                            responses[model_key] = f"Error: {str(e)}"
+                            latencies[model_key] = 0
+
+                # Save updated battle with any newly cached responses
+                arena_manager.storage.update_progressive_battle(battle)
             
             # Return next matchup
             return jsonify({
@@ -1312,6 +1297,7 @@ def vote_arena():
 
 
 @analysis_bp.route('/send_message_streaming', methods=['POST'])
+@require_auth
 @validate_session
 @handle_errors
 @log_execution_time
@@ -1460,7 +1446,7 @@ def send_message_streaming():
         has_uploaded_files = False
         has_csv = False
         has_shapefile = False
-        
+
         if os.path.exists(session_folder):
             # Check for actual data files (not just folders)
             for f in os.listdir(session_folder):
@@ -1496,7 +1482,10 @@ def send_message_streaming():
             'session_id': session_id,
             'csv_loaded': session.get('csv_loaded', False),
             'shapefile_loaded': session.get('shapefile_loaded', False),
-            'analysis_complete': session.get('analysis_complete', False)
+            'analysis_complete': session.get('analysis_complete', False),
+            # Data Analysis V3 mode flags
+            'use_data_analysis_v3': session.get('use_data_analysis_v3', False),
+            'data_analysis_active': session.get('data_analysis_active', False)
         }
         
         # Check if this is a response to a clarification prompt
@@ -1589,299 +1578,371 @@ def send_message_streaming():
         
         # Try Arena first for simple questions
         if use_arena:
-            # Attempting Arena mode for streaming
-            
-            # Import Arena manager, system prompt, and context manager
-            from app.core.arena_manager import ArenaManager
-            from app.core.arena_system_prompt import get_arena_system_prompt
-            from app.core.arena_context_manager import get_arena_context_manager
-            arena_manager = ArenaManager()
-            
-            # Get base Arena system prompt
-            base_arena_prompt = get_arena_system_prompt()
-            
-            # Enhance with session context
-            context_manager = get_arena_context_manager()
-            session_context = context_manager.get_session_context(
-                session_id=session_id,
-                session_data=dict(session)
-            )
-            context_enhancement = context_manager.format_context_for_prompt(session_context)
-            arena_system_prompt = base_arena_prompt + context_enhancement
-            
-            # Get model responses
+            # Attempting Arena mode with pre-loading for fast responses
+
+            # Use the shared Arena manager configured with GPT-4o (Model D)
+            from flask import current_app as _cur_app
+            from app.web.routes.arena_routes import arena_manager as _shared_arena_manager, init_arena_system as _init_arena
+            if _shared_arena_manager is None:
+                _init_arena(_cur_app)
+            arena_manager = _shared_arena_manager
+
+
+            # Get model responses using Arena manager's optimized methods
             import asyncio
-            import requests as req
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             try:
-                # Start progressive battle tournament
-                import random
-                import uuid
-                from app.core.arena_manager import ProgressiveBattleSession
-                
-                # Create progressive battle session with all 3 models
-                battle_id = str(uuid.uuid4())
-                all_models = list(arena_manager.available_models.keys())
-                random.shuffle(all_models)  # Randomize initial order
-                
-                # Create progressive battle
-                battle = ProgressiveBattleSession(
-                    session_id=battle_id,
-                    user_message=user_message,
-                    all_models=all_models,
-                    remaining_models=all_models.copy()
+                # Start progressive battle using Arena manager's method
+                # Tournament structure: 3 local models + Model D (OpenAI) as final challenger
+                logger.info(f"Starting arena battle with pre-loading for: {user_message[:100]}")
+                battle_info = loop.run_until_complete(
+                    arena_manager.start_progressive_battle(
+                        user_message,
+                        num_models=4,  # 3 local models + Model D (OpenAI/gpt-4o)
+                        session_id=session_id
+                    )
                 )
-                
-                # Get first matchup (2 random models)
-                model_a, model_b = battle.remaining_models[0], battle.remaining_models[1]
-                battle.current_pair = (model_a, model_b)
-                battle.current_round = 0
-                
-                # Store battle in arena manager
-                arena_manager.store_progressive_battle(battle)
-                
-                # Call both models
-                responses = {}
-                latencies = {}
-                
-                # Ollama model mapping
-                # FIXED: These must match exactly what ArenaManager returns
-                ollama_model_map = {
-                    'llama3.1:8b': 'llama3.1:8b',
-                    'mistral:7b': 'mistral:7b',
-                    'phi3:mini': 'phi3:mini',
-                    'gemma2:9b': 'gemma2:9b',
-                    'qwen2.5:7b': 'qwen2.5:7b'
-                }
-                
-                # Get responses from both models
-                for model_key, model_name in [('a', model_a), ('b', model_b)]:
-                    try:
-                        if model_name in ollama_model_map:
-                            ollama_host = current_app.config.get('OLLAMA_HOST', 'localhost')
-                            ollama_port = current_app.config.get('OLLAMA_PORT', '11434')
-                            ollama_url = f"http://{ollama_host}:{ollama_port}/v1/chat/completions"
-                            
-                            start = time.time()
-                            ollama_response = req.post(
-                                ollama_url,
-                                json={
-                                    "model": ollama_model_map[model_name],
-                                    "messages": [
-                                        {"role": "system", "content": arena_system_prompt},
-                                        {"role": "user", "content": user_message}
-                                    ],
-                                    "max_tokens": 500
-                                },
-                                timeout=60
-                            )
-                            
-                            if ollama_response.status_code == 200:
-                                responses[model_key] = ollama_response.json()['choices'][0]['message']['content']
-                            else:
-                                responses[model_key] = f"Error from model: {ollama_response.status_code}"
-                            
-                            latencies[model_key] = (time.time() - start) * 1000
-                        else:
-                            responses[model_key] = f"Model {model_name} not available"
-                            latencies[model_key] = 0
-                    except Exception as e:
-                        logger.error(f"Error calling model {model_key}: {e}")
-                        responses[model_key] = f"Error: {str(e)}"
-                        latencies[model_key] = 0
-                
-                # Check if Arena models indicate they need tools
-                tool_need_indicators = [
-                    "i need to see", "upload", "provide the", "i would need",
-                    "cannot analyze without", "don't have access", "no data available",
-                    "please share", "i require", "unable to access", "can't see your"
-                ]
-                
-                response_a_lower = responses.get('a', '').lower()
-                response_b_lower = responses.get('b', '').lower()
-                
-                model_a_needs_tools = any(indicator in response_a_lower for indicator in tool_need_indicators)
-                model_b_needs_tools = any(indicator in response_b_lower for indicator in tool_need_indicators)
-                
-                # If BOTH models say they need tools, fallback to GPT-4o
-                if model_a_needs_tools and model_b_needs_tools:
-                    # Arena models need tools - falling back to GPT-4o
+                battle_id = battle_info['battle_id']
+
+                # PRE-LOAD ALL MODEL RESPONSES IN PARALLEL FOR INSTANT SWITCHING
+                logger.info(f"Pre-loading all {battle_info.get('total_models', 3)} model responses in parallel...")
+                preload_start = time.time()
+
+                all_responses = loop.run_until_complete(
+                    arena_manager.get_all_model_responses(battle_id)
+                )
+
+                preload_time = time.time() - preload_start
+                logger.info(f"✅ All models pre-loaded in {preload_time:.2f}s")
+
+                # Check if pre-loading failed
+                if 'error' in all_responses:
+                    logger.error(f"Failed to pre-load responses: {all_responses['error']}")
                     loop.close()
-                    
-                    # Mark that we need to use tools
-                    session['last_tool_used'] = True
-                    session.modified = True
-                    
-                    # Fall through to GPT-4o
                     use_arena = False
                 else:
-                    # Store responses in battle session
-                    battle.all_responses[model_a] = responses['a']
-                    battle.all_responses[model_b] = responses['b']
-                    battle.all_latencies[model_a] = latencies['a']
-                    battle.all_latencies[model_b] = latencies['b']
-                    
-                    # Save updated battle
-                    arena_manager.storage.store_progressive_battle(battle)
-                    loop.close()
-                    
-                    # Return Arena response as streaming format
-                    def generate_arena():
-                        yield json.dumps({
-                            'content': '',  # No streaming content, send full response
-                            'arena_mode': True,
-                            'battle_id': battle_id,
-                            'round': 1,  # First round
-                            'model_a': model_a,
-                            'model_b': model_b,
-                            'response_a': responses['a'],
-                            'response_b': responses['b'],
-                            'latency_a': latencies['a'],
-                            'latency_b': latencies['b'],
-                            'remaining_models': battle.remaining_models[2:],  # The third model
-                            'eliminated_models': [],
-                            'winner_chain': [],
-                            'done': True
-                        })
-                    
-                    response = Response(
-                        (f"data: {chunk}\n\n" for chunk in generate_arena()),
-                        mimetype='text/event-stream'
-                    )
-                    response.headers['Cache-Control'] = 'no-cache'
-                    response.headers['Connection'] = 'keep-alive'
-                    response.headers['Access-Control-Allow-Origin'] = '*'
-                    return response
+                    # Get the battle with all pre-loaded responses
+                    battle = arena_manager.storage.get_progressive_battle(battle_id)
+                    if not battle:
+                        logger.error("Battle not found after pre-loading")
+                        loop.close()
+                        use_arena = False
+                    else:
+                        # Extract first matchup responses from pre-loaded data
+                        model_a = all_responses.get('model_a')
+                        model_b = all_responses.get('model_b')
+
+                        if not model_a or not model_b:
+                            # Fallback to first two models if not set
+                            model_a = battle.all_models[0] if len(battle.all_models) > 0 else None
+                            model_b = battle.all_models[1] if len(battle.all_models) > 1 else None
+
+                        responses = {
+                            'a': battle.all_responses.get(model_a, ''),
+                            'b': battle.all_responses.get(model_b, '')
+                        }
+                        latencies = {
+                            'a': battle.all_latencies.get(model_a, 0),
+                            'b': battle.all_latencies.get(model_b, 0)
+                        }
+
+                        logger.info(f"Arena matchup ready: {model_a} vs {model_b}")
+                        logger.info(f"Pre-loaded responses - A: {len(responses['a'])} chars, B: {len(responses['b'])} chars")
+                        logger.info(f"Cache status: {len(battle.all_responses)} models pre-loaded")
+                        # Check if Arena models indicate they need tools
+                        tool_need_indicators = [
+                            "i need to see", "upload", "provide the", "i would need",
+                            "cannot analyze without", "don't have access", "no data available",
+                            "please share", "i require", "unable to access", "can't see your"
+                        ]
+
+                        response_a_lower = responses.get('a', '').lower()
+                        response_b_lower = responses.get('b', '').lower()
+
+                        model_a_needs_tools = any(indicator in response_a_lower for indicator in tool_need_indicators)
+                        model_b_needs_tools = any(indicator in response_b_lower for indicator in tool_need_indicators)
+
+                        # If BOTH models say they need tools, fallback to GPT-4o
+                        if model_a_needs_tools and model_b_needs_tools:
+                            # Arena models need tools - falling back to GPT-4o
+                            loop.close()
+
+                            # Mark that we need to use tools
+                            session['last_tool_used'] = True
+                            session.modified = True
+
+                            # Fall through to GPT-4o
+                            use_arena = False
+                        else:
+                            # Responses are already pre-loaded in battle.all_responses
+                            # Just need to update the current pair
+                            battle.current_pair = (model_a, model_b)
+                            arena_manager.storage.update_progressive_battle(battle)
+                            loop.close()
+
+                            # Return Arena response as STREAMING format for better UX
+                            def generate_arena_streaming():
+                                import time
+
+                                logger.info(f"🚨 ARENA: Initializing battle {battle_id}: {model_a} vs {model_b}")
+
+                                # Stream responses in an interleaved manner for better UX
+                                response_a = responses['a']
+                                response_b = responses['b']
+
+                                # Format responses with proper markdown and structure
+                                def format_response(text):
+                                    """Normalize formatting to avoid excessive vertical spacing and keep bullets clean."""
+                                    import re
+                                    s = (text or '').replace('\r\n', '\n').replace('\r', '\n')
+                                    # Normalize bullets
+                                    s = re.sub(r'^(\s*)\*\s+', r'\1- ', s, flags=re.MULTILINE)
+                                    s = re.sub('^(\\s*)[\u2022•]\s+', r'\1- ', s, flags=re.MULTILINE)
+                                    s = re.sub(r'^•\s*', '- ', s, flags=re.MULTILINE)
+                                    s = re.sub(r'^-\s+', '- ', s, flags=re.MULTILINE)
+                                    # Collapse 3+ blank lines to a single blank line
+                                    s = re.sub(r'\n{3,}', '\n\n', s)
+                                    return s
+
+                                response_a_formatted = format_response(response_a)
+                                response_b_formatted = format_response(response_b)
+
+                                # Send an initial event with full preloaded responses as a safety fallback
+                                init_data = {
+                                    'arena_mode': True,
+                                    'battle_id': battle_id,
+                                    'round': 1,
+                                    'model_a': model_a,
+                                    'model_b': model_b,
+                                    'response_a': response_a_formatted,
+                                    'response_b': response_b_formatted,
+                                    'done': False,
+                                    'stream': True
+                                }
+                                yield json.dumps(init_data)
+
+                                # Calculate chunk size for smooth streaming (smaller chunks = smoother)
+                                # Slowed down per user feedback
+                                chunk_size = 60  # Characters per chunk
+
+                                a_idx = 0
+                                b_idx = 0
+                                a_len = len(response_a_formatted)
+                                b_len = len(response_b_formatted)
+
+                                # Stream both responses in parallel (interleaved chunks)
+                                while a_idx < a_len or b_idx < b_len:
+                                    # Send chunk from response A
+                                    if a_idx < a_len:
+                                        a_chunk = response_a_formatted[a_idx:a_idx + chunk_size]
+                                        a_idx += len(a_chunk)
+
+                                        yield json.dumps({
+                                            'arena_mode': True,
+                                            'battle_id': battle_id,
+                                            'stream': True,
+                                            'side': 'a',
+                                            'delta': a_chunk,
+                                            'done': False
+                                        })
+                                        time.sleep(0.08)  # Slower streaming for readability
+
+                                    # Send chunk from response B
+                                    if b_idx < b_len:
+                                        b_chunk = response_b_formatted[b_idx:b_idx + chunk_size]
+                                        b_idx += len(b_chunk)
+
+                                        yield json.dumps({
+                                            'arena_mode': True,
+                                            'battle_id': battle_id,
+                                            'stream': True,
+                                            'side': 'b',
+                                            'delta': b_chunk,
+                                            'done': False
+                                        })
+                                        time.sleep(0.08)  # Slower streaming for readability
+
+                                # Send completion event with metadata
+                                final_data = {
+                                    'arena_mode': True,
+                                    'battle_id': battle_id,
+                                    'round': 1,
+                                    'arena_complete': True,
+                                    'latency_a': latencies['a'],
+                                    'latency_b': latencies['b'],
+                                    'remaining_models': battle.remaining_models[2:] if len(battle.remaining_models) > 2 else [],
+                                    'eliminated_models': [],
+                                    'winner_chain': [],
+                                    'response_a': response_a_formatted,
+                                    'response_b': response_b_formatted,
+                                    'responses_ready': True,
+                                    'done': True
+                                }
+                                logger.info(f"✅ ARENA: Streaming complete for battle {battle_id}")
+                                yield json.dumps(final_data)
+
+                            response = Response(
+                                (f"data: {chunk}\n\n" for chunk in generate_arena_streaming()),
+                                mimetype='text/event-stream'
+                            )
+                            response.headers['Cache-Control'] = 'no-cache'
+                            response.headers['Connection'] = 'keep-alive'
+                            response.headers['Access-Control-Allow-Origin'] = '*'
+                            return response
                     
             except Exception as e:
                 logger.error(f"Error in Arena mode: {e}")
                 loop.close()
                 # Fall through to GPT-4o on error
                 use_arena = False
-        
-        # Get Request Interpreter service (for GPT-4o fallback or when Arena not used)
-        try:
-            request_interpreter = current_app.services.request_interpreter
-            if request_interpreter is None:
-                logger.error("Request Interpreter not available")
+
+        # Only proceed to Request Interpreter if Arena was not used or failed
+        if not use_arena:
+            # Get Request Interpreter service (for GPT-4o fallback or when Arena not used)
+            try:
+                request_interpreter = current_app.services.request_interpreter
+                if request_interpreter is None:
+                    logger.error("Request Interpreter not available")
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'Request processing system not available'
+                    }), 500
+            except Exception as e:
+                logger.error(f"Error getting Request Interpreter: {str(e)}")
                 return jsonify({
                     'status': 'error',
-                    'message': 'Request processing system not available'
+                    'message': 'Error accessing request processing system'
                 }), 500
-        except Exception as e:
-            logger.error(f"Error getting Request Interpreter: {str(e)}")
-            return jsonify({
-                'status': 'error',
-                'message': 'Error accessing request processing system'
-            }), 500
+
+            # Capture Flask context and session data for use in generator
+            app = current_app._get_current_object()
+            # Capture session data before entering generator (avoids request context issues)
+            session_data = dict(session)
+
+            # Use streaming response
+            def generate():
+                # Define formatter function (same as Arena mode)
+                def format_response(text):
+                    """Normalize formatting for streaming responses"""
+                    if not text:
+                        return ""
+
+                    import re
+                    # Normalize line endings
+                    s = (text or '').replace('\r\n', '\n').replace('\r', '\n')
+
+                    # Normalize bullet points to consistent style
+                    s = re.sub(r'^(\s*)\*\s+', r'\1- ', s, flags=re.MULTILINE)
+                    s = re.sub('^(\\s*)[\u2022•]\s+', r'\1- ', s, flags=re.MULTILINE)
+                    s = re.sub(r'^•\s*', '- ', s, flags=re.MULTILINE)
+                    s = re.sub(r'^-\s+', '- ', s, flags=re.MULTILINE)  # Normalize spacing
+
+                    # Collapse excessive vertical spacing
+                    s = re.sub(r'\n{3,}', '\n\n', s)
+
+                    return s
+
+                try:
+                    with app.app_context():
+                        logger.info(f"Processing streaming message: '{user_message[:100]}...'")
+
+                        # Use the real streaming system for proper formatting
+                        logger.info("Using real streaming system with proper line break preservation")
+
+                        # Track streaming result for logging
+                        final_chunk = None
+                        response_content = ""
+                        tools_used = []
+
+                        # Use the actual streaming method (pass data analysis flags)
+                        for chunk in request_interpreter.process_message_streaming(
+                            user_message,
+                            session_id,
+                            session_data,
+                            is_data_analysis=is_data_analysis,
+                            tab_context=tab_context
+                        ):
+                            # Apply formatting to content before streaming
+                            if chunk.get('content'):
+                                chunk['content'] = format_response(chunk['content'])
+                                response_content += chunk.get('content', '')
+
+                            # Track tools used
+                            if chunk.get('tools_used'):
+                                tools_used.extend(chunk.get('tools_used', []))
+
+                            # Track final chunk
+                            if chunk.get('done'):
+                                final_chunk = chunk
+
+                            chunk_json = json.dumps(chunk)
+                            logger.debug(f"Sending streaming chunk: {chunk_json}")
+                            yield f"data: {chunk_json}\n\n"
+
+                        # CRITICAL: Update session state after streaming completes
+                        # This must happen in the request context
+                        from flask import session as flask_session
+                        if tools_used:
+                            # Update session state based on tools used
+                            if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
+                                flask_session['analysis_complete'] = True
+                                if 'runcompleteanalysis' in tools_used:
+                                    flask_session['analysis_type'] = 'dual_method'
+                                elif 'run_composite_analysis' in tools_used:
+                                    flask_session['analysis_type'] = 'composite'
+                                else:
+                                    flask_session['analysis_type'] = 'pca'
+                                # CRITICAL: Mark session as modified
+                                flask_session.modified = True
+                                logger.info(f"Session {session_id}: Analysis completed via streaming, session updated")
+
+                            # Clear any pending actions if analysis was run
+                            if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
+                                flask_session.pop('pending_action', None)
+                                flask_session.pop('pending_variables', None)
+                                flask_session.modified = True
+
+                        # Log completion using final chunk data
+                        if final_chunk:
+                            tools_used = final_chunk.get('tools_used', [])
+                            if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
+                                if 'runcompleteanalysis' in tools_used:
+                                    analysis_type = 'dual_method'
+                                elif 'run_composite_analysis' in tools_used:
+                                    analysis_type = 'composite'
+                                else:
+                                    analysis_type = 'pca'
+                                logger.info(f"Session {session_id}: Analysis completed via streaming ({analysis_type})")
+
+                            # Simplified logging for streaming
+                            if hasattr(app, 'services') and app.services.interaction_logger:
+                                interaction_logger = app.services.interaction_logger
+                                interaction_logger.log_message(
+                                    session_id=session_id,
+                                    sender='assistant',
+                                    content=response_content,
+                                    intent=final_chunk.get('intent_type', 'streaming'),
+                                    entities={
+                                        'streaming': True,
+                                        'tools_used': tools_used,
+                                        'status': final_chunk.get('status', 'success')
+                                    }
+                                )
+
+                except Exception as e:
+                    logger.error(f"Error in streaming processing: {e}")
+                    error_json = json.dumps({'content': f'Error: {str(e)}', 'status': 'error', 'done': True})
+                    yield f"data: {error_json}\n\n"
         
-        # Capture Flask context and session data for use in generator
-        app = current_app._get_current_object()
-        # Capture session data before entering generator (avoids request context issues)
-        session_data = dict(session)
-        
-        # Use streaming response
-        def generate():
-            try:
-                with app.app_context():
-                    logger.info(f"Processing streaming message: '{user_message[:100]}...'")
-                    
-                    # Use the real streaming system for proper formatting
-                    logger.info("Using real streaming system with proper line break preservation")
-                    
-                    # Track streaming result for logging
-                    final_chunk = None
-                    response_content = ""
-                    tools_used = []
-                    
-                    # Use the actual streaming method (pass data analysis flags)
-                    for chunk in request_interpreter.process_message_streaming(
-                        user_message, 
-                        session_id, 
-                        session_data,
-                        is_data_analysis=is_data_analysis,
-                        tab_context=tab_context
-                    ):
-                        # Accumulate content for logging
-                        if chunk.get('content'):
-                            response_content += chunk.get('content', '')
-                        
-                        # Track tools used
-                        if chunk.get('tools_used'):
-                            tools_used.extend(chunk.get('tools_used', []))
-                        
-                        # Track final chunk
-                        if chunk.get('done'):
-                            final_chunk = chunk
-                            
-                        chunk_json = json.dumps(chunk)
-                        logger.debug(f"Sending streaming chunk: {chunk_json}")
-                        yield f"data: {chunk_json}\n\n"
-                    
-                    # CRITICAL: Update session state after streaming completes
-                    # This must happen in the request context
-                    from flask import session as flask_session
-                    if tools_used:
-                        # Update session state based on tools used
-                        if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
-                            flask_session['analysis_complete'] = True
-                            if 'runcompleteanalysis' in tools_used:
-                                flask_session['analysis_type'] = 'dual_method'
-                            elif 'run_composite_analysis' in tools_used:
-                                flask_session['analysis_type'] = 'composite'
-                            else:
-                                flask_session['analysis_type'] = 'pca'
-                            # CRITICAL: Mark session as modified
-                            flask_session.modified = True
-                            logger.info(f"Session {session_id}: Analysis completed via streaming, session updated")
-                        
-                        # Clear any pending actions if analysis was run
-                        if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
-                            flask_session.pop('pending_action', None)
-                            flask_session.pop('pending_variables', None)
-                            flask_session.modified = True
-                    
-                    # Log completion using final chunk data
-                    if final_chunk:
-                        tools_used = final_chunk.get('tools_used', [])
-                        if any(tool in tools_used for tool in ['run_composite_analysis', 'run_pca_analysis', 'runcompleteanalysis']):
-                            if 'runcompleteanalysis' in tools_used:
-                                analysis_type = 'dual_method'
-                            elif 'run_composite_analysis' in tools_used:
-                                analysis_type = 'composite'
-                            else:
-                                analysis_type = 'pca'
-                            logger.info(f"Session {session_id}: Analysis completed via streaming ({analysis_type})")
-                        
-                        # Simplified logging for streaming
-                        if hasattr(app, 'services') and app.services.interaction_logger:
-                            interaction_logger = app.services.interaction_logger
-                            interaction_logger.log_message(
-                                session_id=session_id,
-                                sender='assistant',
-                                content=response_content,
-                                intent=final_chunk.get('intent_type', 'streaming'),
-                                entities={
-                                    'streaming': True,
-                                    'tools_used': tools_used,
-                                    'status': final_chunk.get('status', 'success')
-                                }
-                            )
-                            
-            except Exception as e:
-                logger.error(f"Error in streaming processing: {e}")
-                error_json = json.dumps({'content': f'Error: {str(e)}', 'status': 'error', 'done': True})
-                yield f"data: {error_json}\n\n"
-        
-        # Return streaming response with proper headers
-        response = Response(generate(), mimetype='text/event-stream')
-        response.headers['Cache-Control'] = 'no-cache'
-        response.headers['Connection'] = 'keep-alive'
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
-        return response
+            # Return streaming response with proper headers
+            response = Response(generate(), mimetype='text/event-stream')
+            response.headers['Cache-Control'] = 'no-cache'
+            response.headers['Connection'] = 'keep-alive'
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
+            return response
     
     except ValidationError as e:
         return jsonify({

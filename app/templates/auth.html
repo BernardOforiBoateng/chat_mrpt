@@ -76,6 +76,68 @@
             display: block;
         }
 
+        .google-section {
+            margin-bottom: 24px;
+        }
+
+        .google-btn {
+            width: 100%;
+            padding: 14px;
+            background: #fff;
+            color: #333;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            transition: all 0.2s;
+        }
+
+        .google-btn:hover {
+            border-color: #4285f4;
+            color: #4285f4;
+            transform: translateY(-1px);
+        }
+
+        .google-btn img {
+            width: 20px;
+            height: 20px;
+        }
+
+        .divider {
+            text-align: center;
+            color: #888;
+            font-size: 13px;
+            margin-top: 16px;
+        }
+
+        .divider span {
+            position: relative;
+            padding: 0 12px;
+        }
+
+        .divider span::before,
+        .divider span::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            width: 80px;
+            height: 1px;
+            background: #e1e8ed;
+        }
+
+        .divider span::before {
+            left: -90px;
+        }
+
+        .divider span::after {
+            right: -90px;
+        }
+
         .form-group {
             margin-bottom: 20px;
         }
@@ -120,6 +182,10 @@
             font-weight: 600;
             cursor: pointer;
             transition: transform 0.2s;
+        }
+
+        .btn.secondary {
+            margin-top: 8px;
         }
 
         .btn:hover {
@@ -180,6 +246,14 @@
             <p>Malaria Risk Analysis Platform</p>
         </div>
 
+        <div class="google-section">
+            <button class="google-btn" onclick="startGoogleLogin()">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google Logo">
+                Continue with Google
+            </button>
+            <p class="divider"><span>or use email</span></p>
+        </div>
+
         <div class="tabs">
             <div class="tab active" onclick="switchTab('signin')">Sign In</div>
             <div class="tab" onclick="switchTab('signup')">Sign Up</div>
@@ -187,47 +261,49 @@
 
         <div id="message"></div>
 
-        <!-- Sign In Form -->
-        <form id="signinForm" class="form active">
-            <div class="form-group">
-                <label>Email Address</label>
-                <input type="email" id="signin-email" placeholder="you@example.com" required>
-            </div>
+        <div id="emailForms">
+            <!-- Sign In Form -->
+            <form id="signinForm" class="form active">
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="signin-email" placeholder="you@example.com" required>
+                </div>
 
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="signin-password" placeholder="••••••••" required>
-            </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="signin-password" placeholder="••••••••" required>
+                </div>
 
-            <button type="submit" class="btn">Sign In</button>
-        </form>
+                <button type="submit" class="btn secondary">Sign In with Email</button>
+            </form>
 
-        <!-- Sign Up Form -->
-        <form id="signupForm" class="form">
-            <div class="form-group">
-                <label>Email Address</label>
-                <input type="email" id="signup-email" placeholder="you@example.com" required>
-            </div>
+            <!-- Sign Up Form -->
+            <form id="signupForm" class="form">
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="signup-email" placeholder="you@example.com" required>
+                </div>
 
-            <div class="form-group">
-                <label>Username</label>
-                <input type="text" id="signup-username" placeholder="johndoe" required>
-                <small>At least 3 characters, letters and numbers only</small>
-            </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="signup-username" placeholder="johndoe" required>
+                    <small>At least 3 characters, letters and numbers only</small>
+                </div>
 
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="signup-password" placeholder="••••••••" required>
-                <small>8+ characters, uppercase, lowercase, and numbers</small>
-            </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="signup-password" placeholder="••••••••" required>
+                    <small>8+ characters, uppercase, lowercase, and numbers</small>
+                </div>
 
-            <div class="form-group">
-                <label>Confirm Password</label>
-                <input type="password" id="signup-confirm" placeholder="••••••••" required>
-            </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" id="signup-confirm" placeholder="••••••••" required>
+                </div>
 
-            <button type="submit" class="btn">Sign Up</button>
-        </form>
+                <button type="submit" class="btn secondary">Sign Up with Email</button>
+            </form>
+        </div>
 
         <div class="loading">
             <div class="spinner"></div>
@@ -236,6 +312,26 @@
     </div>
 
     <script>
+        // Ensure legacy localStorage tokens are cleared to prevent cross-tab reuse
+        try {
+            const legacyToken = localStorage.getItem('authToken');
+            if (legacyToken && !sessionStorage.getItem('authToken')) {
+                sessionStorage.setItem('authToken', legacyToken);
+            }
+            const legacyUser = localStorage.getItem('user');
+            if (legacyUser && !sessionStorage.getItem('user')) {
+                sessionStorage.setItem('user', legacyUser);
+            }
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('user');
+        } catch (error) {
+            console.warn('Storage migration skipped', error);
+        }
+
+        function startGoogleLogin() {
+            window.location.href = '/auth/google';
+        }
+
         function switchTab(tab) {
             // Switch active tab
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -282,8 +378,8 @@
 
                 if (data.success) {
                     showMessage('Login successful! Redirecting...', 'success');
-                    localStorage.setItem('authToken', data.token);
-                    localStorage.setItem('user', JSON.stringify(data.user));
+                    sessionStorage.setItem('authToken', data.token);
+                    sessionStorage.setItem('user', JSON.stringify(data.user));
 
                     setTimeout(() => {
                         window.location.href = '/';
@@ -351,8 +447,8 @@
 
                 if (data.success) {
                     showMessage('Account created! Redirecting...', 'success');
-                    localStorage.setItem('authToken', data.token);
-                    localStorage.setItem('user', JSON.stringify(data.user));
+                    sessionStorage.setItem('authToken', data.token);
+                    sessionStorage.setItem('user', JSON.stringify(data.user));
 
                     setTimeout(() => {
                         window.location.href = '/';

@@ -26,6 +26,7 @@ def validate_session(f: Callable) -> Callable:
             import uuid
             session_id = str(uuid.uuid4())
             session['session_id'] = session_id
+            session['base_session_id'] = session_id
             logger.info(f"Generated new session ID: {session_id}")
         
         return f(*args, **kwargs)

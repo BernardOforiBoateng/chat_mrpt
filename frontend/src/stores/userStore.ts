@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import storage from '@/utils/storage';
 
 export interface User {
   id: string;
@@ -37,7 +38,7 @@ export const useUserStore = create<UserState>()(
       clearError: () => set({ error: null }),
 
       logout: () => {
-        localStorage.removeItem('auth_token');
+        storage.clearAuthToken();
         set({
           user: null,
           isAuthenticated: false,

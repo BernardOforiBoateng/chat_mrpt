@@ -105,10 +105,38 @@ from .visualization_maps_tools import (
 )
 
 # Phase 3: VISUALIZATION_CHARTS tools
-from .visualization_charts import (
-    # Geographic/Spatial Charts kept for quick access; others handled by analyze_data_with_python
+from .visualization_charts_tools import (
+    # Statistical Distribution Charts
+    # CreateHistogram,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateViolinPlot,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateDensityPlot,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    
+    # Correlation & Relationship Charts
+    # CreateScatterPlot,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateCorrelationHeatmap,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreatePairPlot,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateRegressionPlot,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    
+    # Comparative Charts
+    # CreateBarChart,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateGroupedBarChart,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateStackedBarChart,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    
+    # Ranking & Performance Charts
+    # CreateLollipopChart,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    
+    # Categorical Analysis
+    # CreatePieChart,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateDonutChart,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    
+    # Advanced Statistical Charts
+    # CreateQQPlot,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateResidualPlot,  # REMOVED - Tool #19 (analyze_data_with_python) can create this chart
+    # CreateBoxPlotGrid,  # REMOVED - Tool #19 (analyze_data_with_python) can create box plots
+    
+    # Geographic/Spatial Charts
     CreateBubbleMap,
-    CreateCoordinatePlot,
+    CreateCoordinatePlot
 )
 
 # Phase 4: INTERVENTION_TARGETING tools - REMOVED

@@ -9,11 +9,17 @@ This module contains the visualization-related routes for the ChatMRPT web appli
 - Generic visualization navigation
 """
 
+import json
 import os
 import logging
 import time
 import traceback
+import zipfile
 from datetime import datetime
+
+import geopandas as gpd
+import pandas as pd
+from typing import List, Optional, Tuple
 from flask import Blueprint, session, request, current_app, jsonify, send_from_directory
 from app.auth.decorators import require_auth
 
@@ -21,6 +27,8 @@ from ...core.decorators import handle_errors, log_execution_time, validate_sessi
 from ...core.exceptions import ValidationError
 from ...core.utils import convert_to_json_serializable
 from ...services.universal_viz_explainer import get_universal_viz_explainer
+from ...analysis.itn_pipeline import generate_itn_map
+from ...tools.variable_distribution import VariableDistribution
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +346,52 @@ def serve_viz_file(session_id, filename):
         }), 500
 
 
+@viz_bp.route('/visualization/rerender', methods=['POST'])
+@require_auth
+@validate_session
+@handle_errors
+def rerender_visualization():
+    """Re-render a visualization with updated geographic level or filters."""
+    payload = request.get_json(silent=True) or {}
+    viz_type = payload.get('viz_type')
+    if not viz_type:
+        return jsonify({'status': 'error', 'message': 'viz_type is required'}), 400
+
+    geographic_level = (payload.get('geographic_level') or 'ward').lower()
+    selected_lgas = [str(code) for code in (payload.get('selected_lgas') or []) if code is not None]
+    session_id = session.get('session_id') or payload.get('session_id')
+    if not session_id:
+        return jsonify({'status': 'error', 'message': 'Session not available'}), 400
+
+    if viz_type == 'variable_distribution':
+        viz_params = payload.get('viz_params') or {}
+        variable_name = viz_params.get('variable_name')
+        if not variable_name:
+            return jsonify({'status': 'error', 'message': 'variable_name missing for variable distribution'}), 400
+        tool = VariableDistribution(
+            variable_name=variable_name,
+            geographic_level=geographic_level,
+            selected_lgas=selected_lgas,
+        )
+        result = tool.execute(session_id=session_id)
+        if not result.success:
+            return jsonify({'status': 'error', 'message': result.message}), 500
+        web_path = (result.data or {}).get('web_path') or result.web_path
+        return jsonify({'status': 'success', 'web_path': web_path})
+
+    if viz_type == 'itn_distribution':
+        web_path, error_message = _rerender_itn_map(
+            session_id=session_id,
+            geographic_level=geographic_level,
+            selected_lgas=selected_lgas,
+        )
+        if error_message:
+            return jsonify({'status': 'error', 'message': error_message}), 400
+        return jsonify({'status': 'success', 'web_path': web_path})
+
+    return jsonify({'status': 'error', 'message': f'Unsupported visualization type: {viz_type}'}), 400
+
+
 # Legacy compatibility for pre/post survey map link without session ID
 @viz_bp.route('/serve_viz_file/vulnerability_map_composite.html')
 def serve_vulnerability_map_legacy():
@@ -465,6 +519,101 @@ def navigate_visualization():
             'status': 'error',
             'message': f'Error navigating visualization: {str(e)}'
         }), 500
+
+
+def _rerender_itn_map(session_id: str, geographic_level: str, selected_lgas: List[str]) -> tuple[Optional[str], Optional[str]]:
+    upload_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], session_id)
+    results_path = os.path.join(upload_dir, 'itn_distribution_results.json')
+    if not os.path.exists(results_path):
+        return None, 'ITN distribution results not found for this session.'
+
+    try:
+        with open(results_path, 'r') as handle:
+            saved_results = json.load(handle)
+    except Exception as exc:
+        logger.error(f"Failed to read ITN results: {exc}")
+        return None, 'Unable to load ITN distribution results.'
+
+    prioritized_records = saved_results.get('prioritized', [])
+    reprioritized_records = saved_results.get('reprioritized', [])
+    prioritized_df = pd.DataFrame(prioritized_records)
+    reprioritized_df = pd.DataFrame(reprioritized_records)
+
+    if prioritized_df.empty and reprioritized_df.empty:
+        return None, 'No ITN allocation data available to render a map.'
+
+    stats = saved_results.get('stats', {})
+    total_nets = saved_results.get('total_nets', stats.get('total_nets', 0))
+    avg_household_size = saved_results.get('avg_household_size', 5.0)
+    method = saved_results.get('method', 'composite')
+    urban_threshold = saved_results.get('urban_threshold', 75.0)
+
+    data_service = getattr(current_app.services, 'data_service', None)
+    data_handler = data_service.get_handler(session_id) if data_service else None
+    shp_data = getattr(data_handler, 'shapefile_data', None) if data_handler else None
+    rankings = getattr(data_handler, 'rankings', None) if data_handler else None
+
+    if shp_data is None:
+        shp_data = _load_session_shapefile(upload_dir)
+    if shp_data is None:
+        return None, 'Unable to load shapefile data for the session.'
+
+    if rankings is None or (hasattr(rankings, 'empty') and rankings.empty):
+        rankings = _load_session_rankings(upload_dir)
+
+    try:
+        web_path = generate_itn_map(
+            shp_data=shp_data,
+            prioritized=prioritized_df,
+            reprioritized=reprioritized_df,
+            rankings=rankings,
+            session_id=session_id,
+            urban_threshold=urban_threshold,
+            total_nets=total_nets,
+            avg_household_size=avg_household_size,
+            method=method,
+            stats=stats,
+            geographic_level=geographic_level,
+            selected_lgas=selected_lgas,
+        )
+        return web_path, None
+    except Exception as exc:
+        logger.error(f"Failed to re-render ITN map: {exc}")
+        return None, 'Unable to regenerate the ITN map with the requested settings.'
+
+
+def _load_session_shapefile(upload_dir: str) -> Optional[gpd.GeoDataFrame]:
+    shapefile_dir = os.path.join(upload_dir, 'shapefile')
+    os.makedirs(shapefile_dir, exist_ok=True)
+    shp_files = [f for f in os.listdir(shapefile_dir) if f.endswith('.shp')]
+    if not shp_files:
+        zip_path = os.path.join(upload_dir, 'raw_shapefile.zip')
+        if os.path.exists(zip_path):
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(shapefile_dir)
+                shp_files = [f for f in os.listdir(shapefile_dir) if f.endswith('.shp')]
+            except Exception as exc:
+                logger.error(f"Failed to extract shapefile zip: {exc}")
+                return None
+    if not shp_files:
+        return None
+    try:
+        return gpd.read_file(os.path.join(shapefile_dir, shp_files[0]))
+    except Exception as exc:
+        logger.error(f"Failed to load shapefile: {exc}")
+        return None
+
+
+def _load_session_rankings(upload_dir: str) -> Optional[pd.DataFrame]:
+    csv_path = os.path.join(upload_dir, 'unified_dataset.csv')
+    if not os.path.exists(csv_path):
+        return None
+    try:
+        return pd.read_csv(csv_path)
+    except Exception as exc:
+        logger.error(f"Failed to load unified dataset for rankings: {exc}")
+        return None
 
 
 @viz_bp.route('/explain_visualization', methods=['POST'])

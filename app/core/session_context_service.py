@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Tuple
@@ -76,40 +75,10 @@ class SessionContextService:
             return session_data
         return session_data
 
-    def _copy_recent_upload_if_needed(self, session_id: str) -> None:
-        """If the current session has no data, try copying from a recent upload (last 5m)."""
-        upload_folder = Path(os.environ.get("UPLOAD_FOLDER", "instance/uploads"))
-        dst = upload_folder / session_id
-        if (dst / "raw_data.csv").exists() or (dst / "data_analysis.csv").exists():
-            return
-        if not upload_folder.exists():
-            return
-        now = time.time()
-        for folder in upload_folder.iterdir():
-            if not folder.is_dir() or folder.name == session_id:
-                continue
-            try:
-                if now - folder.stat().st_mtime > 300:
-                    continue
-            except Exception:
-                continue
-            if (folder / "raw_data.csv").exists():
-                # Copy core artifacts
-                import shutil, glob
-                dst.mkdir(parents=True, exist_ok=True)
-                for pattern in ["*.csv", "*.zip", ".agent_state.json", "session_state.json"]:
-                    for src in glob.glob(str(folder / pattern)):
-                        sp = Path(src)
-                        shutil.copy2(sp, dst / sp.name)
-                break
-
     def get_context(self, session_id: str, session_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         # Accept external session_data, then enrich from agent state
         session_data = dict(session_data) if session_data else {}
         session_data = self._sync_from_agent_state(session_id, session_data)
-
-        # Try to patch missing uploads from recent sessions
-        self._copy_recent_upload_if_needed(session_id)
 
         # Detect data availability
         has_any = self.data_repo.has_any_data(session_id)

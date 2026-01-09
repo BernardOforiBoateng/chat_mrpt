@@ -361,10 +361,9 @@ class ResponseFormatter:
         # Normalize line endings
         text = text.replace('\r\n', '\n').replace('\r', '\n')
 
-        # Normalize bullet points to consistent style
+        # Normalize bullet points to a consistent style without rewriting numbered lists
         text = re.sub(r'^\*\s+', '- ', text, flags=re.MULTILINE)
         text = re.sub(r'^•\s*', '- ', text, flags=re.MULTILINE)
-        text = re.sub(r'^-\s+', '- ', text, flags=re.MULTILINE)
 
         # Collapse 3+ blank lines to 2 blank lines
         text = re.sub(r'\n{3,}', '\n\n', text)

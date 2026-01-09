@@ -1,5 +1,6 @@
 import { useChatStore } from '@/stores/chatStore';
 import toast from 'react-hot-toast';
+import storage from '@/utils/storage';
 
 interface ExportOptions {
   format: 'pdf' | 'html' | 'csv' | 'json';
@@ -66,7 +67,11 @@ class ExportService {
   async exportAnalysisResults(sessionId: string) {
     try {
       // Call backend endpoint to get analysis results
-      const response = await fetch(`/api/export_analysis/${sessionId}`);
+      const response = await fetch(`/api/export_analysis/${sessionId}`, {
+      headers: {
+        'X-Conversation-ID': storage.ensureConversationId(),
+      },
+    });
       
       if (!response.ok) {
         throw new Error('Failed to export analysis results');
@@ -95,7 +100,11 @@ class ExportService {
    */
   async downloadVisualization(vizUrl: string, filename?: string) {
     try {
-      const response = await fetch(vizUrl);
+      const response = await fetch(vizUrl, {
+      headers: {
+        'X-Conversation-ID': storage.ensureConversationId(),
+      },
+    });
       
       if (!response.ok) {
         throw new Error('Failed to download visualization');
@@ -123,7 +132,11 @@ class ExportService {
    */
   async generateReport(sessionId: string, format: 'pdf' | 'html' = 'pdf') {
     try {
-      const response = await fetch(`/api/generate_report/${sessionId}?format=${format}`);
+      const response = await fetch(`/api/generate_report/${sessionId}?format=${format}`, {
+      headers: {
+        'X-Conversation-ID': storage.ensureConversationId(),
+      },
+    });
       
       if (!response.ok) {
         throw new Error('Failed to generate report');
@@ -204,7 +217,11 @@ class ExportService {
   
   private async exportAsPDF(sessionId: string) {
     // This would call a backend endpoint that generates a PDF
-    const response = await fetch(`/api/export_chat_pdf/${sessionId}`);
+    const response = await fetch(`/api/export_chat_pdf/${sessionId}`, {
+      headers: {
+        'X-Conversation-ID': storage.ensureConversationId(),
+      },
+    });
     
     if (!response.ok) {
       throw new Error('Failed to generate PDF');

@@ -1,14 +1,4 @@
-import React, {
-  useState,
-  useRef,
-  useEffect,
-  forwardRef,
-  useImperativeHandle,
-} from 'react';
-
-export interface VisualizationFrameHandle {
-  captureImage: () => Promise<string>;
-}
+import React, { useState, useRef, useEffect } from 'react';
 
 interface VisualizationFrameProps {
   url: string;
@@ -18,18 +8,18 @@ interface VisualizationFrameProps {
   onError?: (error: Error) => void;
 }
 
-const VisualizationFrame = forwardRef<VisualizationFrameHandle, VisualizationFrameProps>(({
+const VisualizationFrame: React.FC<VisualizationFrameProps> = ({
   url,
   title,
   className = '',
   onLoad,
   onError,
-}, ref) => {
+}) => {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [currentUrl, setCurrentUrl] = useState(url);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-
+  
   const handleLoad = () => {
     setIsLoading(false);
     setHasError(false);
@@ -76,55 +66,12 @@ const VisualizationFrame = forwardRef<VisualizationFrameHandle, VisualizationFra
     };
     
     window.addEventListener('message', handleMessage);
-
+    
     return () => {
       window.removeEventListener('message', handleMessage);
     };
   }, []);
-
-  useImperativeHandle(ref, () => ({
-    async captureImage() {
-      const iframe = iframeRef.current;
-      if (!iframe) {
-        throw new Error('Visualization not loaded yet');
-      }
-
-      const iframeWindow = iframe.contentWindow as (Window & { Plotly?: any });
-      if (!iframeWindow) {
-        throw new Error('Unable to access visualization content');
-      }
-
-      const plotly = iframeWindow.Plotly;
-      if (!plotly || typeof plotly.toImage !== 'function') {
-        throw new Error('Plotly renderer not available for this visualization');
-      }
-
-      const doc = iframeWindow.document;
-      const graphDiv = doc?.querySelector('.plotly-graph-div') as HTMLElement | null;
-      if (!graphDiv) {
-        throw new Error('Plot element not found in visualization');
-      }
-
-      try {
-        const dataUrl: string = await plotly.toImage(graphDiv, {
-          format: 'png',
-          height: 720,
-          width: 1024,
-          scale: 2,
-        });
-
-        if (!dataUrl.startsWith('data:image')) {
-          throw new Error('Unexpected capture output from Plotly');
-        }
-
-        return dataUrl;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to capture visualization: ${message}`);
-      }
-    },
-  }));
-
+  
   return (
     <div className={`visualization-frame relative ${className}`}>
       {isLoading && (
@@ -176,8 +123,6 @@ const VisualizationFrame = forwardRef<VisualizationFrameHandle, VisualizationFra
       />
     </div>
   );
-});
-
-VisualizationFrame.displayName = 'VisualizationFrame';
+};
 
 export default VisualizationFrame;

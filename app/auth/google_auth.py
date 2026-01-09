@@ -2,11 +2,11 @@
 Google OAuth Authentication
 """
 from flask import Blueprint, redirect, url_for, session, request, jsonify, current_app
-from flask_login import login_user
 from authlib.integrations.flask_client import OAuth
 import os
 import secrets
 from app.auth.user_model import User
+from app.auth.session_utils import establish_authenticated_session
 
 google_auth = Blueprint('google_auth', __name__, url_prefix='/auth')
 
@@ -63,8 +63,8 @@ def google_callback():
     redirect_uri = f"{proto}://{host}{callback_path}"
 
     try:
-        # Exchange code for tokens; align redirect_uri for providers that validate it strictly
-        token = google.authorize_access_token(redirect_uri=redirect_uri)
+        # Exchange code for tokens; authlib automatically uses the same redirect_uri from the auth request
+        token = google.authorize_access_token()
 
         # Try to obtain userinfo from OIDC endpoint if not included in token payload
         user_info = token.get('userinfo') if isinstance(token, dict) else None
@@ -96,15 +96,9 @@ def google_callback():
                 current_app.logger.error(f"User creation failed: {error}")
                 return jsonify({'error': error}), 400
 
-        # Create session token and login
+        # Create session token, reset server-side session state, and redirect
         session_token = User.create_session_token(user.id)
-        login_user(user, remember=True)
-
-        # Persist session data
-        session['user_id'] = user.id
-        session['user_email'] = email
-        session['auth_token'] = session_token
-        session['auth_method'] = 'google'
+        establish_authenticated_session(user, session_token, method='google', remember=True)
 
         # Redirect to frontend root with token for client-side capture
         return redirect(f'/?token={session_token}&user={user.username}')

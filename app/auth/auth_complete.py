@@ -3,9 +3,11 @@ Complete authentication system with signup/signin for React frontend
 """
 import os
 from flask import Blueprint, jsonify, request, session, current_app
-from flask_login import login_user, logout_user, current_user
+from flask_login import logout_user, current_user
 from app.auth.user_model import User
 import re
+
+from app.auth.session_utils import establish_authenticated_session
 
 auth = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -89,16 +91,9 @@ def signup():
                 'message': error
             }), 400
 
-        # Create session token
+        # Create session token and reset server-side session state
         token = User.create_session_token(user.id)
-
-        # Log the user in
-        login_user(user)
-
-        # Set session data
-        session['user_id'] = user.id
-        session['user_email'] = user.email
-        session['auth_token'] = token
+        establish_authenticated_session(user, token, method='email')
 
         return jsonify({
             'success': True,
@@ -146,16 +141,9 @@ def signin():
                 'message': error
             }), 401
 
-        # Create session token
+        # Create session token and reset server-side session state
         token = User.create_session_token(user.id)
-
-        # Log the user in
-        login_user(user)
-
-        # Set session data
-        session['user_id'] = user.id
-        session['user_email'] = user.email
-        session['auth_token'] = token
+        establish_authenticated_session(user, token, method='email')
 
         return jsonify({
             'success': True,

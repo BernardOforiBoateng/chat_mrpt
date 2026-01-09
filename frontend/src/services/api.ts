@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance } from 'axios';
+import storage from '@/utils/storage';
 
 // API base URL - uses proxy in development, direct URL in production
 const API_BASE = import.meta.env.PROD 
@@ -18,7 +19,7 @@ const axiosInstance: AxiosInstance = axios.create({
 // Request interceptor for adding session ID
 axiosInstance.interceptors.request.use(
   (config) => {
-    const sessionId = localStorage.getItem('session_id');
+    const sessionId = storage.getSessionId();
     if (sessionId) {
       config.headers['X-Session-ID'] = sessionId;
     }

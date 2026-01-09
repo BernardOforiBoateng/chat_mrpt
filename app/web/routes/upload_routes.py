@@ -121,7 +121,8 @@ def upload_both_files():
         # This fixes the concurrent user data bleed issue
         import uuid
         session_id = str(uuid.uuid4())
-        session["session_id"] = session_id
+        session['session_id'] = session_id
+        session['base_session_id'] = session_id
 
         logger.info(f"🔄 Generated new session ID for upload: {session_id}")
 

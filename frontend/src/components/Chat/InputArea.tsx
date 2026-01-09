@@ -24,6 +24,10 @@ const InputArea: React.FC<InputAreaProps> = ({
   const messages = useChatStore((state) => state.messages);
   const hasUploadedFiles = useChatStore((state) => state.session.hasUploadedFiles);
   const analysisResults = useAnalysisStore((state) => state.analysisResults);
+  
+  // Debug log
+  console.log('InputArea - showUploadModal:', showUploadModal);
+  
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
@@ -90,11 +94,17 @@ const InputArea: React.FC<InputAreaProps> = ({
   
   return (
     <div className="border-t border-gray-200 bg-white">
-      {/* Suggestion Buttons - COMMENTED OUT */}
-      {/* {showSuggestions && suggestions.length > 0 && value.length === 0 && (
+      {/* Suggestion Buttons */}
+      {showSuggestions && suggestions.length > 0 && value.length === 0 && (
         <div className="px-4 pt-3 pb-2 animate-fadeIn">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-gray-500 font-medium">Suggestions</span>
+            <button
+              onClick={() => setShowSuggestions(false)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              Hide
+            </button>
           </div>
           <div className="flex flex-wrap gap-2">
             {suggestions.map((suggestion, index) => (
@@ -109,12 +119,12 @@ const InputArea: React.FC<InputAreaProps> = ({
             ))}
           </div>
         </div>
-      )} */}
+      )}
       
       <div className="p-4">
         <div className="flex items-end space-x-3">
         {/* Input Field */}
-        <div className="flex-1" data-tour-id="chat-input" data-edu-tip-chat>
+        <div className="flex-1">
           <textarea
             ref={textareaRef}
             value={value}
@@ -141,8 +151,6 @@ const InputArea: React.FC<InputAreaProps> = ({
             }}
             disabled={isLoading}
             className="p-2 text-gray-500 hover:text-gray-700 disabled:opacity-50 transition-colors"
-            data-tour-id="upload-button"
-            data-edu-tip-upload
             title="Upload files"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -160,7 +168,6 @@ const InputArea: React.FC<InputAreaProps> = ({
             onClick={onSend}
             disabled={isLoading || !value.trim()}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-            data-tour-id="send-button"
           >
             {isLoading ? (
               <div className="flex items-center">
@@ -200,7 +207,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         </div>
         
         {/* Helper Text */}
-        <div className="mt-2 text-xs text-gray-500">Press Enter to send, Shift+Enter for new line</div>
+        <div className="mt-2 text-xs text-gray-500">
+          Press Enter to send, Shift+Enter for new line
+        </div>
       </div>
       
       {/* Upload Modal */}

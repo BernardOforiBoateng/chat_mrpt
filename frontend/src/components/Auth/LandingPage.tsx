@@ -6,6 +6,10 @@ const LandingPage: React.FC = () => {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
 
+  const handleGoogleSignIn = () => {
+    window.location.href = '/auth/google';
+  };
+
   return (
     <>
       {/* Auth Modals */}
@@ -82,16 +86,28 @@ const LandingPage: React.FC = () => {
           {/* CTA Buttons */}
           <div className="space-y-3 pt-4">
             <button
+              onClick={handleGoogleSignIn}
+              className="w-full px-6 py-3 bg-white text-gray-900 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:text-blue-600 transition-all font-medium text-base shadow-sm flex items-center justify-center gap-3"
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+              Continue with Google
+            </button>
+            <div className="flex items-center justify-center space-x-2 text-xs text-gray-400 uppercase tracking-wide">
+              <span className="h-px w-10 bg-gray-200" />
+              <span>or use email</span>
+              <span className="h-px w-10 bg-gray-200" />
+            </div>
+            <button
               onClick={() => setShowLoginModal(true)}
               className="w-full px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium text-base shadow-sm"
             >
-              Sign in
+              Sign in with Email
             </button>
             <button
               onClick={() => setShowSignupModal(true)}
               className="w-full px-6 py-3 bg-white text-gray-900 border-2 border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all font-medium text-base"
             >
-              Sign up
+              Create an Email Account
             </button>
           </div>
 

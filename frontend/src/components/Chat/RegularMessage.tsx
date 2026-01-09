@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import VisualizationContainer from '../Visualization/VisualizationContainer';
 import DualMethodDisplay from '../Analysis/DualMethodDisplay';
@@ -10,19 +10,6 @@ interface RegularMessageProps {
 
 const RegularMessage: React.FC<RegularMessageProps> = ({ message }) => {
   const isUser = message.sender === 'user';
-
-  useEffect(() => {
-    if (isUser) {
-      return;
-    }
-    console.groupCollapsed('🛰️ MESSAGE PIPELINE DEBUG');
-    console.log('Message ID:', message.id);
-    console.log('Workflow metadata:', message.metadata);
-    console.log('Visualizations:', message.visualizations?.length ?? 0, message.visualizations);
-    console.log('Download links:', message.downloadLinks?.length ?? 0, message.downloadLinks);
-    console.log('Content preview:', message.content.substring(0, 200));
-    console.groupEnd();
-  }, [isUser, message]);
   
   // Detect and extract a top-level warning line (styled in red)
   let topWarning = '';
@@ -38,37 +25,9 @@ const RegularMessage: React.FC<RegularMessageProps> = ({ message }) => {
   
   // Check if message contains visualization URLs or has visualizations array
   const hasVisualization = !isUser && (
-    message.content.includes('/serve_viz_file/') ||
+    message.content.includes('/serve_viz_file/') || 
     (message.visualizations && message.visualizations.length > 0)
   );
-
-  const visualizationEntries = useMemo(() => {
-    if (!hasVisualization) {
-      return [];
-    }
-
-    if (message.visualizations && message.visualizations.length > 0) {
-      return message.visualizations.map((viz: any, index: number) => {
-        const url = typeof viz === 'string'
-          ? viz
-          : (viz.url || viz.path || viz.html_path || '');
-
-        return {
-          key: `viz_${message.id}_${index}`,
-          url,
-          title: typeof viz === 'string'
-            ? 'Interactive visualization'
-            : (viz.title || 'Interactive visualization'),
-        };
-      }).filter((entry) => !!entry.url);
-    }
-
-    return [{
-      key: `viz_${message.id}_fallback`,
-      url: message.content,
-      title: 'Interactive visualization',
-    }];
-  }, [hasVisualization, message]);
   
   // Check if message contains analysis results
   const analysisData = useMemo(() => {
@@ -116,36 +75,34 @@ const RegularMessage: React.FC<RegularMessageProps> = ({ message }) => {
               ({message.metadata.model})
             </span>
           )}
-          {/* Per-message spinner removed for a cleaner UI */}
+          {message.isStreaming && (
+            <span className="ml-2">
+              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  fill="none"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+            </span>
+          )}
         </div>
         
         {/* Message Content */}
-        <div className={`prose prose-sm max-w-none ${isUser ? 'prose-invert' : ''} [&>p]:mb-4 [&>ul]:mb-4 [&>ol]:mb-4 [&>h2]:mt-6 [&>h2]:mb-3 [&>h3]:mt-4 [&>h3]:mb-2`}>
+        <div className={`prose prose-sm max-w-none ${isUser ? 'prose-invert' : ''}`}>
           {!isUser ? (
             <>
               {topWarning && (
                 <div className="text-red-600 font-bold mb-2">{topWarning}</div>
-              )}
-              {visualizationEntries.length > 0 && (
-                <div className="not-prose mb-4">
-                  {visualizationEntries.map((viz) => (
-                    <div
-                      key={viz.key}
-                      className="mb-4 rounded-lg border border-blue-200 bg-blue-50/60 p-3"
-                    >
-                      <div className="mb-2 flex items-center justify-between text-sm font-semibold text-blue-900">
-                        <span>{viz.title}</span>
-                        <span className="text-xs font-medium uppercase tracking-wide text-blue-600">Interactive</span>
-                      </div>
-                      <VisualizationContainer
-                        content={viz.url}
-                        onExplain={(vizUrl) => {
-                          console.log('Explain visualization:', vizUrl);
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
               )}
               {/* Check if content starts with our styled HTML */}
               {restContent.startsWith('<span style="color: red') ? (
@@ -244,6 +201,32 @@ const RegularMessage: React.FC<RegularMessageProps> = ({ message }) => {
         )}
         
         {/* Visualization Container */}
+        {hasVisualization && (
+          <div className="mt-4">
+            {/* Handle visualizations array if present */}
+            {message.visualizations && message.visualizations.length > 0 ? (
+              message.visualizations.map((viz: any, index: number) => (
+                <VisualizationContainer
+                  key={index}
+                  content={typeof viz === 'string' ? viz : (viz.path || viz.html_path || viz.url)}
+                  onExplain={(vizUrl) => {
+                    // Could trigger a new message asking for explanation
+                    console.log('Explain visualization:', vizUrl);
+                  }}
+                />
+              ))
+            ) : (
+              /* Fallback to original logic for content-based URLs */
+              <VisualizationContainer
+                content={message.content}
+                onExplain={(vizUrl) => {
+                  // Could trigger a new message asking for explanation
+                  console.log('Explain visualization:', vizUrl);
+                }}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -119,7 +119,9 @@ def index():
     """
     # Initialize session data if needed
     if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
+        session['session_id'] = session_id
+        session['base_session_id'] = session_id
         session['conversation_history'] = []
         session['data_loaded'] = False
         session['analysis_complete'] = False
@@ -193,14 +195,43 @@ def index():
     logger.info(f"Serving React app for session {session['session_id']}")
     
     # Send the React index.html from the static/react directory
-    return send_from_directory(os.path.join(current_app.static_folder, 'react'), 'index.html')
+    response = send_from_directory(
+        os.path.join(current_app.static_folder, 'react'),
+        'index.html',
+        max_age=0
+    )
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 # Serve React app assets (JS, CSS, etc.)
 @core_bp.route('/assets/<path:filename>')
 def serve_react_assets(filename):
     """Serve React build assets."""
-    return send_from_directory(os.path.join(current_app.static_folder, 'react', 'assets'), filename)
+    response = send_from_directory(
+        os.path.join(current_app.static_folder, 'react', 'assets'),
+        filename,
+        max_age=31536000
+    )
+    response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return response
+
+
+# Build metadata manifest (cache-busting support)
+@core_bp.route('/build-meta.json')
+def serve_build_meta():
+    """Expose build metadata for version checking."""
+    response = send_from_directory(
+        os.path.join(current_app.static_folder, 'react'),
+        'build-meta.json',
+        max_age=0
+    )
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 # Stable version routes (backup of current working state)
@@ -209,7 +240,15 @@ def serve_react_assets(filename):
 def stable_index():
     """Serve the stable version of the React app."""
     logger.info(f"Serving stable React app for session {session.get('session_id', 'unknown')}")
-    return send_from_directory(os.path.join(current_app.static_folder, 'react-stable'), 'index.html')
+    response = send_from_directory(
+        os.path.join(current_app.static_folder, 'react-stable'),
+        'index.html',
+        max_age=0
+    )
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @core_bp.route('/stable/assets/<path:filename>')
@@ -302,6 +341,7 @@ def clear_session():
         # Clear session data and set new session_id
         session.clear()  # Clear everything first
         session['session_id'] = new_session_id  # Set new session ID
+        session['base_session_id'] = new_session_id
         session['conversation_history'] = []
         session['data_loaded'] = False
         session['analysis_complete'] = False

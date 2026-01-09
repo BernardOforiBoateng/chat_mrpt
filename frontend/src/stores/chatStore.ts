@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
-import type { 
+import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import storage from '@/utils/storage';
+import type {
   Message, 
   RegularMessage,
   ArenaMessage, 
@@ -167,11 +168,35 @@ export const useChatStore = create<ChatState>()(
         // Session actions
         updateSession: (updates) =>
           set((state) => {
-            // Persist backend session id for Axios interceptors
             if (updates.sessionId) {
-              try { localStorage.setItem('session_id', updates.sessionId); } catch {}
+              storage.setSessionId(updates.sessionId);
             }
-            return { session: { ...state.session, ...updates } };
+
+            const currentId = state.session.sessionId;
+            const incomingId = updates.sessionId;
+            const sessionIdSwapped = Boolean(incomingId && currentId && incomingId !== currentId);
+            const wasAnonymous = Boolean(incomingId && !currentId && state.messages.length);
+            const sessionChanged = sessionIdSwapped || wasAnonymous;
+
+            const nextState: Partial<ChatState> = {
+              session: {
+                ...state.session,
+                ...updates,
+              },
+            };
+
+            if (sessionChanged) {
+              nextState.messages = [];
+              nextState.currentArena = null;
+
+              try {
+                sessionStorage.removeItem('chat-storage');
+              } catch (error) {
+                console.warn('Failed to clear chat storage', error);
+              }
+            }
+
+            return nextState;
           }),
         
         incrementMessageCount: () =>
@@ -194,20 +219,25 @@ export const useChatStore = create<ChatState>()(
             },
           })),
         
-        resetSession: () =>
-          set({
+        resetSession: () => {
+          storage.clearConversationId();
+          const newConversationId = storage.ensureConversationId();
+          return set({
             session: {
               sessionId: `session_${Date.now()}`,
               startTime: new Date(),
               messageCount: 0,
               hasUploadedFiles: false,
+              conversationId: newConversationId,
             },
             messages: [],
             currentArena: null,
-          }),
+          });
+        },
       }),
       {
         name: 'chat-storage',
+        storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
           // DON'T persist sessionId to prevent reuse across concurrent uploads
           // sessionId: state.session.sessionId,  // REMOVED to fix data bleed issue

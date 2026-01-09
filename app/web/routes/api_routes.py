@@ -8,7 +8,7 @@ import uuid
 import json
 import traceback
 from datetime import datetime
-from flask import Blueprint, jsonify, request, session, current_app, send_file
+from flask import Blueprint, jsonify, request, session, current_app, send_file, g
 from werkzeug.utils import secure_filename
 import pandas as pd
 from app.auth.decorators import require_auth
@@ -44,9 +44,18 @@ def start_session():
         if 'session_id' not in session:
             session_id = str(uuid.uuid4())
             session['session_id'] = session_id
+            session['base_session_id'] = session_id
             session['created_at'] = datetime.utcnow().isoformat()
         else:
             session_id = session['session_id']
+            if 'base_session_id' not in session:
+                session['base_session_id'] = session_id.split('__', 1)[0] if '__' in session_id else session_id
+
+        if getattr(g, 'conversation_id', None):
+            base_session_id = session.get('base_session_id', session_id)
+            composite = f"{base_session_id}__{g.conversation_id}"
+            session['session_id'] = composite
+            session_id = composite
 
         # Initialize session data
         session['conversation_history'] = []

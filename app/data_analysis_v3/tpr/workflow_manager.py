@@ -15,6 +15,12 @@ from enum import Enum
 from ..core.state_manager import DataAnalysisStateManager, ConversationStage
 from .data_analyzer import TPRDataAnalyzer
 from ..core.tpr_language_interface import TPRLanguageInterface
+try:
+    from app.features.tpr.workflow.navigation import handle_navigation_command
+except ImportError:  # pragma: no cover - legacy environments without features package
+    def handle_navigation_command(*_args, **_kwargs):
+        """Fallback navigation handler when feature package is unavailable."""
+        return None
 import plotly.express as px
 import pandas as pd
 
@@ -43,6 +49,29 @@ class TPRWorkflowHandler:
         self.session_folder = f"instance/uploads/{session_id}"
         self.language = TPRLanguageInterface(session_id)
         self.state_analysis = {}
+
+    @staticmethod
+    def _describe_selections(facility_level: str, age_group: str) -> str:
+        facility_map = {
+            'primary': 'primary facilities',
+            'secondary': 'secondary facilities',
+            'tertiary': 'tertiary facilities',
+            'all': 'all facility levels',
+        }
+        age_map = {
+            'u5': 'children under 5 years',
+            'o5': 'people 5 years and older (excluding pregnant women)',
+            'pw': 'pregnant women',
+            'all_ages': 'all age groups',
+        }
+
+        facility_text = facility_map.get(facility_level, 'all facility levels')
+        age_text = age_map.get(age_group, 'all age groups')
+
+        return (
+            f"Using {facility_text} and focusing on {age_text}, I based the calculations on "
+            "the strongest signal between RDT and microscopy results."
+        )
     
     def set_data(self, data):
         """Set the uploaded data for analysis."""
@@ -379,98 +408,15 @@ class TPRWorkflowHandler:
         """
         logger.info(f"Handling navigation command: {nav_type}")
 
-        if nav_type == 'back':
-            # Go back one stage
-            if self.current_stage == ConversationStage.TPR_FACILITY_LEVEL:
-                # Go back to state selection
-                self.current_stage = ConversationStage.TPR_STATE_SELECTION
-                self.state_manager.update_workflow_stage(self.current_stage)
-                # Clear facility selection
-                if 'facility_level' in self.tpr_selections:
-                    del self.tpr_selections['facility_level']
+        response = handle_navigation_command(self, nav_type)
+        if response is not None:
+            return response
 
-                # Re-show state selection
-                state_analysis = self.tpr_analyzer.analyze_states(self.uploaded_data)
-                try:
-                    self.state_analysis = state_analysis
-                    self.language.update_available_states(list((state_analysis.get('states') or {}).keys()))
-                except Exception:
-                    pass
-                from ..core.formatters import MessageFormatter
-                formatter = MessageFormatter(self.session_id)
-                message = formatter.format_state_selection(state_analysis)
-
-                return {
-                    "success": True,
-                    "message": "Let's go back to state selection.\n\n" + message,
-                    "session_id": self.session_id,
-                    "workflow": "tpr",
-                    "stage": "state_selection"
-                }
-
-            elif self.current_stage == ConversationStage.TPR_AGE_GROUP:
-                # Go back to facility selection
-                self.current_stage = ConversationStage.TPR_FACILITY_LEVEL
-                self.state_manager.update_workflow_stage(self.current_stage)
-                # Clear age selection
-                if 'age_group' in self.tpr_selections:
-                    del self.tpr_selections['age_group']
-
-                # Re-show facility selection
-                selected_state = self.tpr_selections.get('state', '')
-                facility_analysis = self.tpr_analyzer.analyze_facility_levels(self.uploaded_data, selected_state)
-                from ..core.formatters import MessageFormatter
-                formatter = MessageFormatter(self.session_id)
-                message = formatter.format_facility_selection(selected_state, facility_analysis)
-
-                return {
-                    "success": True,
-                    "message": "Let's go back to facility selection.\n\n" + message,
-                    "session_id": self.session_id,
-                    "workflow": "tpr",
-                    "stage": "facility_selection"
-                }
-
-            else:
-                return {
-                    "success": True,
-                    "message": "You're at the beginning of the TPR workflow. Please make your selection or say 'exit' to leave.",
-                    "session_id": self.session_id
-                }
-
-        elif nav_type == 'status':
-            # Show current selections
-            status = "**Your TPR workflow status:**\n\n"
-            if self.tpr_selections:
-                for key, value in self.tpr_selections.items():
-                    status += f"- **{key.replace('_', ' ').title()}**: {value}\n"
-            else:
-                status += "No selections made yet.\n"
-
-            status += f"\n**Current stage**: {str(self.current_stage).replace('ConversationStage.', '').replace('_', ' ').title()}"
-
-            return {
-                "success": True,
-                "message": status + "\n\nPlease continue with your selection.",
-                "session_id": self.session_id
-            }
-
-        elif nav_type == 'exit':
-            # Exit TPR workflow
-            self.state_manager.mark_tpr_workflow_complete()
-            return {
-                "success": True,
-                "message": "Exiting TPR workflow. Your selections have been saved. You can restart anytime by saying 'run TPR analysis'.",
-                "session_id": self.session_id,
-                "workflow": "exit"
-            }
-
-        else:
-            return {
-                "success": True,
-                "message": f"Navigation command '{nav_type}' recognized. Please continue with your selection.",
-                "session_id": self.session_id
-            }
+        return {
+            "success": True,
+            "message": f"Navigation command '{nav_type}' recognized. Please continue with your selection.",
+            "session_id": self.session_id,
+        }
 
     def handle_visualization_request(self, request_type: str) -> Dict[str, Any]:
         """
@@ -814,6 +760,12 @@ class TPRWorkflowHandler:
             formatter = MessageFormatter(self.session_id)
             message = formatter.format_tool_tpr_results(result)
 
+            if message and message.startswith("## TPR Analysis Complete"):
+                summary_line = self._describe_selections(facility_level, age_group)
+                marker = "## TPR Analysis Complete\n\n"
+                if message.startswith(marker):
+                    message = message.replace(marker, f"{marker}{summary_line}\n\n", 1)
+
             # Mark workflow complete
             self.state_manager.mark_tpr_workflow_complete()
             self.state_manager.update_workflow_stage(ConversationStage.INITIAL)
@@ -1142,4 +1094,3 @@ Which level would you like to analyze? (**primary**, **secondary**, **tertiary**
 - **All**: Complete picture across all age groups to understand the full disease burden.
 
 Which age group would you like to analyze? (**u5**, **o5**, **pw**, or **all**)**"""
-

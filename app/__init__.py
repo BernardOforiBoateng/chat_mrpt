@@ -2,8 +2,9 @@
 # app/__init__.py
 import os
 import logging
+import re
 from logging.handlers import RotatingFileHandler
-from flask import Flask, session as flask_session, request
+from flask import Flask, session as flask_session, request, g
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_session import Session
 from flask_login import LoginManager
@@ -11,10 +12,6 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
-
-# Import blueprints and other necessary components
-from .core.llm_manager import LLMManager
-from .services.container import init_services
 
 # --- Configuration ---
 INSTANCE_FOLDER_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'instance')
@@ -97,13 +94,8 @@ def create_app(config_name=None):
     config_class.init_app(app)
 
     # --- Initialize Extensions ---
-    # Try to initialize Redis sessions, fall back to filesystem if Redis is not available
     from .config.redis_config import RedisConfig
-    redis_initialized = RedisConfig.init_redis_session(app)
-    
-    if not redis_initialized:
-        # Fall back to filesystem sessions
-        Session(app)
+    RedisConfig.init_redis_session(app)
     
     # Initialize Flask-Login
     login_manager = LoginManager()
@@ -168,13 +160,14 @@ def create_app(config_name=None):
     # Register all functional route blueprints (core, upload, analysis, visualization, etc.)
     register_all_blueprints(app)
     
-    # --- Initialize Arena System ---
-    from .web.routes.arena_routes import init_arena_system
-    try:
-        init_arena_system(app)
-        app.logger.info("✅ Arena system initialized successfully")
-    except Exception as e:
-        app.logger.warning(f"Arena system initialization failed: {e}")
+    # --- Arena System DISABLED (GPU instance stopped to save costs) ---
+    # from .web.routes.arena_routes import init_arena_system
+    # try:
+    #     init_arena_system(app)
+    #     app.logger.info("✅ Arena system initialized successfully")
+    # except Exception as e:
+    #     app.logger.warning(f"Arena system initialization failed: {e}")
+    app.logger.info("⚠️  Arena system DISABLED - GPU instance stopped to save costs (~$200-400/month)")
     
     # --- Initialize Additional Routes ---
     from .routes import init_routes
@@ -183,9 +176,28 @@ def create_app(config_name=None):
     # --- Session Persistence Fix ---
     @app.before_request
     def make_session_permanent():
-        """Ensure session is marked as permanent on every request."""
+        """Keep anonymous sessions ephemeral; persist only authenticated users."""
         from flask import session
-        session.permanent = True
+
+        has_auth = bool(session.get('auth_token'))
+        session.permanent = has_auth
+
+        # Mark anonymous sessions as modified so Flask writes updated expiry flags
+        if not has_auth:
+            session.modified = True
+
+    @app.before_request
+    def apply_conversation_scope():
+        """Expose a sanitized conversation identifier for request-scoped use."""
+        conversation_id = request.headers.get('X-Conversation-ID') or request.args.get('conversation_id')
+        if not conversation_id:
+            return
+
+        safe_conversation = re.sub(r"[^a-zA-Z0-9_-]", "", conversation_id)[:64]
+        if not safe_conversation:
+            return
+
+        g.conversation_id = safe_conversation
     
     # Log startup information
     app.logger.info("ChatMRPT v3.0 - Modern Architecture Initialized")

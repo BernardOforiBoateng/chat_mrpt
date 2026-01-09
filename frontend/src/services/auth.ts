@@ -1,5 +1,6 @@
 import { useUserStore, type User } from '@/stores/userStore';
 import toast from 'react-hot-toast';
+import storage from '@/utils/storage';
 
 const API_BASE = '';
 
@@ -18,7 +19,7 @@ interface StatusResponse {
 
 class AuthService {
   private getHeaders(): HeadersInit {
-    const token = localStorage.getItem('auth_token');
+    const token = storage.getAuthToken();
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
@@ -40,7 +41,7 @@ class AuthService {
       console.log('🔐 AUTH: Sending login request to /auth/login');
       const response = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Conversation-ID': storage.ensureConversationId() },
         body: JSON.stringify({ email, password }),
         credentials: 'include',
       });
@@ -51,7 +52,7 @@ class AuthService {
 
       if (data.success && data.user && data.token) {
         console.log('🔐 AUTH: Login successful! Setting token and user');
-        localStorage.setItem('auth_token', data.token);
+        storage.setAuthToken(data.token);
         setUser(data.user);
         console.log('🔐 AUTH: User set in store:', data.user);
         console.log('🔐 AUTH: Store state after login:', useUserStore.getState());
@@ -87,7 +88,7 @@ class AuthService {
       console.log('🔐 AUTH: Sending signup request to /auth/signup');
       const response = await fetch(`${API_BASE}/auth/signup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Conversation-ID': storage.ensureConversationId() },
         body: JSON.stringify({ email, username, password }),
         credentials: 'include',
       });
@@ -98,7 +99,7 @@ class AuthService {
 
       if (data.success && data.user && data.token) {
         console.log('🔐 AUTH: Signup successful! Setting token and user');
-        localStorage.setItem('auth_token', data.token);
+        storage.setAuthToken(data.token);
         setUser(data.user);
         console.log('🔐 AUTH: User set in store:', data.user);
         console.log('🔐 AUTH: Store state after signup:', useUserStore.getState());
@@ -130,15 +131,17 @@ class AuthService {
 
       await fetch(`${API_BASE}/auth/logout`, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: { ...this.getHeaders(), 'X-Conversation-ID': storage.ensureConversationId() },
         credentials: 'include',
       });
 
       clearUserState();
+      storage.clearAuthToken();
       toast.success('Signed out successfully');
     } catch (error) {
       // Even if the API call fails, clear local state
       clearUserState();
+      storage.clearAuthToken();
       toast.success('Signed out');
     } finally {
       setLoading(false);
@@ -149,8 +152,8 @@ class AuthService {
     const { setUser, setLoading } = useUserStore.getState();
 
     console.log('🔐 AUTH: checkAuth() called');
-    const token = localStorage.getItem('auth_token');
-    console.log('🔐 AUTH: Token in localStorage:', token ? 'EXISTS' : 'NONE');
+    const token = storage.getAuthToken();
+    console.log('🔐 AUTH: Token in sessionStorage:', token ? 'EXISTS' : 'NONE');
 
     try {
       setLoading(true);
@@ -158,7 +161,7 @@ class AuthService {
       console.log('🔐 AUTH: Checking auth status at /auth/status');
       const response = await fetch(`${API_BASE}/auth/status`, {
         method: 'GET',
-        headers: this.getHeaders(),
+        headers: { ...this.getHeaders(), 'X-Conversation-ID': storage.ensureConversationId() },
         credentials: 'include',
       });
 
@@ -174,13 +177,13 @@ class AuthService {
       } else {
         console.log('🔐 AUTH: Not authenticated, clearing user');
         setUser(null);
-        localStorage.removeItem('auth_token');
+        storage.clearAuthToken();
         return false;
       }
     } catch (error) {
       console.error('🔐 AUTH: checkAuth error:', error);
       setUser(null);
-      localStorage.removeItem('auth_token');
+      storage.clearAuthToken();
       return false;
     } finally {
       setLoading(false);

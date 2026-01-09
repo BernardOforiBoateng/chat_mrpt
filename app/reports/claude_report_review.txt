@@ -1,0 +1,26 @@
+Claude Report Review
+====================
+
+1. Session Reset on Upload
+--------------------------
+Claude correctly notes the behavior is intentional, but his proposed fix (stop rotating session IDs) would reopen the prior data-bleed issue unless per-user isolation is tightened. Suggested improvement: preserve conversation history by decoupling the chat session ID from the upload session, or migrate chat/memory from the old ID when a new upload-specific ID is created, so we keep privacy guarantees without nuking user context.
+
+2. Geographic Level Toggling
+----------------------------
+Accurate diagnosis that the feature is missing entirely, with good backend-side suggestions (add aggregation). To fully solve it we should also plan frontend work—`VisualizationFrame` needs controls to switch levels and the visualization payload should expose multi-level data or Plotly updatemenus.
+
+3. Data Reliability / Dual-Brain Wiring
+---------------------------------------
+Claude points to “dual-brain confusion” but stops at a conceptual level. We need concrete remediation steps: consolidate data loading through `UnifiedDataState`, treat `.analysis_complete` markers as the source of truth for session flags, remove redundant reruns in `FlexibleDataAccess`, and ensure both LangGraph and the Request Interpreter consume the same unified dataset instead of reloading raw CSVs independently.
+
+4. Two-Brain Architecture
+-------------------------
+Agreed that maintaining LangGraph plus the Request Interpreter adds unnecessary complexity. The next step is to decide on a unified orchestrator (either embedding LangGraph into the main chat path or retiring it) and outline the migration so we don’t keep duplicating state machines, data loaders, and visualization formatting.
+
+5. Workflow Rigidity
+--------------------
+The report highlights rigid flows but doesn’t prescribe how to let users iterate. Recommend adding explicit rerun/edit APIs (e.g., endpoints to rerun analysis with new variables, track parameter sets) and UI affordances so users can tweak decisions without re-uploading data.
+
+Summary
+-------
+Claude’s findings align with mine at a high level, but we should extend his recommendations with privacy-safe conversation persistence, combined backend/frontend work for level toggling, a single shared data-service layer, and a concrete plan for unifying the two agent paths and enabling iterative analysis.

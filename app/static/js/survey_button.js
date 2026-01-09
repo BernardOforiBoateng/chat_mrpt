@@ -95,7 +95,12 @@
                     navBar = exportButton.parentElement;
                 }
 
-                // If still no nav bar found and we've tried enough times, create our own
+                const actionGroup = document.getElementById('toolbar-action-group');
+                if (actionGroup) {
+                    navBar = actionGroup;
+                }
+
+                // If still no nav bar found and we've tried enough times, create a basic container as fallback
                 if (!navBar && attempts >= maxAttempts) {
                     navBar = document.createElement('div');
                     navBar.style.cssText = `
@@ -110,14 +115,14 @@
                         align-items: center;
                         justify-content: flex-end;
                         padding: 0 20px;
+                        gap: 12px;
                         z-index: 9998;
                         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
                     `;
+                    navBar.id = 'toolbar-action-group';
                     document.body.appendChild(navBar);
-                    // Add padding to body to account for fixed header
                     document.body.style.paddingTop = '60px';
                 } else if (!navBar) {
-                    // Try again in 500ms if we haven't reached max attempts
                     setTimeout(tryCreateButton, 500);
                     return;
                 }
@@ -135,102 +140,26 @@
         }
 
         insertSurveyButton(navBar) {
-            // Create button container for top nav
-            const buttonContainer = document.createElement('div');
-            buttonContainer.id = 'survey-button-container';
-            buttonContainer.style.cssText = `
-                display: inline-flex;
-                align-items: center;
-                margin-left: 20px;
-                margin-right: 10px;
-            `;
+            // Ensure the nav bar behaves as a flex row
+            if (navBar && navBar.classList) {
+                navBar.classList.add('flex');
+                navBar.classList.add('items-center');
+                navBar.classList.add('gap-3');
+            }
 
-            // Create button with a design that fits in the nav bar
             const button = document.createElement('button');
             button.id = 'survey-button';
-            button.className = 'survey-btn';
-            button.style.cssText = `
-                background: transparent;
-                color: #374151;
-                border: 2px solid #e5e7eb;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-size: 14px;
-                font-weight: 500;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                transition: all 0.2s ease;
-                position: relative;
-            `;
+            button.type = 'button';
+            button.className = 'toolbar-button toolbar-button--survey';
 
             button.innerHTML = `
-                <span style="font-size: 16px;">📋</span>
-                <span>Survey</span>
-                <span id="survey-badge" style="
-                    display: none;
-                    position: absolute;
-                    top: -8px;
-                    right: -8px;
-                    background: #ef4444;
-                    color: white;
-                    border-radius: 50%;
-                    width: 20px;
-                    height: 20px;
-                    font-size: 11px;
-                    text-align: center;
-                    line-height: 20px;
-                    font-weight: bold;
-                ">0</span>
+                <span class="toolbar-button-icon">📋</span>
+                <span class="toolbar-button-label">Survey</span>
+                <span id="survey-badge" class="toolbar-badge">0</span>
             `;
-
-            button.onmouseover = () => {
-                button.style.background = '#2563eb';
-                button.style.color = 'white';
-                button.style.borderColor = '#2563eb';
-            };
-
-            button.onmouseout = () => {
-                button.style.background = 'transparent';
-                button.style.color = '#374151';
-                button.style.borderColor = '#e5e7eb';
-            };
 
             button.onclick = () => this.openSurvey();
-
-            // Add a subtle separator before the survey button
-            const separator = document.createElement('span');
-            separator.style.cssText = `
-                display: inline-block;
-                width: 1px;
-                height: 24px;
-                background: #e5e7eb;
-                margin-right: 15px;
-                vertical-align: middle;
-            `;
-            buttonContainer.appendChild(separator);
-            buttonContainer.appendChild(button);
-
-            // Add to nav bar - insert at the END after all existing buttons
-            // Find all buttons in the nav bar
-            const allButtons = Array.from(navBar.querySelectorAll('button'));
-
-            if (allButtons.length > 0) {
-                // Get the last button (should be Export)
-                const lastButton = allButtons[allButtons.length - 1];
-
-                // Insert after the last button
-                if (lastButton.nextSibling) {
-                    lastButton.parentElement.insertBefore(buttonContainer, lastButton.nextSibling);
-                } else {
-                    // If last button is the final element, append to its parent
-                    lastButton.parentElement.appendChild(buttonContainer);
-                }
-            } else {
-                // No buttons found, just append to nav bar
-                navBar.appendChild(buttonContainer);
-            }
+            navBar.appendChild(button);
 
             // Add pulsing animation when surveys are pending
             const style = document.createElement('style');
@@ -323,18 +252,19 @@
             const badge = document.getElementById('survey-badge');
             const button = document.getElementById('survey-button');
 
-            // Guard against nulls if the button hasn't been inserted yet
             if (!badge || !button) {
                 return;
             }
 
             if (count > 0) {
-                badge.style.display = 'inline-block';
                 badge.textContent = count;
-                button.classList.add('has-pending');
+                badge.classList.add('toolbar-badge--visible');
+                badge.classList.remove('hidden');
+                button.classList.add('toolbar-button--accent-active');
             } else {
-                badge.style.display = 'none';
-                button.classList.remove('has-pending');
+                badge.classList.remove('toolbar-badge--visible');
+                badge.classList.add('hidden');
+                button.classList.remove('toolbar-button--accent-active');
             }
 
             this.pendingSurveys = count;

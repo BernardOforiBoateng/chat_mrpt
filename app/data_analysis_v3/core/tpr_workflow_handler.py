@@ -7,6 +7,7 @@ facility selection, age group selection, and calculation triggering.
 
 import os
 import logging
+import shutil
 import uuid
 from typing import Dict, Any, Optional, List
 from pathlib import Path
@@ -1613,8 +1614,8 @@ Analyzing test data and generating visualizations..."""
         Transition from TPR workflow to standard data upload workflow.
         This mimics the behavior of uploading data through the standard Upload tab.
         """
-        logger.info("Transitioning from TPR to standard upload workflow")
-        
+        logger.warning("[TPR SYNC] trigger_risk_analysis start session=%s", self.session_id)
+
         # Check if files are ready
         import os
         import pandas as pd
@@ -1628,8 +1629,10 @@ Analyzing test data and generating visualizations..."""
                 "message": "Error: TPR data file not found. Please re-run TPR calculation.",
                 "session_id": self.session_id
             }
-        
+
         try:
+            self._ensure_active_session_has_outputs()
+
             # Load the data that TPR created
             df = EncodingHandler.read_csv_with_encoding(raw_data_path)
             logger.info(f"Loaded TPR output data: {len(df)} rows, {len(df.columns)} columns")
@@ -1729,7 +1732,96 @@ Analyzing test data and generating visualizations..."""
                 "message": f"Error transitioning to data analysis: {str(e)}",
                 "session_id": self.session_id
             }
-    
+
+    def _ensure_active_session_has_outputs(self) -> None:
+        """Copy freshly generated TPR assets into the scoped session folder."""
+        try:
+            from flask import current_app, session
+
+            scoped_session_id = session.get('session_id')
+            logger.warning(
+                "[TPR SYNC] base_session=%s scoped_session=%s conversation_id=%s",
+                self.session_id,
+                scoped_session_id,
+                getattr(session, 'conversation_id', None),
+            )
+            if not scoped_session_id or scoped_session_id == self.session_id:
+                return
+
+            upload_root = current_app.config.get('UPLOAD_FOLDER', 'instance/uploads')
+            source_folder = os.path.join(upload_root, self.session_id)
+            dest_folder = os.path.join(upload_root, scoped_session_id)
+            logger.warning(
+                "[TPR SYNC] source_folder=%s dest_folder=%s exists_source=%s",
+                source_folder,
+                dest_folder,
+                os.path.isdir(source_folder),
+            )
+
+            if not os.path.isdir(source_folder):
+                logger.warning(
+                    "Source folder %s missing while syncing TPR outputs for session %s",
+                    source_folder,
+                    self.session_id,
+                )
+                return
+
+            os.makedirs(dest_folder, exist_ok=True)
+
+            critical_files = [
+                'raw_data.csv',
+                'raw_shapefile.zip',
+                'tpr_results.csv',
+                'tpr_distribution_map.html',
+                '.agent_state.json',
+                '.risk_ready',
+                '.analysis_complete',
+                '.tpr_waiting_confirmation',
+                'tpr_debug.json',
+            ]
+
+            for filename in critical_files:
+                source_path = os.path.join(source_folder, filename)
+                if os.path.exists(source_path):
+                    dest_path = os.path.join(dest_folder, filename)
+                    try:
+                        shutil.copy2(source_path, dest_path)
+                        logger.warning(
+                            "[TPR SYNC] copied=%s destination=%s scoped=%s",
+                            filename,
+                            dest_path,
+                            scoped_session_id,
+                        )
+                    except Exception as copy_error:
+                        logger.error(
+                            "Failed to copy %s to scoped session %s: %s",
+                            filename,
+                            scoped_session_id,
+                            copy_error,
+                        )
+
+            source_viz = os.path.join(source_folder, 'visualizations')
+            if os.path.isdir(source_viz):
+                dest_viz = os.path.join(dest_folder, 'visualizations')
+                try:
+                    shutil.copytree(source_viz, dest_viz, dirs_exist_ok=True)
+                    logger.warning(
+                        "[TPR SYNC] copied visualizations to scoped=%s",
+                        scoped_session_id,
+                    )
+                except Exception as viz_error:
+                    logger.error(
+                        "Failed to sync visualizations to scoped session %s: %s",
+                        scoped_session_id,
+                        viz_error,
+                    )
+
+        except Exception as sync_error:
+            logger.error(
+                "Unexpected error while syncing TPR outputs for scoped session: %s",
+                sync_error,
+            )
+
     def _determine_user_expertise(self) -> str:
         """
         Determine user expertise level for progressive disclosure.

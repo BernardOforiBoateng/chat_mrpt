@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import VisualizationFrame, { type VisualizationFrameHandle } from './VisualizationFrame';
+import VisualizationFrame from './VisualizationFrame';
 import VisualizationControls from './VisualizationControls';
 import useVisualization from '@/hooks/useVisualization';
 import { useChatStore } from '@/stores/chatStore';
 import toast from 'react-hot-toast';
-import { api } from '@/services/api';
 
 interface VisualizationContainerProps {
   content: string;
@@ -23,9 +22,7 @@ const VisualizationContainer: React.FC<VisualizationContainerProps> = ({
   const [explanation, setExplanation] = useState('');
   const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const frameRef = useRef<VisualizationFrameHandle>(null);
   const session = useChatStore((state) => state.session);
-  const explanationCacheRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     // Reset to first visualization when content changes
@@ -49,22 +46,16 @@ const VisualizationContainer: React.FC<VisualizationContainerProps> = ({
   const handleExplain = async () => {
     if (!currentViz) return;
 
-    const cacheKey = currentViz.url || currentViz.title || `viz_${currentIndex}`;
-
+    // Toggle explanation display if we already have one
     if (showExplanation && explanation) {
-      setShowExplanation(false);
-      return;
-    }
-
-    const cached = explanationCacheRef.current[cacheKey];
-    if (cached) {
-      setExplanation(cached);
-      setShowExplanation(true);
+      setShowExplanation(!showExplanation);
       return;
     }
 
     setShowExplanation(true);
     setIsLoadingExplanation(true);
+
+    // NO FALLBACK - Clear any previous explanation
     setExplanation('');
 
     // Extract visualization path from URL
@@ -101,43 +92,40 @@ const VisualizationContainer: React.FC<VisualizationContainerProps> = ({
     }
 
     try {
-      let imageBase64: string | undefined;
-
-      try {
-        const dataUrl = await frameRef.current?.captureImage();
-        if (dataUrl?.startsWith('data:image')) {
-          imageBase64 = dataUrl.split(',')[1];
-        }
-      } catch (captureError) {
-        console.warn('Visualization capture failed', captureError);
-      }
-
-      const payload = {
-        session_id: session.sessionId,
+      console.log('🔵 Calling /explain_visualization with:', {
         viz_url: currentViz.url,
-        viz_path: vizPath,
         viz_type: vizType,
-        title: currentViz.title,
-        image_base64: imageBase64,
-        cache_key: cacheKey,
-        metadata: {
-          ...(currentViz.metadata || {}),
-          type: currentViz.type,
-          title: currentViz.title,
-        },
-      };
+        viz_path: vizPath,
+        session_id: session.sessionId,
+      });
 
-      const response = await api.visualization.explainVisualization(payload);
-      const data = response.data;
+      const response = await fetch('/explain_visualization', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          viz_url: currentViz.url,
+          viz_type: vizType,
+          viz_path: vizPath,
+          visualization_path: vizPath, // Include both for compatibility
+          session_id: session.sessionId,
+        }),
+      });
+
+      const data = await response.json();
+      console.log('🔵 Response from /explain_visualization:', data);
 
       if (data.status === 'success' && data.explanation) {
+        // Show the actual AI explanation
         setExplanation(data.explanation);
-        explanationCacheRef.current[data.cache_key || cacheKey] = data.explanation;
       } else {
+        // NO FALLBACK - Show the actual error
         throw new Error(data.message || 'Failed to get explanation');
       }
     } catch (error) {
       console.error('❌ Error explaining visualization:', error);
+      // NO FALLBACK - Show the actual error message
       const errorMessage = error instanceof Error ? error.message : String(error);
       setExplanation(`ERROR: ${errorMessage}`);
       toast.error(`Failed: ${errorMessage}`);
@@ -162,7 +150,6 @@ const VisualizationContainer: React.FC<VisualizationContainerProps> = ({
 
           <div className="p-4 bg-white">
             <VisualizationFrame
-              ref={frameRef}
               url={currentViz.url}
               title={currentViz.title}
             />

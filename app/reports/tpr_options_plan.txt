@@ -1,0 +1,37 @@
+TPR Handling Strategy
+=====================
+
+Goal
+----
+Support both workflows requested by stakeholders:
+1. Full TPR recalculation from raw NMEP Excel files (current conversational module).
+2. Direct ingestion of pre-calculated TPR values exported from DHIS2 (skip recalculation).
+
+Plan
+----
+1. Upload Detection
+   - Extend `UploadTypeDetector` to classify uploads into `tpr_excel` (raw), `tpr_shapefile`, and a new `tpr_precalculated` type when CSV/Excel files contain canonical DHIS2 TPR columns.
+   - Keep existing routing for `tpr_excel` (recalculation path) and default to the standard upload handler for `tpr_precalculated`.
+
+2. Workflow Selection Prompt
+   - After detection, inform the user:
+     * Option A: “Recalculate TPR from raw NMEP data (recommended for QA and environmental enrichment).”
+     * Option B: “Use existing TPR values from DHIS2; ChatMRPT will validate ward codes and continue with analysis.”
+   - Persist the choice in session so downstream steps know which branch was used.
+
+3. Pre-Calculated Path Requirements
+   - Validate that the uploaded data includes TPR columns plus geographic identifiers (WardCode/WardName or at least LGACode). If only LGA-level data exists, offer aggregation helpers or block with a clear message.
+   - Run the same ward-name mismatch checker/fixer used in the recalculation workflow so downstream analyses still operate at ward granularity.
+   - Skip the TPR conversation: proceed directly to summarizing the dataset and asking for analysis permission.
+
+4. Recalculation Path (unchanged)
+   - Keep the existing TPR module for raw NMEP uploads. Users walk through state/facility/age selections and receive the enriched CSV + shapefile bundle.
+   - When the conversation completes, pass the generated files into the standard upload pipeline (as today).
+
+5. Analysis Integration
+   - Both paths ultimately deliver the same standard structure (ward-level rows, TPR columns, environmental variables). Downstream tools don’t need to care which option created the data; they can log it in metadata for transparency.
+
+6. Documentation & Messaging
+   - Update user guides and upload instructions explaining when to choose each option and the benefits of recalculation versus importing existing TPR.
+   - Highlight validation steps (ward-name fixes, schema checks) so users know what happens if DHIS2 exports don’t match expected formats.
+

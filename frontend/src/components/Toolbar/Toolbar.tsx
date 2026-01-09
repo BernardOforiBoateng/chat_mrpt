@@ -85,7 +85,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ onOpenSettings }) => {
   
   return (
     <>
-      <div className="sticky top-0 z-50 flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200" data-tour-id="toolbar">
+      <div className="sticky top-0 z-50 flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
         <div className="flex items-center space-x-2">
           <h1 className="text-lg font-semibold text-gray-900">ChatMRPT</h1>
           <span className="px-2 py-1 text-xs font-medium text-blue-700 bg-blue-100 rounded-full">
@@ -99,7 +99,6 @@ const Toolbar: React.FC<ToolbarProps> = ({ onOpenSettings }) => {
             onClick={handleClearChat}
             disabled={!hasMessages}
             className="flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            data-tour-id="clear-chat"
             title="Clear chat history"
           >
             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -109,9 +108,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ onOpenSettings }) => {
           </button>
           
           {/* Export Dropdown */}
-          <div data-tour-id="export">
-            <ExportDropdown />
-          </div>
+          <ExportDropdown />
           
           {/* Settings Button */}
           <button

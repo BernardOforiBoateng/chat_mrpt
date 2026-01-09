@@ -1,0 +1,66 @@
+ChatMRPT Pre‑Test Findings and Recommendations
+============================================
+
+1. Session Reset on Data Upload
+------------------------------
+Root Cause:
+- `UploadModal` posts to `/upload_both_files` (standard workflow) or `/api/data-analysis/upload` (Data Analysis tab). Both endpoints always generate a brand-new UUID (`session['session_id'] = str(uuid.uuid4())`) before saving the uploaded files. The frontend Zustand store watches `sessionId`: whenever it changes it clears the entire chat history and session metadata to avoid data bleed, so any exploration the user did before uploading is discarded from the UI even though the underlying disk folder still contains the previous analysis artifacts.
+- Post-upload helpers only clear cached DataHandler instances (`SessionDataService.session_handlers.pop(session_id, None)`) but make no attempt to migrate prior conversation state. Because the conversation history is tied to the old session id—both in memory and in Redis—the new id starts empty even if the user just wanted to append their data mid-chat.
+
+Recommendations:
+- Introduce a stable conversation/session identifier that survives uploads. Either stop rotating `session_id` when uploads occur (address data bleed by scoping uploads per authenticated user or by storing files under unique folder names) or migrate conversation logs from `base_session_id` into the new UUID after upload so the UI can keep rendering prior exchanges.
+- Update the frontend to distinguish between a true “new chat” and an upload-triggered id swap. Instead of blindly clearing the store whenever the backend id changes, check whether `base_session_id` stayed constant and, if so, keep prior messages.
+- Preserve analysis artifacts and memory summaries across uploads by syncing them to the stable id so both agents can reference the same history.
+
+2. Visualization Level Toggling
+-------------------------------
+Root Cause:
+- Every visualization tool (variable distributions, vulnerability maps, PCA maps, composite score grids, ITN maps, etc.) ultimately calls `save_agent_visualization`, which writes a single Plotly figure to an HTML file and returns a `/serve_viz_file/...` URL. The data merged into those figures is strictly ward-level: there is no aggregation pipeline that produces LGA or state views, nor any metadata describing multiple resolutions.
+- The frontend `VisualizationFrame` simply iframes the HTML; there’s no UI to swap datasets or rebuild the chart. Once the file is rendered, the user cannot toggle to a different geographic level without re-running a new tool command that saves a separate HTML file.
+
+Recommendations:
+- Extend the visualization tools to produce multi-level data (ward, LGA, state) in-memory and emit Plotly figures with `updatemenus` or dropdowns so users can switch between traces without new round trips.
+- If runtime cost is a concern, return a structured payload (e.g., `ward_data`, `lga_data`, `state_data`) plus a single HTML scaffold, and build the toggle controls in React so the iframe-less component can re-render plots client-side.
+- At minimum, expose backend parameters that let users request LGA/state aggregations explicitly, with the frontend surfacing those options in the visualization controls.
+
+3. Unreliable Data Answers / Agent Wiring
+-----------------------------------------
+Root Cause:
+- There are four different data loaders in play: `SessionDataService/DataHandler` for the legacy analysis pipeline, `UnifiedDataState` (accessed by direct tools), Data Analysis V3’s `_get_input_data` method, and `FlexibleDataAccess` within ConversationalDataAccess. Each of these decides independently which files to load (`raw_data.csv`, `analysis_cleaned_data.csv`, `unified_dataset.*`, etc.), so whichever component answers a question may be using a different snapshot.
+- The LangGraph Data Analysis Agent only considers `unified_dataset.csv` if it finds a `.analysis_complete` marker; otherwise it falls back to raw data. The Request Interpreter’s `analyze_data_with_python` path invokes `ConversationalDataAccess`, which will silently re-run `run_full_analysis_pipeline` (via `FlexibleDataAccess`) if it doesn’t see cached results—yielding fresh calculations that can diverge from the “official” analysis.
+- Tool routing depends on `session_context` flags (`data_loaded`, `analysis_complete`). Those flags live in the Flask session and regularly get out of sync with disk markers when uploads reset the session id. As a result, the resolver sometimes thinks analysis isn’t complete (and refuses visualization tools) even though `unified_dataset.csv` exists, or vice versa.
+
+Recommendations:
+- Consolidate all data reads/writes behind a single service (extend `UnifiedDataState` or introduce a “Data Hub” abstraction). Every agent and tool should fetch datasets through that service so they see the same DataFrame/GeoDataFrame objects.
+- Treat the `.analysis_complete` marker (plus unified dataset existence) as the source of truth and, on each request, reconcile the Flask session flags with the marker to avoid stale routing decisions.
+- Remove the redundant pipelines inside `FlexibleDataAccess`. Instead of rerunning analysis when caches are empty, instruct it to load the unified dataset and related artifacts produced by the primary analysis path.
+- Ensure that LangGraph outputs (insights, tables, visualizations) and Request Interpreter responses share a single interaction/memory log so users receive consistent answers regardless of which agent handled the query.
+
+4. Workflow Rigidity & Lack of Revisability
+-------------------------------------------
+Root Cause:
+- Once `_run_malaria_risk_analysis` (or the Data Analysis V3 workflow) completes, it writes unified artifacts and sets `session['analysis_complete'] = True`, but there’s no API to rerun with different variables or parameters without uploading again. Uploading triggers the session reset described above, so iteration feels like “start over.”
+- The Request Interpreter clears `pending_action` and `pending_variables` after any analysis tool runs. There’s no state machine or UI affordance that lets the user step back, tweak selections, and re-execute prior stages.
+- Attempts to provide flexibility via `FlexibleDataAccess` merely create parallel ad-hoc outputs that aren’t surfaced in the main UI, leading to confusion when users see conflicting numbers.
+
+Recommendations:
+- Introduce explicit “analysis sessions” that track parameter sets. Provide endpoints to rerun the pipeline with new selections while keeping the same conversation id and history.
+- Add UI controls (or chat intents) to reconfigure variables/thresholds and rerun downstream steps without forcing a data re-upload.
+- When an analysis rerun occurs, version the outputs (e.g., store multiple unified datasets) or at least annotate responses with the parameter set used so users can compare iterations.
+
+5. Two-Brain Architecture (LangGraph Agent vs. Request Interpreter)
+-------------------------------------------------------------------
+Assessment:
+- Maintaining two separate “brains” (LangGraph for the Data Analysis tab and the py-sidebot Request Interpreter for chat) doubles every integration point: data loading, tool execution, visualization formatting, error handling, and memory persistence. Each brain expects different session flags, so transitioning between them requires manual cookie/session gymnastics (`exit_data_analysis_mode`, `base_session_id` mirroring).
+- Many of the bugs above stem from keeping those two stacks in sync. A single orchestrator would eliminate duplicate pipelines and ensure every request—whether typed in the chat or triggered from the Data Analysis tab—goes through the same state machine.
+
+Recommendation:
+- Consolidate on one agent. Either move the LangGraph/Data Analysis V3 stack into the primary request path (so all queries benefit from its structured planning) or retire it in favor of a unified interpreter that can execute Python code, manage workflows, and call the existing Pydantic tools. With one brain, enforcing consistent data access and rerun logic becomes straightforward.
+
+Next Steps:
+-----------
+1. Decide on the long-term agent architecture (single orchestrator vs. dual) and plan the migration.
+2. Build a unified data-service layer and refactor all tools/agents to consume it.
+3. Redesign session handling so uploads don’t reset the entire conversation; migrate chat history when ids must change.
+4. Extend the visualization pipeline to emit multi-level data plus frontend controls for toggling.
+5. Add rerun/edit capabilities to the analysis workflow (API + UI) so users can iterate without re-uploading data.

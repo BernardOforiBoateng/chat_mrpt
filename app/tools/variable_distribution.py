@@ -11,10 +11,21 @@ import numpy as np
 from typing import Dict, Any, Optional, List
 from flask import session
 import logging
-from pydantic import Field
+from pydantic import Field, validator
 
 from app.tools.base import BaseTool, ToolCategory, ToolExecutionResult
 from app.services.variable_resolution_service import variable_resolver
+from app.utils.geospatial_levels import (
+    apply_lga_highlight,
+    collect_lga_options,
+    dissolve_to_lga,
+    normalize_lga_code,
+)
+from app.utils.lga_boundaries import (
+    annotate_with_lga_names,
+    get_reference_lga_geometries,
+)
+from app.utils.visualization_controls import inject_geographic_controls
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +33,21 @@ class VariableDistribution(BaseTool):
     """Create spatial distribution maps for any variable from uploaded CSV and shapefile data"""
     
     variable_name: str = Field(..., description="Name of the variable to visualize (e.g., 'pfpr', 'rainfall', 'housing_quality')")
+    geographic_level: str = Field(
+        'ward',
+        description="Geographic level for rendering: 'ward' (default) or 'lga'",
+    )
+    selected_lgas: Optional[List[str]] = Field(
+        default=None,
+        description="Optional list of LGA codes to highlight when rendering",
+    )
+
+    @validator('geographic_level')
+    def validate_geographic_level(cls, value: str) -> str:
+        value = (value or 'ward').lower()
+        if value not in {'ward', 'lga'}:
+            raise ValueError("geographic_level must be 'ward' or 'lga'")
+        return value
     
     @classmethod
     def get_tool_name(cls) -> str:
@@ -109,15 +135,24 @@ class VariableDistribution(BaseTool):
                 logger.info(f"Using fuzzy matched variable: '{self.variable_name}' → '{resolved_variable}' "
                            f"(confidence: {resolution['confidence']:.0%})")
             
+            available_lgas = collect_lga_options(csv_data, shapefile_data)
+            selected_lgas = self._normalize_selected_lgas(available_lgas)
+
             # Create spatial distribution map
-            map_result = self._create_spatial_distribution_map(csv_data, shapefile_data, resolved_variable, session_id)
+            map_result = self._create_spatial_distribution_map(
+                csv_data,
+                shapefile_data,
+                resolved_variable,
+                session_id,
+                selected_lgas,
+            )
             if not map_result:
                 return ToolExecutionResult(
                     success=False,
                     message=f"Could not create spatial map for {self.variable_name}",
                     error_details="Map generation failed"
                 )
-            
+
             # Generate summary statistics
             stats_text = self._generate_statistics(csv_data, resolved_variable)
             
@@ -148,7 +183,10 @@ class VariableDistribution(BaseTool):
                     'web_path': map_result['web_path'],
                     'chart_type': 'spatial_distribution_map',
                     'file_path': map_result['file_path'],
-                    'workflow_guidance': workflow_guidance
+                    'workflow_guidance': workflow_guidance,
+                    'geographic_level': self.geographic_level,
+                    'selected_lgas': selected_lgas,
+                    'available_lgas': available_lgas,
                 }
             )
             
@@ -213,7 +251,14 @@ class VariableDistribution(BaseTool):
             logger.error(f"Error loading data: {e}")
             return None, None
     
-    def _create_spatial_distribution_map(self, csv_data: pd.DataFrame, shapefile: gpd.GeoDataFrame, variable: str, session_id: str) -> Optional[Dict[str, Any]]:
+    def _create_spatial_distribution_map(
+        self,
+        csv_data: pd.DataFrame,
+        shapefile: gpd.GeoDataFrame,
+        variable: str,
+        session_id: str,
+        selected_lgas: List[str],
+    ) -> Optional[Dict[str, Any]]:
         """Create spatial distribution choropleth map like vulnerability/composite score maps"""
         try:
             # Merge CSV data with shapefile
@@ -277,6 +322,12 @@ class VariableDistribution(BaseTool):
                 )
                 return None
 
+            # Enrich with LGA names/state names from the national boundary reference
+            try:
+                clean_data = annotate_with_lga_names(clean_data)
+            except Exception as exc:
+                logger.warning("Failed to annotate LGA names: %s", exc)
+
             # Convert LineString geometries to Polygons by buffering
             # Choropleth maps require Polygon geometries, but some shapefiles have LineStrings
             from shapely.geometry import LineString, MultiLineString, Polygon, MultiPolygon
@@ -311,51 +362,100 @@ class VariableDistribution(BaseTool):
             else:
                 color_scale = 'Viridis'  # Default color scale
                 title_suffix = 'Spatial Distribution'
-            
+
+            available_lgas = collect_lga_options(clean_data)
+
+            plot_level = self.geographic_level
+            plot_data = clean_data.copy()
+            highlight_codes = selected_lgas
+
+            if plot_level == 'lga':
+                try:
+                    aggregated = (
+                        clean_data.groupby('LGACode', dropna=True)
+                        .agg({
+                            variable: 'mean',
+                            'StateName': 'first',
+                            'LGAName': 'first',
+                        })
+                        .reset_index()
+                    )
+                    reference_shapes = get_reference_lga_geometries(aggregated[['LGACode', 'StateName', 'LGAName']])
+                    if reference_shapes is not None and not reference_shapes.empty:
+                        plot_data = reference_shapes.merge(
+                            aggregated[['LGACode', variable]],
+                            on='LGACode',
+                            how='left',
+                        )
+                    else:
+                        raise ValueError('No matching LGA boundaries found')
+                except Exception as agg_err:
+                    logger.error(f"Failed to use reference LGA polygons: {agg_err}")
+                    try:
+                        plot_data = dissolve_to_lga(clean_data, value_columns=[variable])
+                    except Exception as dissolve_err:
+                        logger.error(f"Failed fallback dissolve: {dissolve_err}")
+                        plot_data = clean_data.copy()
+                        plot_level = 'ward'
+
+            plot_data = apply_lga_highlight(plot_data, highlight_codes, 'LGACode')
+
             # Create choropleth map using plotly graph_objects (like other ChatMRPT maps)
             fig = go.Figure()
-            
-            # Add choropleth layer
-            # Convert GeoDataFrame to proper GeoJSON format using __geo_interface__ with mapping
-            # This creates proper GeoJSON that Plotly can use
-            import json
+
             from shapely.geometry import mapping
 
-            # Build GeoJSON FeatureCollection manually to ensure geometry is properly serialized
-            features = []
-            for idx, row in clean_data.iterrows():
-                features.append({
-                    'type': 'Feature',
-                    'id': str(idx),
-                    'geometry': mapping(row.geometry),
-                    'properties': {}
-                })
+            def build_geojson(df: gpd.GeoDataFrame):
+                features = []
+                for idx, row in df.iterrows():
+                    features.append({
+                        'type': 'Feature',
+                        'id': str(idx),
+                        'geometry': mapping(row.geometry),
+                        'properties': {}
+                    })
+                return {'type': 'FeatureCollection', 'features': features}
 
-            geojson_data = {
-                'type': 'FeatureCollection',
-                'features': features
-            }
+            def add_trace(df, show_scale, opacity, colorscale_override=None, name_suffix=''):
+                if df.empty:
+                    return
+                geojson = build_geojson(df)
+                label_series = df.get('LGAName', df.get('WardName', df.get('ward_name', df.get('LGACode', df.index))))
+                fig.add_trace(go.Choroplethmapbox(
+                    geojson=geojson,
+                    locations=df.index.astype(str),
+                    z=df[variable],
+                    colorscale=colorscale_override or color_scale,
+                    text=label_series,
+                    hovertemplate=f'<b>%{{text}}</b><br>{variable}: %{{z}}<extra></extra>',
+                    marker_opacity=opacity,
+                    marker_line_width=1,
+                    marker_line_color='white',
+                    showscale=show_scale,
+                    colorbar=dict(
+                        title=variable.replace('_', ' ').title(),
+                        thickness=15,
+                        len=0.7
+                    ) if show_scale else None,
+                    name=name_suffix or variable
+                ))
 
-            fig.add_trace(go.Choroplethmapbox(
-                geojson=geojson_data,
-                locations=clean_data.index.astype(str),
-                z=clean_data[variable],
-                colorscale=color_scale,
-                text=clean_data.get('WardName', clean_data.get('ward_name', clean_data.index)),
-                hovertemplate=f'<b>%{{text}}</b><br>{variable}: %{{z}}<extra></extra>',
-                marker_opacity=0.7,
-                marker_line_width=1,
-                marker_line_color='white',
-                showscale=True,
-                colorbar=dict(
-                    title=variable.replace('_', ' ').title(),
-                    thickness=15,
-                    len=0.7
+            if highlight_codes:
+                faded = plot_data[~plot_data['_is_selected_lga']]
+                highlighted = plot_data[plot_data['_is_selected_lga']]
+                add_trace(
+                    faded,
+                    show_scale=False,
+                    opacity=0.25,
+                    colorscale_override=[[0, '#d1d5db'], [1, '#9ca3af']],
+                    name_suffix='Other LGAs'
                 )
-            ))
-            
+                add_trace(highlighted, show_scale=True, opacity=0.85, name_suffix='Selected LGA')
+            else:
+                add_trace(plot_data, show_scale=True, opacity=0.75)
+
             # Calculate map center
-            bounds = clean_data.total_bounds
+            bounds = plot_data.total_bounds
             center_lat = (bounds[1] + bounds[3]) / 2
             center_lon = (bounds[0] + bounds[2]) / 2
             
@@ -403,13 +503,30 @@ class VariableDistribution(BaseTool):
             
             # Generate web path for frontend
             web_path = f"/serve_viz_file/{session_id}/{filename}"
-            
+
+            controls_config = {
+                'viz_type': 'variable_distribution',
+                'session_id': session_id,
+                'current_level': plot_level,
+                'selected_lgas': highlight_codes,
+                'available_lgas': available_lgas,
+                'viz_params': {
+                    'variable_name': variable,
+                },
+            }
+
+            try:
+                inject_geographic_controls(file_path, controls_config)
+            except Exception as inject_err:
+                logger.warning(f"Failed to inject geographic controls: {inject_err}")
+
             return {
                 'type': 'spatial_distribution_map',
                 'title': f'{variable.upper()} {title_suffix}',
                 'file_path': file_path,  # Full path for backend processing
                 'web_path': web_path,
-                'description': f'Spatial distribution map of {variable} across study area'
+                'description': f'Spatial distribution map of {variable} across study area',
+                'controls': controls_config,
             }
             
         except Exception as e:
@@ -541,3 +658,14 @@ class VariableDistribution(BaseTool):
         except Exception as e:
             logger.warning(f"Failed to generate workflow guidance: {e}")
             return {'show_guidance': False, 'message': '', 'phase': 'error'}
+
+    def _normalize_selected_lgas(self, available_lgas: List[Dict[str, str]]) -> List[str]:
+        if not self.selected_lgas:
+            return []
+        available_codes = {normalize_lga_code(item['code']) for item in available_lgas}
+        normalized = []
+        for code in self.selected_lgas:
+            norm = normalize_lga_code(code)
+            if norm and (not available_codes or norm in available_codes):
+                normalized.append(norm)
+        return normalized

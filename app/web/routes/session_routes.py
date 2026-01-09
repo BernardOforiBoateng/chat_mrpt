@@ -16,6 +16,18 @@ logger = logging.getLogger(__name__)
 session_bp = Blueprint('session', __name__)
 
 
+def _apply_session_no_cache_headers(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
+@session_bp.after_request
+def apply_no_cache(response):
+    return _apply_session_no_cache_headers(response)
+
+
 @session_bp.route('/api/session/verify-tpr', methods=['GET'])
 @handle_errors
 def verify_tpr_session():

@@ -1,14 +1,3 @@
-# Templates
-
-Jinja2 HTML templates for server-side rendered pages.
-
-## Contents
-
-- **auth.html** - Authentication pages (login, signup)
-- **survey/** - Survey module templates
-- **prepost/** - Pre/post assessment templates
-- Error pages (403, 404, 500)
-
-## Purpose
-
-Provides HTML templates for non-React pages, including authentication flows and survey interfaces.
+# Template Frontend Archived
+The template-based frontend has been archived to app/templates_archived_20250920
+The React frontend is now the only active frontend

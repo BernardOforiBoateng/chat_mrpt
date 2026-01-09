@@ -1,9 +1,7 @@
-# React Build Placeholder
+# Public Assets
 
-This directory is intentionally empty.
+Static assets served at root level.
 
-- The actual React source lives in the top-level `frontend/` project.
-- When you run `npm run build` inside `frontend/`, copy the contents of `frontend/dist/` into this folder so Flask can serve the compiled assets.
-- Keeping the folder empty in git avoids confusing reviewers with generated files. Only deployment builds should populate it.
+## Purpose
 
-The `.gitkeep` file ensures the directory stays in the repository without bundling artifacts.
+Contains favicon, logos, and other static assets served directly without processing.

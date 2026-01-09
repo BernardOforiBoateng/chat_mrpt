@@ -3,6 +3,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useAnalysisStore } from '@/stores/analysisStore';
 import type { RegularMessage, ModelName } from '@/types';
 import toast from 'react-hot-toast';
+import storage from '@/utils/storage';
 
 const useMessageStreaming = () => {
   const {
@@ -12,7 +13,7 @@ const useMessageStreaming = () => {
     session,
     startArenaBattle,
   } = useChatStore();
-
+  
   const sendMessage = useCallback(async (message: string, opts?: { silent?: boolean }) => {
     // Check if we're in data analysis mode
     const dataAnalysisMode = useAnalysisStore.getState().dataAnalysisMode;
@@ -40,7 +41,7 @@ const useMessageStreaming = () => {
     
     try {
       // Determine endpoint based on mode
-      const endpoint = dataAnalysisMode
+      const endpoint = dataAnalysisMode 
         ? '/api/v1/data-analysis/chat'
         : '/send_message_streaming';
       
@@ -49,20 +50,108 @@ const useMessageStreaming = () => {
       console.log(`  🔍 Data Analysis Mode: ${dataAnalysisMode}`);
       
       // Use different handling for data analysis vs streaming
-      // Streaming endpoint (works for both main and data analysis flows)
-      if (import.meta.env.DEV) {
-        console.log('STREAMING REQUEST', {
-          message: message.substring(0, 80),
-          sessionId: session.sessionId,
-          endpoint,
-          dataAnalysisMode,
+      if (dataAnalysisMode) {
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('📊 DATA ANALYSIS V3 REQUEST');
+        console.log('  Message:', message.substring(0, 80));
+        console.log('  Session ID:', session.sessionId);
+        console.log('  Endpoint:', endpoint);
+        console.log('  Timestamp:', new Date().toISOString());
+        console.log('═══════════════════════════════════════════════════════════');
+
+        // Data analysis endpoint - JSON response
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Conversation-ID': storage.ensureConversationId(),
+          },
+          body: JSON.stringify({
+            message,
+            session_id: session.sessionId,
+          }),
         });
+
+        if (!response.ok) {
+          console.error('❌ DATA ANALYSIS V3 ERROR:', response.status, response.statusText);
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const responseData = await response.json();
+        console.log('───────────────────────────────────────────────────────────');
+        console.log('✅ DATA ANALYSIS V3 RESPONSE');
+        console.log('  Success:', responseData.success);
+        console.log('  Exit Data Analysis Mode:', responseData.exit_data_analysis_mode);
+        console.log('  Has Message:', !!responseData.message);
+        console.log('  Has Redirect Message:', !!responseData.redirect_message);
+        console.log('  Workflow:', responseData.workflow);
+        console.log('  Stage:', responseData.stage);
+        console.log('  Message Preview:', responseData.message?.substring(0, 120));
+        console.log('───────────────────────────────────────────────────────────');
+
+        // Check if we should exit data analysis mode
+        if (responseData.exit_data_analysis_mode) {
+          console.log('🔄🔄🔄 WORKFLOW TRANSITION DETECTED 🔄🔄🔄');
+          console.log('  Exiting Data Analysis V3 mode');
+          console.log('  Setting dataAnalysisMode = false');
+          console.log('  Next request will go to /send_message_streaming');
+          console.log('  Transition message:', responseData.message?.substring(0, 200));
+          setDataAnalysisMode(false);
+          
+          // Display the transition message first
+          if (responseData.message) {
+            const transitionMessage: RegularMessage = {
+              id: `msg_${Date.now() + 1}`,
+              type: 'regular',
+              sender: 'assistant',
+              content: responseData.message,
+              timestamp: new Date(),
+              sessionId: session.sessionId,
+              visualizations: responseData.visualizations?.length ? responseData.visualizations : undefined,
+              downloadLinks: responseData.download_links?.length ? responseData.download_links : undefined,
+            };
+            addMessage(transitionMessage);
+          }
+          
+          // If there's a redirect message, send it to the normal chat
+          if (responseData.redirect_message) {
+            setTimeout(() => {
+              sendMessage(responseData.redirect_message);
+            }, 500); // Increased delay to ensure transition message shows first
+          }
+        } else if (responseData.success && responseData.message) {
+          // Add the response as an assistant message
+          const assistantMessage: RegularMessage = {
+            id: `msg_${Date.now() + 1}`,
+            type: 'regular',
+            sender: 'assistant',
+            content: responseData.message,
+            timestamp: new Date(),
+            sessionId: session.sessionId,
+            visualizations: responseData.visualizations,
+          };
+          addMessage(assistantMessage);
+        }
+        
+        setLoading(false);
+        return;
       }
+      
+      // Regular streaming endpoint
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('🌊 STREAMING REQUEST (Standard Mode)');
+      console.log('  Message:', message.substring(0, 80));
+      console.log('  Session ID:', session.sessionId);
+      console.log('  Endpoint:', endpoint);
+      console.log('  Data Analysis Mode:', dataAnalysisMode, '(should be FALSE)');
+      console.log('  Timestamp:', new Date().toISOString());
+      console.log('═══════════════════════════════════════════════════════════');
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Conversation-ID': storage.ensureConversationId(),
         },
         body: JSON.stringify({
           message,
@@ -76,6 +165,7 @@ const useMessageStreaming = () => {
       }
 
       console.log('✅ Streaming response received, starting to read chunks...');
+      
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       
@@ -92,8 +182,6 @@ const useMessageStreaming = () => {
       let arenaBattleId: string | null = null;
       let arenaAccumA = '';
       let arenaAccumB = '';
-      let exitDataAnalysisFlag = false;
-      let queuedRedirectMessage: string | null = null;
       
       while (true) {
         const { done, value } = await reader.read();
@@ -216,12 +304,6 @@ const useMessageStreaming = () => {
                 streamingContent += data.content;
                 updateStreamingContent(assistantMessageId, streamingContent);
               }
-
-              // If backend sends full message (data.message) and we have no content yet, honour it
-              if (data.message && assistantMessageId && !isArenaResponse && !data.content) {
-                streamingContent = data.message;
-                updateStreamingContent(assistantMessageId, streamingContent);
-              }
               
               // Capture download links if present
               if (data.download_links && data.download_links.length > 0) {
@@ -245,28 +327,18 @@ const useMessageStreaming = () => {
                 console.log('  Status:', data.status);
                 console.log('───────────────────────────────────────────────────────────');
 
-                if (data.exit_data_analysis_mode) {
-                  exitDataAnalysisFlag = true;
-                  console.log('🔄 Backend requested Data Analysis mode exit');
-                  setDataAnalysisMode(false);
-                }
-
-                if (data.redirect_message) {
-                  queuedRedirectMessage = data.redirect_message;
-                }
-
                 if (!isArenaResponse && assistantMessageId) {
                   // Finalize regular message with download links and visualizations
                   const finalMessage: RegularMessage = {
                     id: assistantMessageId,
                     type: 'regular',
                     sender: 'assistant',
-                    content: streamingContent || data.message || '',
+                    content: streamingContent || '',
                     timestamp: new Date(),
                     sessionId: session.sessionId,
                     isStreaming: false,
                     downloadLinks: downloadLinks.length > 0 ? downloadLinks : undefined,
-                    visualizations: visualizations.length > 0 ? visualizations : (data.visualizations && data.visualizations.length > 0 ? data.visualizations : undefined),
+                    visualizations: visualizations.length > 0 ? visualizations : undefined,
                   };
                   // Update the message with download links and visualizations
                   useChatStore.getState().updateMessage(assistantMessageId, finalMessage);
@@ -277,23 +349,16 @@ const useMessageStreaming = () => {
                 }
                 setLoading(false);
               }
-
+              
             } catch (error) {
               console.error('Error parsing SSE data:', error, 'Line:', line);
             }
           }
         }
       }
-
-      if (exitDataAnalysisFlag && queuedRedirectMessage) {
-        console.log('🚦 Scheduling redirect message after Data Analysis exit');
-        setTimeout(() => {
-          sendMessage(queuedRedirectMessage!, { silent: true });
-        }, 500);
-      }
-
+      
       setLoading(false);
-
+      
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Failed to send message');

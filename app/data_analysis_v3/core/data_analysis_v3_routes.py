@@ -244,13 +244,41 @@ def data_analysis_chat():
         
         data = request.get_json()
         message = data.get('message', '')
-        session_id = data.get('session_id') or session.get('session_id')
-        
-        if not session_id:
+
+        payload_session_id = data.get('session_id')
+        scoped_session_id = session.get('session_id')
+
+        # Prefer the scoped Flask session (includes conversation suffix) when it
+        # matches the payload session. This keeps all file IO scoped to the
+        # active conversation-specific folder instead of the base session id.
+        effective_session_id = None
+        if scoped_session_id and payload_session_id:
+            if scoped_session_id == payload_session_id:
+                effective_session_id = scoped_session_id
+            elif scoped_session_id.startswith(f"{payload_session_id}__"):
+                effective_session_id = scoped_session_id
+            else:
+                effective_session_id = scoped_session_id
+        elif scoped_session_id:
+            effective_session_id = scoped_session_id
+        elif payload_session_id:
+            effective_session_id = payload_session_id
+
+        if not effective_session_id:
             return jsonify({
                 'success': False,
                 'error': 'No session ID provided'
             }), 400
+
+        if scoped_session_id and payload_session_id:
+            logger.warning(
+                "[TPR ROUTE] payload=%s scoped=%s effective=%s",
+                payload_session_id,
+                scoped_session_id,
+                effective_session_id,
+            )
+
+        session_id = effective_session_id
         
         import time
         request_time = time.time()

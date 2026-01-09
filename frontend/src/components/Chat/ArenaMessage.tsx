@@ -6,6 +6,7 @@ import DualResponsePanel from '../Arena/DualResponsePanel';
 import VotingButtons from '../Arena/VotingButtons';
 import api from '@/services/api';
 import toast from 'react-hot-toast';
+import storage from '@/utils/storage';
 
 interface ArenaMessageProps {
   message: ArenaMessageType;
@@ -81,7 +82,10 @@ const ArenaMessage: React.FC<ArenaMessageProps> = ({ message }) => {
             const battleId = data.battle_id || message.battleId;
             const resp = await fetch('/api/arena/get_responses_streaming', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Conversation-ID': storage.ensureConversationId(),
+              },
               body: JSON.stringify({ battle_id: battleId })
             });
             const reader = resp.body?.getReader();

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import storage from '@/utils/storage';
 import { useAnalysisStore } from '@/stores/analysisStore';
 import useMessageStreaming from '@/hooks/useMessageStreaming';
 import api from '@/services/api';
@@ -28,7 +29,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
   React.useEffect(() => {
     if (activeTab === 'download' && session.sessionId) {
       setIsLoadingDownloads(true);
-      fetch(`/export/list/${session.sessionId}`)
+      fetch(`/export/list/${session.sessionId}`, {
+        headers: {
+          'X-Conversation-ID': storage.ensureConversationId(),
+        },
+      })
         .then(res => res.json())
         .then(data => {
           if (data.success) {
@@ -349,7 +354,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                                     const chatResponse = await fetch('/api/v1/data-analysis/chat', {
                                       method: 'POST',
                                       headers: {
-                                        'Content-Type': 'application/json'
+                                        'Content-Type': 'application/json',
+                                        'X-Conversation-ID': storage.ensureConversationId(),
                                       },
                                       body: JSON.stringify({
                                         message: 'analyze uploaded data',

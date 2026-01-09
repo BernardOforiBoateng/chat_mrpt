@@ -5,9 +5,9 @@ Centralized configuration for Arena mode performance optimization
 
 import os
 
-# GPU Instance Configuration
+# GPU Instance Configuration (DISABLED - Instance stopped to save costs)
 GPU_INSTANCE_HOST = os.environ.get('AWS_OLLAMA_HOST', '172.31.45.157')
-USE_GPU_INSTANCE = os.environ.get('USE_GPU_ARENA', 'true').lower() == 'true'
+USE_GPU_INSTANCE = False  # DISABLED: GPU instance stopped (was costing ~$200-400/month)
 
 # Model Configuration - Order matters for performance!
 ARENA_MODELS = {
@@ -49,9 +49,9 @@ MAX_RESPONSE_LENGTH = 800  # Max tokens per response
 RESPONSE_TIMEOUT = 15  # Timeout per model in seconds
 OPENAI_TIMEOUT = 30    # Longer timeout for OpenAI
 
-# Tournament Structure
-DEFAULT_NUM_MODELS = 3  # Use 3 local models by default
-INCLUDE_OPENAI_FINAL = os.environ.get('ARENA_INCLUDE_OPENAI', 'false').lower() == 'true'
+# Tournament Structure (DISABLED - Arena mode turned off)
+DEFAULT_NUM_MODELS = 0  # DISABLED: Arena mode turned off to save GPU costs
+INCLUDE_OPENAI_FINAL = False  # DISABLED: Arena mode turned off
 
 def get_ollama_url():
     """Get the Ollama URL based on configuration"""

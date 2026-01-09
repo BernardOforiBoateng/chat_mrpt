@@ -115,6 +115,7 @@ export interface SessionData {
   startTime: Date;
   messageCount: number;
   hasUploadedFiles: boolean;
+  conversationId?: string;
   uploadedFiles?: {
     csv?: string;
     shapefile?: string;

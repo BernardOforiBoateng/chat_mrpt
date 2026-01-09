@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 
 from typing import Any, Dict
 
@@ -23,6 +24,7 @@ __all__ = ["handle_send_message_streaming"]
 def handle_send_message_streaming() -> Response:
     data = request.json or {}
     user_message = data.get('message', '')
+    payload_session_id = data.get('session_id')
 
     logger.info("=" * 60)
     logger.info("🔧 BACKEND: /send_message_streaming endpoint hit")
@@ -33,6 +35,17 @@ def handle_send_message_streaming() -> Response:
     logger.info("  📊 Data Loaded: %s", session.get('data_loaded', False))
     logger.info("  🔄 TPR Complete: %s", session.get('tpr_workflow_complete', False))
     logger.info("=" * 60)
+
+    logger.warning(
+        "[TPR ROUTE STREAM] payload=%s scoped=%s",
+        payload_session_id,
+        session.get('session_id'),
+    )
+
+    try:
+        _sync_tpr_outputs_for_stream(payload_session_id)
+    except Exception as sync_exc:
+        logger.error("[TPR SYNC] Streaming mirror failed: %s", sync_exc)
 
     if not user_message:
         def generate_error():
@@ -343,3 +356,55 @@ def _response_from_tpr_result(tpr_result: Dict[str, Any]) -> Response:
     response.headers['Connection'] = 'keep-alive'
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
+def _sync_tpr_outputs_for_stream(payload_session_id: str | None) -> None:
+    scoped_session_id = session.get('session_id')
+
+    base_session_id = session.get('base_session_id')
+    if not base_session_id:
+        base_session_id = payload_session_id
+        if not base_session_id and scoped_session_id and '__' in scoped_session_id:
+            base_session_id = scoped_session_id.split('__', 1)[0]
+        elif not base_session_id:
+            base_session_id = scoped_session_id
+
+    if not base_session_id or not scoped_session_id or base_session_id == scoped_session_id:
+        return
+
+    upload_root = current_app.config.get('UPLOAD_FOLDER', 'instance/uploads')
+    source_folder = os.path.join(upload_root, base_session_id)
+    dest_folder = os.path.join(upload_root, scoped_session_id)
+
+    if not os.path.isdir(source_folder):
+        return
+
+    os.makedirs(dest_folder, exist_ok=True)
+
+    critical_files = [
+        'raw_data.csv',
+        'raw_shapefile.zip',
+        'tpr_results.csv',
+        'tpr_distribution_map.html',
+        '.agent_state.json',
+        '.risk_ready',
+        '.analysis_complete',
+        '.tpr_waiting_confirmation',
+        'tpr_debug.json',
+    ]
+
+    for filename in critical_files:
+        source_path = os.path.join(source_folder, filename)
+        if os.path.exists(source_path):
+            dest_path = os.path.join(dest_folder, filename)
+            shutil.copy2(source_path, dest_path)
+            logger.warning(
+                "[TPR SYNC] streaming copied=%s destination=%s scoped=%s",
+                filename,
+                dest_path,
+                scoped_session_id,
+            )
+
+    source_viz = os.path.join(source_folder, 'visualizations')
+    if os.path.isdir(source_viz):
+        dest_viz = os.path.join(dest_folder, 'visualizations')
+        shutil.copytree(source_viz, dest_viz, dirs_exist_ok=True)
+        logger.warning("[TPR SYNC] streaming copied visualizations to scoped=%s", scoped_session_id)

@@ -7,6 +7,7 @@ import MainInterface from './components/MainInterface';
 import LandingPage from './components/Auth/LandingPage';
 import { authService } from './services/auth';
 import { useUserStore } from './stores/userStore';
+import storage from '@/utils/storage';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -21,61 +22,38 @@ const queryClient = new QueryClient({
 function App() {
   const { isAuthenticated, isLoading, user } = useUserStore();
 
-  // TEMPORARY: Force authentication bypass for development
-  const forceAuthenticated = true;
-
-  console.log('🔵 APP: Render - isAuthenticated:', isAuthenticated, 'isLoading:', isLoading, 'user:', user, 'FORCED:', forceAuthenticated);
+  console.log('🔵 APP: Render - isAuthenticated:', isAuthenticated, 'isLoading:', isLoading, 'user:', user);
 
   // Check authentication status on app load
   useEffect(() => {
     console.log('🔵 APP: useEffect triggered');
-    // Check for OAuth callback parameters in URL
+    storage.ensureConversationId();
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
     const username = urlParams.get('user');
 
-    if (token && username) {
-      console.log('🔵 APP: OAuth callback detected - token and username in URL');
-      // Store the token from OAuth callback
-      localStorage.setItem('auth_token', token);
+    const runAuthCheck = async () => {
+      try {
+        if (token) {
+          console.log('🔵 APP: OAuth callback detected - storing token');
+          storage.setAuthToken(token);
+        }
 
-      // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
+        const success = await authService.checkAuth();
+        console.log('🔵 APP: checkAuth result:', success);
 
-      // Check auth status to load user data with a small delay to ensure token is stored
-      setTimeout(() => {
-        console.log('🔵 APP: Calling checkAuth for OAuth callback');
-        authService.checkAuth().then((success) => {
-          console.log('🔵 APP: OAuth checkAuth result:', success);
-          if (success) {
-            toast.success(`Welcome back, ${username}`);
-          }
-        });
-      }, 100);
-    } else {
-      console.log('🔵 APP: No OAuth callback, checking persisted state');
-      // Only check auth if we don't already have a user from persisted state
-      // AND we have a token in localStorage
-      const hasToken = !!localStorage.getItem('auth_token');
-      const hasPersistedUser = !!user;
-
-      console.log('🔵 APP: hasToken:', hasToken, 'hasPersistedUser:', hasPersistedUser);
-
-      if (hasToken && !hasPersistedUser) {
-        console.log('🔵 APP: Has token but no persisted user - validating');
-        // We have a token but no user - validate it
-        authService.checkAuth();
-      } else if (!hasToken && hasPersistedUser) {
-        console.log('🔵 APP: Has persisted user but no token - clearing stale state');
-        // We have a persisted user but no token - clear the stale state
-        useUserStore.getState().logout();
-      } else if (hasToken && hasPersistedUser) {
-        console.log('🔵 APP: Has both token and persisted user - trusting persisted state');
-      } else {
-        console.log('🔵 APP: No token and no persisted user - already logged out');
+        if (success && token && username) {
+          toast.success(`Welcome back, ${username}`);
+        }
+      } finally {
+        if (token || username) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
       }
-    }
-  }, [user]);
+    };
+
+    runAuthCheck();
+  }, []);
 
   console.log('🔵 APP: Rendering UI - isLoading:', isLoading, 'isAuthenticated:', isAuthenticated);
 
@@ -83,7 +61,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         {/* Show loading spinner during initial auth check */}
-        {isLoading && !forceAuthenticated ? (
+        {isLoading ? (
           (() => {
             console.log('🔵 APP: Showing loading spinner');
             return (
@@ -92,9 +70,9 @@ function App() {
               </div>
             );
           })()
-        ) : (isAuthenticated || forceAuthenticated) ? (
+        ) : isAuthenticated ? (
           (() => {
-            console.log('🔵 APP: Showing main interface (authenticated or forced)');
+            console.log('🔵 APP: Showing main interface (authenticated)');
             return <MainInterface />;
           })()
         ) : (

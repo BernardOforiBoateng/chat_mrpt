@@ -21,7 +21,7 @@ const DualResponsePanel: React.FC<DualResponsePanelProps> = ({
   labelB = 'Response B',
 }) => {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6" data-tour-id="arena-panel">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
       {/* Response A */}
       <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
         <div className="mb-3 flex justify-between items-center">
@@ -32,7 +32,7 @@ const DualResponsePanel: React.FC<DualResponsePanelProps> = ({
             </span>
           )}
         </div>
-        <div className="prose prose-sm max-w-none min-h-[200px] max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed break-words">
+        <div className="prose prose-sm max-w-none min-h-[200px] max-h-80 overflow-y-auto">
           {isLoading && !responseA ? (
             <div className="flex items-center justify-center h-32">
               <svg className="animate-spin h-6 w-6 text-gray-400" viewBox="0 0 24 24">
@@ -68,7 +68,7 @@ const DualResponsePanel: React.FC<DualResponsePanelProps> = ({
             </span>
           )}
         </div>
-        <div className="prose prose-sm max-w-none min-h-[200px] max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed break-words">
+        <div className="prose prose-sm max-w-none min-h-[200px] max-h-80 overflow-y-auto">
           {isLoading && !responseB ? (
             <div className="flex items-center justify-center h-32">
               <svg className="animate-spin h-6 w-6 text-gray-400" viewBox="0 0 24 24">

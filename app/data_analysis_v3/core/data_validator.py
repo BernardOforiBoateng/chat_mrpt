@@ -28,6 +28,12 @@ class DataValidator:
         # Domain-agnostic patterns for single letters/numbers
         r'\b[A-Z]\b(?:\s|$|,)',                              # Just "A", "B", "C" alone
         r'(?:^|\s)#\d+(?:\s|$)',                             # #1, #2, #3, etc.
+        r'[Ww]ard\s+[A-Z](?:\b|$)',                           # Ward A
+        r'[Ww]ard\s+\d+(?:\b|$)',                            # Ward 1
+        r'[Ff]acility\s+[A-Z](?:\b|$)',                       # Facility B
+        r'[Ff]acility\s+\d+(?:\b|$)',                        # Facility 2
+        r'[Aa]rea\s+[A-Z](?:\b|$)',                           # Area C
+        r'[Ll]ocation\s+[A-Z](?:\b|$)',                       # Location D
     ]
     
     # Additional context-specific patterns (detected dynamically)
@@ -214,9 +220,9 @@ class DataValidator:
         # Replace generic facility names with warning
         for pattern in cls.GENERIC_PATTERNS:
             sanitized = re.sub(
-                pattern, 
-                "[facility name unavailable]", 
-                sanitized, 
+                pattern,
+                "[name unavailable]",
+                sanitized,
                 flags=re.IGNORECASE
             )
         

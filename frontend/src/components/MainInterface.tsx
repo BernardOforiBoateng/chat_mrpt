@@ -4,15 +4,11 @@ import ChatContainer from './Chat/ChatContainer';
 import Sidebar from './Sidebar/Sidebar';
 import Toolbar from './Toolbar/Toolbar';
 import SettingsModal from './Modal/SettingsModal';
-// import QuickStartModal from './Modal/QuickStartModal';
-import TourOverlay from './Modal/TourOverlay';
 import PrivacyModal from './Modal/PrivacyModal';
 
 const MainInterface: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
-  // const [showQuickStart, setShowQuickStart] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
-  const [showTour, setShowTour] = useState(false);
   
   // Check for first-time user on mount
   useEffect(() => {
@@ -20,14 +16,6 @@ const MainInterface: React.FC = () => {
     if (!hasAcceptedPrivacy) {
       setShowPrivacyModal(true);
     }
-    // Only start the tour when explicitly requested
-    try {
-      const start = localStorage.getItem('chatmrpt_start_tour') === '1';
-      if (start) {
-        setShowTour(true);
-        localStorage.removeItem('chatmrpt_start_tour');
-      }
-    } catch {}
   }, []);
   
   const handlePrivacyAccept = () => {
@@ -57,9 +45,6 @@ const MainInterface: React.FC = () => {
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
       />
-      {/* Quick Start Modal removed as per request */}
-      {/* Guided Tour */}
-      <TourOverlay isOpen={showTour} onClose={() => setShowTour(false)} onCompleted={() => setShowTour(false)} />
       
       {/* Privacy Modal - First Run */}
       <PrivacyModal

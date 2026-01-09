@@ -8,6 +8,7 @@ import axios from 'axios';
 import Icon from '../Icons/WelcomeIcons';
 import '@/styles/animations.css';
 import UploadModal from '../Modal/UploadModal';
+import storage from '@/utils/storage';
 
 const ChatContainer: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -86,7 +87,7 @@ const ChatContainer: React.FC = () => {
         const backendSessionId = res.data?.session_id;
         if (backendSessionId) {
           updateSession({ sessionId: backendSessionId });
-          try { localStorage.setItem('session_id', backendSessionId); } catch {}
+          storage.setSessionId(backendSessionId);
         }
       } catch {
         // ignore; fallback to existing client session id

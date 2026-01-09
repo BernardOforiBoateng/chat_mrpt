@@ -35,20 +35,28 @@ class TPRToRiskTransition:
             import glob
             
             # Find the plus.csv and state.zip files
-            csv_files = glob.glob(os.path.join(self.session_folder, '*_plus.csv'))
-            shp_files = glob.glob(os.path.join(self.session_folder, '*_state.zip'))
+            csv_candidates = []
+            csv_candidates.extend(glob.glob(os.path.join(self.session_folder, 'raw_data.csv')))
+            csv_candidates.extend(glob.glob(os.path.join(self.session_folder, '*_TPR_Analysis_*.csv')))
+            csv_candidates.extend(glob.glob(os.path.join(self.session_folder, '*_plus.csv')))
+
+            shp_candidates = []
+            shp_candidates.extend(glob.glob(os.path.join(self.session_folder, 'raw_shapefile.zip')))
+            shp_candidates.extend(glob.glob(os.path.join(self.session_folder, '*_state.zip')))
             
-            if not csv_files:
-                logger.warning(f"No *_plus.csv files found in {self.session_folder}")
+            csv_candidates = [c for c in csv_candidates if os.path.isfile(c)]
+            if not csv_candidates:
+                logger.warning(f"No TPR transition CSV found in {self.session_folder}")
                 return False
                 
-            if not shp_files:
-                logger.warning(f"No *_state.zip files found in {self.session_folder}")
+            shp_candidates = [c for c in shp_candidates if os.path.isfile(c)]
+            if not shp_candidates:
+                logger.warning(f"No TPR transition shapefile found in {self.session_folder}")
                 return False
             
             # Store the found files for later use
-            self._tpr_csv = csv_files[0]  # Use the first match
-            self._tpr_shapefile = shp_files[0]
+            self._tpr_csv = csv_candidates[0]
+            self._tpr_shapefile = shp_candidates[0]
             
             logger.info(f"TPR outputs available for transition: {os.path.basename(self._tpr_csv)}, {os.path.basename(self._tpr_shapefile)}")
             return True
@@ -69,14 +77,23 @@ class TPRToRiskTransition:
             if not hasattr(self, '_tpr_csv') or not hasattr(self, '_tpr_shapefile'):
                 # If not found in attributes, find them again
                 import glob
-                csv_files = glob.glob(os.path.join(self.session_folder, '*_plus.csv'))
-                shp_files = glob.glob(os.path.join(self.session_folder, '*_state.zip'))
-                
-                if not csv_files or not shp_files:
+                csv_candidates = []
+                csv_candidates.extend(glob.glob(os.path.join(self.session_folder, 'raw_data.csv')))
+                csv_candidates.extend(glob.glob(os.path.join(self.session_folder, '*_TPR_Analysis_*.csv')))
+                csv_candidates.extend(glob.glob(os.path.join(self.session_folder, '*_plus.csv')))
+
+                shp_candidates = []
+                shp_candidates.extend(glob.glob(os.path.join(self.session_folder, 'raw_shapefile.zip')))
+                shp_candidates.extend(glob.glob(os.path.join(self.session_folder, '*_state.zip')))
+
+                csv_candidates = [c for c in csv_candidates if os.path.isfile(c)]
+                shp_candidates = [c for c in shp_candidates if os.path.isfile(c)]
+
+                if not csv_candidates or not shp_candidates:
                     raise FileNotFoundError("TPR output files not found")
-                
-                self._tpr_csv = csv_files[0]
-                self._tpr_shapefile = shp_files[0]
+
+                self._tpr_csv = csv_candidates[0]
+                self._tpr_shapefile = shp_candidates[0]
             
             # Target files for risk analysis (matching standard upload)
             risk_csv = os.path.join(self.session_folder, 'raw_data.csv')
