@@ -203,7 +203,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                             const backendSessionId = response.data.session_id || session.sessionId;
                             if (response.data.session_id) {
                               console.log('Using backend session ID for standard upload:', backendSessionId);
-                              updateSession({ sessionId: backendSessionId });
+                              updateSession({ sessionId: backendSessionId }, { preserveMessages: true });
                             }
                             
                             setUploadedFiles(csvFile.name, shapeFile.name);
@@ -327,9 +327,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose }) => {
                                 
                                 // Store file info for the chat to know we're in data analysis mode
                                 setUploadedFiles(file.name, undefined);
-                                
-                                // Update session with backend's ID
-                                updateSession({ sessionId: backendSessionId });
+
+                                // Update session with backend's ID (preserve existing chat messages)
+                                updateSession({ sessionId: backendSessionId }, { preserveMessages: true });
                                 
                                 // Activate data analysis mode with backend session
                                 await api.analysis.activateMode(backendSessionId);
