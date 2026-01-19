@@ -1,0 +1,12 @@
+{
+  "test_session": "test_tpr_comprehensive_20250719_000121",
+  "timestamp": "2025-07-19T00:01:30.545859",
+  "validation_results": {},
+  "conversations": [
+    {
+      "user": "hi",
+      "assistant": "I apologize, but I encountered an error: Connection error.",
+      "timestamp": "2025-07-19T00:01:29.223842"
+    }
+  ]
+}

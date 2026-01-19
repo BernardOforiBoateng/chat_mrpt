@@ -1,0 +1,29 @@
+[2025-07-24 18:45:07,120] ERROR in redis_config: ❌ Failed to connect to Redis: Error 111 connecting to localhost:6379. Connection refused.
+[2025-07-24 18:45:07,120] WARNING in redis_config: ⚠️ Falling back to filesystem sessions
+[2025-07-24 18:45:08 +0000] [721210] [INFO] Starting gunicorn 21.2.0
+[2025-07-24 18:45:08 +0000] [721210] [INFO] Starting ChatMRPT server...
+[2025-07-24 18:45:08 +0000] [721210] [INFO] Listening at: http://0.0.0.0:8080 (721210)
+[2025-07-24 18:45:08 +0000] [721210] [INFO] Using worker: sync
+[2025-07-24 18:45:08 +0000] [721210] [INFO] ChatMRPT server is ready. Listening on [('0.0.0.0', 8080)]
+[2025-07-24 18:45:08 +0000] [721210] [INFO] Worker [booting] spawned
+[2025-07-24 18:45:08 +0000] [721215] [INFO] Booting worker with pid: 721215
+[2025-07-24 18:45:08 +0000] [721215] [INFO] Worker 721215 initialized
+[2025-07-24 18:45:08 +0000] [721215] [INFO] Worker 721215 ready to handle requests
+[2025-07-24 18:45:08 +0000] [721210] [INFO] Worker [booting] spawned
+[2025-07-24 18:45:08 +0000] [721216] [INFO] Booting worker with pid: 721216
+[2025-07-24 18:45:08 +0000] [721216] [INFO] Worker 721216 initialized
+[2025-07-24 18:45:08 +0000] [721216] [INFO] Worker 721216 ready to handle requests
+[2025-07-24 18:45:08 +0000] [721210] [INFO] Worker [booting] spawned
+[2025-07-24 18:45:08 +0000] [721217] [INFO] Booting worker with pid: 721217
+[2025-07-24 18:45:08 +0000] [721217] [INFO] Worker 721217 initialized
+[2025-07-24 18:45:08 +0000] [721217] [INFO] Worker 721217 ready to handle requests
+127.0.0.1 - - [24/Jul/2025:18:45:09 +0000] "HEAD /ping HTTP/1.1" 200 0 "-" "curl/8.11.1" 3533
+[2025-07-24 18:46:23 +0000] [721215] [INFO] Worker exiting (pid: 721215)
+[2025-07-24 18:46:23 +0000] [721217] [INFO] Worker exiting (pid: 721217)
+[2025-07-24 18:46:23 +0000] [721216] [INFO] Worker exiting (pid: 721216)
+[2025-07-24 18:46:23 +0000] [721210] [INFO] Handling signal: term
+[2025-07-24 18:46:23 +0000] [721210] [ERROR] Worker (pid:721217) was sent SIGTERM!
+[2025-07-24 18:46:23 +0000] [721210] [ERROR] Worker (pid:721216) was sent SIGTERM!
+[2025-07-24 18:46:23 +0000] [721210] [ERROR] Worker (pid:721215) was sent SIGTERM!
+[2025-07-24 18:46:23 +0000] [721210] [INFO] Shutting down: Master
+[2025-07-24 18:46:23 +0000] [721210] [INFO] Shutting down ChatMRPT server...

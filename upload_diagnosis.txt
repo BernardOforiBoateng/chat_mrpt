@@ -1,0 +1,93 @@
+=== AWS Upload Issue Diagnostic ===
+==================================
+
+1. Session directories in instance/uploads:
+-------------------------------------------
+total 16
+drwxrwxrwx.  6 ec2-user ec2-user   182 Jul 21 15:22 .
+drwxrwxrwx. 10 ec2-user ec2-user   183 Jul 21 15:54 ..
+drwxr-xr-x.  3 ec2-user ec2-user 16384 Jul 21 05:41 6ae958be-1519-4036-ba79-de14a7f7851a
+drwxr-xr-x.  2 ec2-user ec2-user    51 Jul 21 15:22 814bebd5-34af-4431-8886-f2375f84637e
+drwxr-xr-x.  2 ec2-user ec2-user    51 Jul 21 15:19 99baa381-2039-470e-9b91-809dc3430989
+drwxr-xr-x.  2 ec2-user ec2-user    51 Jul 21 05:05 d2870ba6-98bb-4592-9f8b-9dc37520281c
+
+2. Recently modified files (last 30 min):
+-----------------------------------------
+
+3. CSV files in uploads:
+------------------------
+ 17107460    200 -rw-r--r--   1 ec2-user ec2-user   204688 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/analysis_cleaned_data.csv
+ 17107461    268 -rw-r--r--   1 ec2-user ec2-user   271728 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/analysis_normalized_data.csv
+ 17107462     24 -rw-r--r--   1 ec2-user ec2-user    20677 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/analysis_vulnerability_rankings.csv
+ 17107463    152 -rw-r--r--   1 ec2-user ec2-user   153431 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/analysis_composite_scores.csv
+ 17107464    152 -rw-r--r--   1 ec2-user ec2-user   153431 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/composite_scores.csv
+ 17107465      4 -rw-r--r--   1 ec2-user ec2-user      669 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/model_formulas.csv
+ 17107466     52 -rw-r--r--   1 ec2-user ec2-user    51132 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/analysis_vulnerability_rankings_pca.csv
+ 17107467     52 -rw-r--r--   1 ec2-user ec2-user    52194 Jul 21 05:41 instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/analysis_pca_scores.csv
+ 16933030    200 -rw-r--r--   1 ec2-user ec2-user   202128 Jul 21 15:19 instance/uploads/99baa381-2039-470e-9b91-809dc3430989/raw_data.csv
+ 25348700    200 -rw-r--r--   1 ec2-user ec2-user   202128 Jul 21 15:22 instance/uploads/814bebd5-34af-4431-8886-f2375f84637e/raw_data.csv
+
+4. Session-related log entries:
+-------------------------------
+
+5. Upload directory permissions:
+--------------------------------
+drwxrwxrwx. 6 ec2-user ec2-user 182 Jul 21 15:22 instance/uploads
+instance/uploads/6ae958be-1519-4036-ba79-de14a7f7851a/:
+total 7688
+drwxr-xr-x. 3 ec2-user ec2-user   16384 Jul 21 05:41 .
+drwxrwxrwx. 6 ec2-user ec2-user     182 Jul 21 15:22 ..
+-rw-r--r--. 1 ec2-user ec2-user  204688 Jul 21 05:41 analysis_cleaned_data.csv
+-rw-r--r--. 1 ec2-user ec2-user  153431 Jul 21 05:41 analysis_composite_scores.csv
+-rw-r--r--. 1 ec2-user ec2-user  271728 Jul 21 05:41 analysis_normalized_data.csv
+-rw-r--r--. 1 ec2-user ec2-user   52194 Jul 21 05:41 analysis_pca_scores.csv
+-rw-r--r--. 1 ec2-user ec2-user   20677 Jul 21 05:41 analysis_vulnerability_rankings.csv
+-rw-r--r--. 1 ec2-user ec2-user   51132 Jul 21 05:41 analysis_vulnerability_rankings_pca.csv
+
+6. Disk space:
+--------------
+Filesystem        Size  Used Avail Use% Mounted on
+/dev/nvme0n1p1     20G  8.6G   12G  44% /
+
+7. Data processing logs:
+------------------------
+
+8. Upload errors:
+-----------------
+
+9. Gunicorn workers:
+--------------------
+ec2-user  504860  0.1  5.7 759064 225424 ?       Ss   15:21   0:02 /home/ec2-user/chatmrpt_env/bin/python3.11 /home/ec2-user/chatmrpt_env/bin/gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 run:app
+ec2-user  504864  0.0  3.9 759588 155048 ?       S    15:21   0:00 /home/ec2-user/chatmrpt_env/bin/python3.11 /home/ec2-user/chatmrpt_env/bin/gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 run:app
+ec2-user  504865  0.0  4.1 760516 163700 ?       S    15:21   0:00 /home/ec2-user/chatmrpt_env/bin/python3.11 /home/ec2-user/chatmrpt_env/bin/gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 run:app
+
+10. Key environment variables:
+------------------------------
+UPLOAD_FOLDER=instance/uploads
+
+11. Latest session directory contents:
+--------------------------------------
+Latest session: 814bebd5-34af-4431-8886-f2375f84637e
+total 588
+drwxr-xr-x. 2 ec2-user ec2-user     51 Jul 21 15:22 .
+drwxrwxrwx. 6 ec2-user ec2-user    182 Jul 21 15:22 ..
+-rw-r--r--. 1 ec2-user ec2-user 202128 Jul 21 15:22 raw_data.csv
+-rw-r--r--. 1 ec2-user ec2-user 394547 Jul 21 15:22 raw_shapefile.zip
+
+12. Session configuration in production.py:
+-------------------------------------------
+    # Security settings
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    if not SECRET_KEY:
+        raise ValueError("SECRET_KEY environment variable is not set!")
+    
+    # Secure session cookies
+    SESSION_COOKIE_SECURE = True  # HTTPS only
+    SESSION_COOKIE_HTTPONLY = True  # No JS access
+    SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
+    PERMANENT_SESSION_LIFETIME = 3600  # 1 hour
+    
+    # Database configuration
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        'DATABASE_URL',
+        'sqlite:///instance/interactions.db'

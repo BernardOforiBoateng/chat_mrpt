@@ -1,0 +1,12 @@
+{
+  "test_session": "test_tpr_comprehensive_20250718_235526",
+  "timestamp": "2025-07-18T23:55:28.390004",
+  "validation_results": {},
+  "conversations": [
+    {
+      "user": "hi",
+      "assistant": "I encountered an issue: name 'session_id' is not defined",
+      "timestamp": "2025-07-18T23:55:26.757554"
+    }
+  ]
+}
