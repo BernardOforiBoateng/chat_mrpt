@@ -1,0 +1,206 @@
+================================================================================
+                    ChatMRPT Local Development Setup Guide
+================================================================================
+
+This guide will help you run ChatMRPT on your local machine.
+Tested and verified working on January 18, 2026.
+
+
+PREREQUISITES
+-------------
+- Python 3.10 or higher
+- Git (you already have repo access)
+- OpenAI API key (get one at https://platform.openai.com/api-keys)
+
+
+STEP 1: Pull Latest Code
+------------------------
+Open terminal/command prompt in your ChatMRPT folder:
+
+    git pull origin main
+
+
+STEP 2: Create Virtual Environment
+-----------------------------------
+If you haven't created one yet:
+
+    # Create virtual environment
+    python -m venv venv
+
+    # Activate it:
+    # On Linux/Mac/WSL:
+    source venv/bin/activate
+
+    # On Windows Command Prompt:
+    venv\Scripts\activate
+
+    # On Windows PowerShell:
+    venv\Scripts\Activate.ps1
+
+You should see (venv) at the start of your terminal prompt.
+
+
+STEP 3: Install Dependencies
+----------------------------
+With your virtual environment activated:
+
+    pip install -r requirements.txt
+
+This may take a few minutes. If you see errors about GDAL, see troubleshooting below.
+
+
+STEP 4: Set Up Environment Variables
+-------------------------------------
+Copy the example environment file:
+
+    # On Linux/Mac/WSL:
+    cp .env.example .env
+
+    # On Windows:
+    copy .env.example .env
+
+
+STEP 5: Add Your OpenAI API Key
+-------------------------------
+Open the .env file in a text editor and find this line:
+
+    OPENAI_API_KEY=your-openai-api-key-here
+
+Replace "your-openai-api-key-here" with your actual API key:
+
+    OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxx
+
+Save the file.
+
+
+STEP 6: Verify FLASK_ENV is Set Correctly
+------------------------------------------
+In your .env file, make sure this line says "development":
+
+    FLASK_ENV=development
+
+This is CRITICAL - if it says "production", the app will fail because
+it will try to connect to Redis (which you don't have locally).
+
+
+STEP 7: Run the Application
+---------------------------
+    python run.py
+
+You should see output like:
+    [DEV] ChatMRPT Development Mode
+    [DEV] OpenAI API Key: Set
+    📁 Falling back to filesystem sessions for local development
+    ✅ Filesystem session store initialized
+    ...
+    Starting ChatMRPT v3.0
+    Environment: development
+    URL: http://0.0.0.0:5013
+
+
+STEP 8: Open in Browser
+-----------------------
+Open your browser and go to:
+
+    http://127.0.0.1:5013
+
+    or
+
+    http://localhost:5013
+
+You should see the ChatMRPT interface!
+
+
+================================================================================
+                              TROUBLESHOOTING
+================================================================================
+
+ERROR: "RuntimeError: Redis session store is required for ChatMRPT in production"
+----------------------------------------------------------------------------------
+This means FLASK_ENV is set to "production" instead of "development".
+
+Fix: Open your .env file and change:
+    FLASK_ENV=production
+to:
+    FLASK_ENV=development
+
+
+ERROR: "ModuleNotFoundError: No module named 'xxx'"
+---------------------------------------------------
+Your virtual environment might not be activated or packages aren't installed.
+
+Fix:
+1. Make sure you see (venv) in your terminal prompt
+2. Run: pip install -r requirements.txt
+
+
+ERROR: "OPENAI_API_KEY environment variable not set"
+----------------------------------------------------
+Your .env file is missing or the API key isn't set.
+
+Fix: Make sure .env exists and contains your real API key:
+    OPENAI_API_KEY=sk-proj-your-actual-key
+
+
+ERROR: GDAL installation fails
+------------------------------
+GDAL can be tricky to install. Try these options:
+
+Option 1 - Use conda (recommended):
+    conda install -c conda-forge gdal
+
+Option 2 - On Ubuntu/Debian:
+    sudo apt-get install gdal-bin libgdal-dev
+    pip install GDAL==$(gdal-config --version)
+
+Option 3 - On Mac:
+    brew install gdal
+    pip install GDAL==$(gdal-config --version)
+
+Option 4 - Skip GDAL (app will work but some geo features won't):
+    Comment out the GDAL line in requirements.txt and run pip install again
+
+
+ERROR: Port 5013 already in use
+-------------------------------
+Another process is using port 5013.
+
+Fix: Either stop that process, or run on a different port:
+    PORT=5014 python run.py
+
+
+================================================================================
+                              QUICK REFERENCE
+================================================================================
+
+Start the app:          python run.py
+Stop the app:           Ctrl+C
+App URL:                http://localhost:5013
+Logs:                   instance/app.log
+Uploaded files:         instance/uploads/
+
+Key .env settings:
+    OPENAI_API_KEY      - Your OpenAI API key (REQUIRED)
+    FLASK_ENV           - Must be "development" for local use
+    DEBUG               - Set to True for detailed errors
+
+
+================================================================================
+                              WHAT'S WORKING
+================================================================================
+
+Verified working features:
+✅ App starts without Redis (uses filesystem sessions)
+✅ OpenAI integration (gpt-4o)
+✅ 41 analysis tools loaded
+✅ File upload
+✅ Data visualization
+✅ Survey system
+✅ Authentication disabled for local dev
+
+
+================================================================================
+
+Questions? Contact Bernard or check the GitHub issues.
+
+Last updated: January 18, 2026
